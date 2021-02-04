@@ -222,6 +222,11 @@ class ChargePoint(cp):
             status='Accepted'
         )
 
+    @on(Action.StatusNotification)
+    def on_status_notification(self):
+        return call_result.StatusNotificationPayload(
+        )
+
     @on(Action.Heartbeat)
     def on_heartbeat(self):
         return call_result.HeartbeatPayload(
