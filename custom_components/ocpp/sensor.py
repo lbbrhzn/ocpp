@@ -1,6 +1,6 @@
 """Open Charge Point Protocol integration."""
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Dict, Optional
 
