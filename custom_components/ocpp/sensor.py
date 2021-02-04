@@ -223,12 +223,12 @@ class ChargePoint(cp):
         )
 
     @on(Action.StatusNotification)
-    def on_status_notification(self):
+    def on_status_notification(self, **kwargs):
         return call_result.StatusNotificationPayload(
         )
 
     @on(Action.Heartbeat)
-    def on_heartbeat(self):
+    def on_heartbeat(self, **kwargs):
         return call_result.HeartbeatPayload(
             current_time=datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S') + "Z"
         )
