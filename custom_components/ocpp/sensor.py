@@ -215,7 +215,7 @@ class ChargePoint(cp):
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
-    def on_boot_notification(self, charging_station, reason, **kwargs):
+    def on_boot_notification(self, **kwargs):
         return call_result.BootNotificationPayload(
             current_time=datetime.utcnow().isoformat(),
             interval=10,
