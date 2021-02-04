@@ -214,6 +214,20 @@ class ChargePoint(cp):
 
         return call_result.MeterValuesPayload()
 
+    @on(Action.BootNotification)
+    def on_boot_notification(self, charging_station, reason, **kwargs):
+        return call_result.BootNotificationPayload(
+            current_time=datetime.utcnow().isoformat(),
+            interval=10,
+            status='Accepted'
+        )
+
+    @on(Action.Heartbeat)
+    def on_heartbeat(self):
+        return call_result.HeartbeatPayload(
+            current_time=datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S') + "Z"
+        )
+
     def get_metric(self, measurand: str):
         """Return last known value for given measurand."""
         return self._metrics.get(measurand, None)
