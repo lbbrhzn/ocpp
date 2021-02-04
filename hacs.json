@@ -1,0 +1,10 @@
+{
+  "name": "ocpp",
+  "content_in_root": false,
+  "domains": [
+    "sensor"
+  ],
+  "homeassistant": "0.109.0",
+  "iot_class": "Local Push",
+  "render_readme": true
+}

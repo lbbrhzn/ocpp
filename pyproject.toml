@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "ocpp"
+version = "0.1.0"
+description = "HomeAssistant custom ocpp sensor"
+authors = ["OrangeTux"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.7"
+homeassistant = "^0.109.0"
+pre-commit = "^2.2.0"
+
+[tool.poetry.dev-dependencies]
+
+[tool.black]
+line_length = 88
+target_version = ["py37", "py38"]
+
+[build-system]
+requires = ["poetry>=1.0.0"]
+build-backend = "poetry.masonry.api"
