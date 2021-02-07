@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "ocpp"
-version = "0.2"
+version = "0.3"
 description = "HomeAssistant custom ocpp sensor"
-authors = ["OrangeTux"]
+authors = ["OrangeTux" "lbbrhzn"]
 license = "MIT"
 
 [tool.poetry.dependencies]
