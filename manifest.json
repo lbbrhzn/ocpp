@@ -3,7 +3,7 @@
   "name": "ocpp",
   "documentation": "https://www.home-assistant.io/integrations/ocpp",
   "requirements": [
-      "ocpp==0.6.4",
+      "ocpp==0.8.1",
       "websockets==8.1"
   ],
   "codeowners": ["@OrangeTux"]
