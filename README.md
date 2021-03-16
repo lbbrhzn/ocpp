@@ -15,7 +15,7 @@ This is a home assistant integration for a simple OCPP server (central system) f
 
 ## Example configuration
 
----
+```yaml
 sensor:
   - platform: ocpp
     monitored_variables:
@@ -46,7 +46,7 @@ sensor:
     port: 9000
     scan_interval:
       seconds: 60
----    
+```
 
 ## Screenshot
 
