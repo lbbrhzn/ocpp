@@ -7,11 +7,12 @@ This is a home assistant integration for a simple OCPP server (central system) f
 
 ## Installation
 
-1. install [HACS](https://hacs.xyz/)
-2. add this repository as a Custom repository in HACS 
-3. search for the ocpp integration and install
-4. add the ocpp platform configuration (see below) to configuration.yaml
-5. restart home assistant
+1. Install [HACS](https://hacs.xyz/) in home assistant
+2. Add this repository as a Custom repository in HACS 
+3. Search for the ocpp integration and install
+4. Add the ocpp platform configuration (see below) to configuration.yaml
+5. Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000 )
+6. Restart Home Assistant
 
 ## Example configuration
 
