@@ -13,6 +13,7 @@ This is a home assistant integration for a simple OCPP server (central system) f
 4. Add the ocpp platform configuration (see below) to configuration.yaml
 5. Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000 )
 6. Restart Home Assistant
+7. Update your home assistant dashboard to include the new OCPP Entities
 
 ## Example configuration
 
@@ -47,6 +48,34 @@ sensor:
     port: 9000
     scan_interval:
       seconds: 60
+```
+
+## Example dashboard
+```yaml
+views:
+  - title: Charging
+    path: charging
+    badges: []
+    cards:
+      - type: history-graph
+        entities:
+          - entity: sensor.energy_active_import_register
+          - entity: sensor.current_import
+          - entity: sensor.status
+        hours_to_show: 24
+        refresh_interval: 0
+      - type: entities
+        entities:
+          - entity: sensor.status
+          - entity: sensor.energy_active_import_register
+          - entity: sensor.energy_reactive_import_register
+          - entity: sensor.power_active_import
+          - entity: sensor.power_reactive_import
+          - entity: sensor.current_offered
+          - entity: sensor.current_import
+          - entity: sensor.heartbeat
+          - entity: sensor.soc
+        title: OCPP
 ```
 
 ## Screenshot
