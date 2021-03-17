@@ -22,6 +22,8 @@ logging.getLogger("ocpp").setLevel(logging.DEBUG)
 
 ICON = "mdi:ev-station"
 
+SLEEP_TIME = 60
+
 SCAN_INTERVAL = timedelta(seconds=1)
 
 MEASURANDS = [
@@ -155,35 +157,39 @@ class ChargePoint(cp):
         except (ConfigurationError, NotImplementedError) as e:
             _LOGGER.debug("Configuration of the charger failed: %r", e)
 
-    async def clear_profile(self):
-        while True:
-            req = call.ClearChargingProfilePayload()            
-            resp = await self.call(req)
-            if resp.status == ClearChargingProfileStatus.accepted: break;            
-            await asyncio.sleep(10)
-
-    async def become_operative(self):
-        while True:
-            req = call.RemoteStopTransactionPayload(transaction_id=1234)
-            resp = await self.call(req) 
-            req = call.ChangeAvailabilityPayload(connector_id=0, type=AvailabilityType.operative)
-            resp = await self.call(req)
-            if resp.status == AvailabilityStatus.accepted: break            
-            await asyncio.sleep(10)
-    
     async def trigger_boot_notification(self):
         while True:
             req = call.TriggerMessagePayload(requested_message="BootNotification")
             resp = await self.call(req)
             if resp.status == TriggerMessageStatus.accepted: break
-            await asyncio.sleep(10)
+            if resp.status == TriggerMessageStatus.not_implemented: break      
+            if resp.status == TriggerMessageStatus.rejected: break                        
+            await asyncio.sleep(SLEEP_TIME)
 
     async def trigger_status_notification(self):
         while True:
             req = call.TriggerMessagePayload(requested_message="StatusNotification")
             resp = await self.call(req)
             if resp.status == TriggerMessageStatus.accepted: break
-            await asyncio.sleep(10)
+            await asyncio.sleep(SLEEP_TIME)
+    
+    async def become_operative(self):
+        while True:
+            """ there could be an ongoing transaction. Terminate it """            
+            req = call.RemoteStopTransactionPayload(transaction_id=1234)
+            resp = await self.call(req) 
+            """ change availability """
+            req = call.ChangeAvailabilityPayload(connector_id=0, type=AvailabilityType.operative)
+            resp = await self.call(req)
+            if resp.status == AvailabilityStatus.accepted: break            
+            await asyncio.sleep(SLEEP_TIME)
+    
+    async def clear_profile(self):
+        while True:
+            req = call.ClearChargingProfilePayload()            
+            resp = await self.call(req)
+            if resp.status == ClearChargingProfileStatus.accepted: break;            
+            await asyncio.sleep(SLEEP_TIME)
 
     async def start_transaction(self):
         while True:
@@ -208,7 +214,7 @@ class ChargePoint(cp):
             )
             resp = await self.call(req)
             if resp.status == RemoteStartStopStatus.accepted: break
-            await asyncio.sleep(10)
+            await asyncio.sleep(SLEEP_TIME)
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
