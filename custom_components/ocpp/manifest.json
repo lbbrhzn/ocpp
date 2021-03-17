@@ -3,7 +3,7 @@
   "name": "ocpp",
   "version": "0.1",
   "documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
-  "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues"
+  "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
   "requirements": [
       "ocpp==0.8.1",
       "websockets==8.1"
