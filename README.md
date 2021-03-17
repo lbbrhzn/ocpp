@@ -80,5 +80,5 @@ views:
 
 ## Screenshot
 
-![example](https://github.com/lbbrhzn/ocpp/example.png "Example")
+![example](https://github.com/lbbrhzn/ocpp/raw/main/example.png "Example")
 
