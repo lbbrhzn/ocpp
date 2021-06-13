@@ -1,0 +1,29 @@
+# Service ID
+#start_charge:
+  # Service name as shown in UI
+#  name: Start charging
+  # Description of the service
+#  description: Starts a charge session
+  # If the service accepts entity IDs, target allows the user to specify entities by entity, device, or area. If `target` is specified, `entity_id` should not be defined in the `fields` map. By default it shows only targets matching entities from the same domain as the service, but if further customization is required, target supports the entity, device, and area selectors (https://www.home-assistant.io/docs/blueprint/selectors/). Entity selector parameters will automatically be applied to device and area, and device selector parameters will automatically be applied to area. 
+#  target:
+  # Different fields that your service accepts
+#      limit:
+      # Field name as shown in UI
+#      name: Charge limit
+      # Description of the field
+#      description: Maximum charge rate in W
+      # Whether or not field is required (default = false)
+#      required: false
+      # Advanced fields are only shown when the advanced mode is enabled for the user (default = false)
+#      advanced: false
+      # Example value that can be passed for this field
+#      example: "1500"
+      # The default field value
+#      default: "22000"
+      
+stop_charge:
+  name: Start charging
+  description: Stops a charge session in progress
+  target:
+    entity:
+      integration: ocpp
