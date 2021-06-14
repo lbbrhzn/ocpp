@@ -1,5 +1,5 @@
 """Open Charge Point Protocol integration."""
-import asyncio
+import asyncio, time
 from datetime import datetime, timedelta
 import logging
 from typing import Dict, Optional
@@ -41,6 +41,7 @@ SERVICE_CHARGE_START = "start_transaction"
 SERVICE_CHARGE_STOP = "stop_transaction"
 SERVICE_AVAILABILITY = "availability"
 SERVICE_SET_CHARGE_RATE = "max_charge_rate"
+SERVICE_RESET = "reset"
 
 #Ocpp supported measurands
 MEASURANDS = [
@@ -84,7 +85,8 @@ GENERAL = [
     "Model",
     "FW.Version",
     "Features",
-    "Connectors"
+    "Connectors",
+    "Transaction.Id"
 ]
 CONF_GENERAL = "general"
 
@@ -94,13 +96,13 @@ CONF_METER_INTERVAL = "meter_interval"
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Optional(CONF_PORT, default=9000): cv.positive_int,
-        vol.Optional(CONF_MONITORED_VARIABLES): vol.All(
+        vol.Optional(CONF_MONITORED_VARIABLES, default = MEASURANDS): vol.All(
             cv.ensure_list, [vol.In(MEASURANDS)]
         ),
-        vol.Optional(CONF_MONITORED_CONDITIONS): vol.All(
+        vol.Optional(CONF_MONITORED_CONDITIONS, default = CONDITIONS): vol.All(
             cv.ensure_list, [vol.In(CONDITIONS)]
         ),
-        vol.Optional(CONF_GENERAL): vol.All(
+        vol.Optional(CONF_GENERAL, default = GENERAL): vol.All(
             cv.ensure_list, [vol.In(GENERAL)]
         ),
         vol.Optional(CONF_NAME, default="ocpp"): cv.string,
@@ -108,7 +110,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     },
 )
 
-async def async_setup_platform(hass, config, async_add_entities, async_register_entity_service, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the OCPP sensors & make config available globally."""
     global yaml_config
     yaml_config = config
@@ -120,11 +122,11 @@ async def async_setup_platform(hass, config, async_add_entities, async_register_
 
     metric = []
     for measurand in config[CONF_MONITORED_VARIABLES]:
-        metric.append(ChargeMetric(measurand, central_sys, "M", config[CONF_NAME]))
+        metric.append(ChargePointMetric(measurand, central_sys, "M", config[CONF_NAME]))
     for condition in config[CONF_MONITORED_CONDITIONS]:
-        metric.append(ChargeMetric(condition, central_sys, "S", config[CONF_NAME]))
+        metric.append(ChargePointMetric(condition, central_sys, "S", config[CONF_NAME]))
     for gen in config[CONF_GENERAL]:
-        metric.append(ChargeMetric(gen, central_sys, "G", config[CONF_NAME]))
+        metric.append(ChargePointMetric(gen, central_sys, "G", config[CONF_NAME]))
         
     async_add_entities(metric, True)
     
@@ -139,6 +141,8 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self._server = None
         self._connected_charger: Optional[ChargePoint] = None
+        self._last_connected_id = ""
+        self._cp_metrics = {}
 
     @staticmethod
     async def create(host: str = "0.0.0.0", port: int = 9000):
@@ -159,10 +163,15 @@ class CentralSystem:
             return
 
         try:
-            cp = ChargePoint(cp_id, websocket, yaml_config[CONF_METER_INTERVAL])
+            cp = ChargePoint(cp_id, websocket)
             self._connected_charger = cp
-            _LOGGER.info(f"Charger {cp_id} connected.")
-            await cp.start()
+            if self._last_connected_id == cp.id:
+                _LOGGER.debug(f"Charger {cp_id} reconnected.")
+                self._cp_metrics = await cp.reconnect(self._cp_metrics)
+            else:
+                _LOGGER.info(f"Charger {cp_id} connected.")
+                self._last_connected_id = cp.id
+                self._cp_metrics = await cp.start()
         finally:
             self._connected_charger = None
 
@@ -170,14 +179,12 @@ class CentralSystem:
         """Return last known value for given measurand."""
         if self._connected_charger is not None:
             return self._connected_charger.get_metric(measurand)
-
         return None
 
     def get_unit(self, measurand: str):
         """Return unit of given measurand."""
         if self._connected_charger is not None:
             return self._connected_charger.get_unit(measurand)
-
         return None
 
 
@@ -197,6 +204,7 @@ class ChargePoint(cp):
         self._features_supported = {}
         self.preparing = asyncio.Event()
         self._metrics["ID"] = id
+        self._transactionId = 0
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -205,17 +213,18 @@ class ChargePoint(cp):
             if FEATURE_PROFILE_REMOTE in self._features_supported:
                 await self.trigger_boot_notification()
                 await self.trigger_status_notification()
+            await self.become_operative()
             await self.get_configure("HeartbeatInterval")
-            await self.get_configure("MeterValuesSampledData")
             await self.get_configure("StopTxnSampledData")
-            await self.get_configure("MeterValueSampleInterval")
-            await self.become_operative()      
+            await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData", ",".join(yaml_config[CONF_MONITORED_VARIABLES])
             )
             await self.configure(
                 "MeterValueSampleInterval", str(yaml_config[CONF_METER_INTERVAL])
             )
+            resp = await self.get_configure("NumberOfConnectors")
+            self._metrics["Connectors"] = resp.configuration_key[0]["value"]
 #            await self.start_transaction()
         except (ConfigurationError, NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %r", e)
@@ -226,7 +235,7 @@ class ChargePoint(cp):
         for key_value in resp.configuration_key:
             self._features_supported = key_value["value"]
             self._metrics["Features"] = self._features_supported
-            _LOGGER.debug("SupportedFeatureProfiles: %r",key_value["value"])
+            _LOGGER.debug("SupportedFeatureProfiles: %r",self._features_supported)
 
     async def trigger_boot_notification(self):
         while True:
@@ -289,21 +298,32 @@ class ChargePoint(cp):
             await asyncio.sleep(SLEEP_TIME)
 
     async def stop_transaction(self):
+        """Request remote stop of current transaction and set power to 0."""
         while True:
             req = call.RemoteStopTransactionPayload(
-                transactionId=1234
+                transactionId=self._transactionId
             )
             resp = await self.call(req)
-            if resp.status == RemoteStartStopStatus.accepted: break
+            if resp.status == RemoteStartStopStatus.accepted: 
+                self._metrics["Power.Active.Import"] = 0
+                break
+            await asyncio.sleep(SLEEP_TIME)
+
+    async def reset(self, typ: str = ResetType.soft):
+        """Soft reset charger unless hard reset requested."""
+        while True:
+            req = call.ResetPayload(typ)
+            resp = await self.call(req)
+            if resp.status == ResetStatus.accepted: break
             await asyncio.sleep(SLEEP_TIME)
 
     async def get_configure(self, key: str):
-        """Get Configuration of charger for supported keys.
-        """
+        """Get Configuration of charger for supported keys."""
         req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            _LOGGER.debug("Get Configuration for %r: %r",key, key_value["value"])
+            _LOGGER.debug("Get Configuration for %s: %s",key, key_value["value"])
+        return resp
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
@@ -361,12 +381,26 @@ class ChargePoint(cp):
             await self._send(response)
 
     async def start(self):
+        """Start charge point"""
+        try:
+            await asyncio.gather(super().start(), self.post_connect())
+        except websockets.exceptions.ConnectionClosed as e:
+            _LOGGER.debug(e)
+            return self._metrics
+        
+    async def reconnect(self, last_metrics):
         """Start charge point."""
-        await asyncio.gather(super().start(), self.post_connect())
+        try:
+            self._metrics = last_metrics
+            await asyncio.gather(super().start())
+        except websockets.exceptions.ConnectionClosed as e:
+            _LOGGER.debug(e)
+            return self._metrics
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
+        self._metrics["Transaction.Id"] = kwargs.get("transactionId")
         for bucket in meter_value:
             for sampled_value in bucket["sampled_value"]:
                 self._metrics[sampled_value["measurand"]] = sampled_value["value"]
@@ -379,7 +413,8 @@ class ChargePoint(cp):
     def on_boot_notification(self, charge_point_model, charge_point_vendor, **kwargs):
         self._metrics["Model"] = charge_point_model
         self._metrics["Vendor"] = charge_point_vendor
-        self._metrics["FW.Version"] = kwargs.get("firmwareVersion")
+        self._metrics["FW.Version"] = kwargs.get("firmware_version")
+        _LOGGER.debug("Additional boot info: %s",kwargs)
         return call_result.BootNotificationPayload(
             current_time=datetime.utcnow().isoformat(),
             interval=30,
@@ -404,17 +439,27 @@ class ChargePoint(cp):
         )
 
     @on(Action.StartTransaction)
-    def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):    
+    def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs): 
+        self._transactionId = time.time()
+        self._metrics["Transaction.Id"] = self._transactionId
         return call_result.StartTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted },
-            transaction_id = 1234
+            transaction_id = self._transactionId
         )
     
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
+        self._metrics["Power.Active.Import"] = 0
         return call_result.StopTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted }            
+        )
+    
+    @on(Action.DataTransfer)
+    def on_data_transfer(self, vendor_id, **kwargs):
+        _LOGGER.debug("Datatransfer received from CP: %s",kwargs)
+        return call_result.DataTransferPayload(
+            status = { "status" : DataTransferStatus.accepted } 
         )
     
     @on(Action.Heartbeat)
@@ -435,11 +480,11 @@ class ChargePoint(cp):
         return self._units.get(measurand, None)
 
 
-class ChargeMetric(Entity):
-    """Sensor for charge metrics."""
+class ChargePointMetric(Entity):
+    """Individual sensor for charge point metrics."""
 
     def __init__(self, metric, central_sys, genre, prefix):
-        """Instantiate instance of a ChargeMetrics."""
+        """Instantiate instance of a ChargePointMetrics."""
         self.metric = metric
         self.central_sys = central_sys
         self._genre = genre
