@@ -440,7 +440,7 @@ class ChargePoint(cp):
 
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs): 
-        self._transactionId = time.time()
+        self._transactionId = int(time.time() * 1000)
         self._metrics["Transaction.Id"] = self._transactionId
         return call_result.StartTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted },
