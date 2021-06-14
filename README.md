@@ -72,22 +72,22 @@ views:
     cards:
       - type: history-graph
         entities:
-          - entity: sensor.charger_1.energy.active.import.register
-          - entity: sensor.charger_1.current.import
-          - entity: sensor.charger_1.status
+          - entity: sensor.charger_1_energy_active_import_register
+          - entity: sensor.charger_1_current_import
+          - entity: sensor.charger_1_status
         hours_to_show: 24
         refresh_interval: 0
       - type: entities
         entities:
-          - entity: sensor.charger_1.status
-          - entity: sensor.charger_1.energy.active.import.register
-          - entity: sensor.charger_1.energy.reactive.import.register
-          - entity: sensor.charger_1.power.active.import
-          - entity: sensor.charger_1.power.reactive.import
-          - entity: sensor.charger_1.current.offered
-          - entity: sensor.charger_1.current.import
-          - entity: sensor.charger_1.heartbeat
-          - entity: sensor.charger_1.soc
+          - entity: sensor.charger_1_status
+          - entity: sensor.charger_1_energy_active_import_register
+          - entity: sensor.charger_1_energy_reactive_import_register
+          - entity: sensor.charger_1_power_active_import
+          - entity: sensor.charger_1_power_reactive_import
+          - entity: sensor.charger_1_current_offered
+          - entity: sensor.charger_1_current_import
+          - entity: sensor.charger_1_heartbeat
+          - entity: sensor.charger_1_soc
         title: OCPP
 ```
 
