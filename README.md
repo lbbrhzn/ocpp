@@ -20,6 +20,21 @@ This is a home assistant integration for a simple OCPP server (central system) f
 ```yaml
 sensor:
   - platform: ocpp
+    name: charger_1
+    meter_interval: 60
+    general:
+      - "ID"
+      - "Vendor"
+      - "Model"
+      - "FW.Version"
+      - "Features"
+      - "Connectors"
+      - "Transaction.Id"
+    monitored_conditions:
+      - "Status"
+      - "Stop.Reason"
+      - "Error.Code"
+      - "Heartbeat"
     monitored_variables:
       - "Current.Export"
       - "Current.Import"
@@ -33,7 +48,6 @@ sensor:
       - "Energy.Reactive.Export.Interval"
       - "Energy.Reactive.Import.Interval"
       - "Frequency"
-      - "Heartbeat"
       - "Power.Active.Export"
       - "Power.Active.Import"
       - "Power.Factor"
@@ -42,7 +56,6 @@ sensor:
       - "Power.Reactive.Import"
       - "RPM"
       - "SoC"
-      - "Status"
       - "Temperature"
       - "Voltage"
     port: 9000
@@ -59,22 +72,22 @@ views:
     cards:
       - type: history-graph
         entities:
-          - entity: sensor.energy_active_import_register
-          - entity: sensor.current_import
-          - entity: sensor.status
+          - entity: sensor.charger_1_energy_active_import_register
+          - entity: sensor.charger_1_current_import
+          - entity: sensor.charger_1_status
         hours_to_show: 24
         refresh_interval: 0
       - type: entities
         entities:
-          - entity: sensor.status
-          - entity: sensor.energy_active_import_register
-          - entity: sensor.energy_reactive_import_register
-          - entity: sensor.power_active_import
-          - entity: sensor.power_reactive_import
-          - entity: sensor.current_offered
-          - entity: sensor.current_import
-          - entity: sensor.heartbeat
-          - entity: sensor.soc
+          - entity: sensor.charger_1_status
+          - entity: sensor.charger_1_energy_active_import_register
+          - entity: sensor.charger_1_energy_reactive_import_register
+          - entity: sensor.charger_1_power_active_import
+          - entity: sensor.charger_1_power_reactive_import
+          - entity: sensor.charger_1_current_offered
+          - entity: sensor.charger_1_current_import
+          - entity: sensor.charger_1_heartbeat
+          - entity: sensor.charger_1_soc
         title: OCPP
 ```
 
