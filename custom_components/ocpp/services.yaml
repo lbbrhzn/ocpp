@@ -22,7 +22,7 @@
 #      default: "22000"
       
 stop_charge:
-  name: Start charging
+  name: Stop charging
   description: Stops a charge session in progress
   target:
     entity:
