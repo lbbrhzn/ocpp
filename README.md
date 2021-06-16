@@ -35,6 +35,7 @@ sensor:
       - "Stop.Reason"
       - "Error.Code"
       - "Heartbeat"
+      - "Session.Energy"
     monitored_variables:
       - "Current.Export"
       - "Current.Import"
