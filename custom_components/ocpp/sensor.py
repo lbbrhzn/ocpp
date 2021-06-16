@@ -75,7 +75,8 @@ CONDITIONS = [
     "Heartbeat",
     "Error.Code",
     "Stop.Reason",
-    "FW.Status"
+    "FW.Status",
+    "Session.Energy" #in kWh
 ]
 
 #Additional general information to report
@@ -205,6 +206,7 @@ class ChargePoint(cp):
         self.preparing = asyncio.Event()
         self._metrics["ID"] = id
         self._transactionId = 0
+        self._meter_start = 0
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -215,7 +217,6 @@ class ChargePoint(cp):
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configure("HeartbeatInterval")
-            await self.get_configure("StopTxnSampledData")
             await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData", ",".join(yaml_config[CONF_MONITORED_VARIABLES])
@@ -223,6 +224,9 @@ class ChargePoint(cp):
             await self.configure(
                 "MeterValueSampleInterval", str(yaml_config[CONF_METER_INTERVAL])
             )
+#            await self.configure(
+#                "StopTxnSampledData", ",".join(yaml_config[CONF_MONITORED_VARIABLES])
+#            )
             resp = await self.get_configure("NumberOfConnectors")
             self._metrics["Connectors"] = resp.configuration_key[0]["value"]
 #            await self.start_transaction()
@@ -298,15 +302,13 @@ class ChargePoint(cp):
             await asyncio.sleep(SLEEP_TIME)
 
     async def stop_transaction(self):
-        """Request remote stop of current transaction and set power to 0."""
+        """Request remote stop of current transaction."""
         while True:
             req = call.RemoteStopTransactionPayload(
                 transactionId=self._transactionId
             )
             resp = await self.call(req)
-            if resp.status == RemoteStartStopStatus.accepted: 
-                self._metrics["Power.Active.Import"] = 0
-                break
+            if resp.status == RemoteStartStopStatus.accepted: break
             await asyncio.sleep(SLEEP_TIME)
 
     async def reset(self, typ: str = ResetType.soft):
@@ -400,13 +402,16 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
-        self._metrics["Transaction.Id"] = kwargs.get("transactionId")
         for bucket in meter_value:
             for sampled_value in bucket["sampled_value"]:
-                self._metrics[sampled_value["measurand"]] = sampled_value["value"]
+                if ("measurand" in sampled_value):
+                    self._metrics[sampled_value["measurand"]] = sampled_value["value"]
+                if (len(sampled_value.keys()) == 1) #for backwards compatibility
+                    self._metrics("Energy.Active.Import.Register") = sampled_value["value"]
                 if ("unit" in sampled_value):
-                  self._units[sampled_value["measurand"]] = sampled_value["unit"]
-
+                    self._units[sampled_value["measurand"]] = sampled_value["unit"]
+        self._metrics["Session.Energy"] = round(float(self._metrics["Energy.Active.Import.Register"]) - self._meter_start, 1)
+        self._units["Session.Energy"] = "kWh"
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -440,8 +445,10 @@ class ChargePoint(cp):
 
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs): 
-        self._transactionId = int(time.time() * 1000)
+        self._transactionId = int(time.time())
+        self._metrics["Stop.Reason"] = ""
         self._metrics["Transaction.Id"] = self._transactionId
+        self._meter_start = int(meter_start) / 1000.0
         return call_result.StartTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted },
             transaction_id = self._transactionId
@@ -450,7 +457,7 @@ class ChargePoint(cp):
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
-        self._metrics["Power.Active.Import"] = 0
+        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - self._meter_start, 1)
         return call_result.StopTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted }            
         )
