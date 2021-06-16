@@ -409,7 +409,7 @@ class ChargePoint(cp):
                 if (len(sampled_value.keys()) == 1) #for backwards compatibility
                     self._metrics("Energy.Active.Import.Register") = sampled_value["value"]
                 if ("unit" in sampled_value):
-                  self._units[sampled_value["measurand"]] = sampled_value["unit"]
+                    self._units[sampled_value["measurand"]] = sampled_value["unit"]
         self._metrics["Session.Energy"] = round(float(self._metrics["Energy.Active.Import.Register"]) - self._meter_start, 1)
         self._units["Session.Energy"] = "kWh"
         return call_result.MeterValuesPayload()
