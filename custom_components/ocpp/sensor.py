@@ -404,7 +404,10 @@ class ChargePoint(cp):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
             for sampled_value in bucket["sampled_value"]:
-                self._metrics[sampled_value["measurand"]] = sampled_value["value"]
+                if ("measurand" in sampled_value):
+                    self._metrics[sampled_value["measurand"]] = sampled_value["value"]
+                if (len(sampled_value.keys()) == 1) #for backwards compatibility
+                    self._metrics("Energy.Active.Import.Register") = sampled_value["value"]
                 if ("unit" in sampled_value):
                   self._units[sampled_value["measurand"]] = sampled_value["unit"]
         self._metrics["Session.Energy"] = round(float(self._metrics["Energy.Active.Import.Register"]) - self._meter_start, 1)
