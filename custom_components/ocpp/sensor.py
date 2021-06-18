@@ -19,8 +19,13 @@ from homeassistant.helpers import config_validation as cv, entity_platform, serv
 from homeassistant.helpers.entity import Entity
 #from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+DOMAIN = "ocpp"
+LOCAL_HOST = "0.0.0.0"
+DEFAULT_PORT = 9000
+DEFAULT_SUBPROTOCOL = "ocpp1.6"
+
 _LOGGER = logging.getLogger(__name__)
-logging.getLogger("ocpp").setLevel(logging.DEBUG)
+logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 
 ICON = "mdi:ev-station"
 
@@ -68,6 +73,7 @@ MEASURANDS = [
     "Temperature",
     "Voltage"
     ]
+DEFAULT_MEASURAND = "Energy.Active.Import.Register"
 
 #Additional conditions/states to monitor
 CONDITIONS = [
@@ -76,7 +82,8 @@ CONDITIONS = [
     "Error.Code",
     "Stop.Reason",
     "FW.Status",
-    "Session.Energy" #in kWh
+    "Session.Energy", #in kWh
+    "Meter.Start" #in kWh
 ]
 
 #Additional general information to report
@@ -89,22 +96,15 @@ GENERAL = [
     "Connectors",
     "Transaction.Id"
 ]
-CONF_GENERAL = "general"
 
 #Interval between measurand meters being sent
 CONF_METER_INTERVAL = "meter_interval"
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
-        vol.Optional(CONF_PORT, default=9000): cv.positive_int,
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.positive_int,
         vol.Optional(CONF_MONITORED_VARIABLES, default = MEASURANDS): vol.All(
             cv.ensure_list, [vol.In(MEASURANDS)]
-        ),
-        vol.Optional(CONF_MONITORED_CONDITIONS, default = CONDITIONS): vol.All(
-            cv.ensure_list, [vol.In(CONDITIONS)]
-        ),
-        vol.Optional(CONF_GENERAL, default = GENERAL): vol.All(
-            cv.ensure_list, [vol.In(GENERAL)]
         ),
         vol.Optional(CONF_NAME, default="ocpp"): cv.string,
         vol.Optional(CONF_METER_INTERVAL, default=300): cv.positive_int
@@ -116,21 +116,20 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     global yaml_config
     yaml_config = config
     
-    port = config[CONF_PORT]
+    cfg_port = config[CONF_PORT]
     _LOGGER.info(config)
 
-    central_sys = await CentralSystem.create(port=port)
+    central_sys = await CentralSystem.create(port=cfg_port)
 
     metric = []
     for measurand in config[CONF_MONITORED_VARIABLES]:
         metric.append(ChargePointMetric(measurand, central_sys, "M", config[CONF_NAME]))
-    for condition in config[CONF_MONITORED_CONDITIONS]:
+    for condition in CONDITIONS:
         metric.append(ChargePointMetric(condition, central_sys, "S", config[CONF_NAME]))
-    for gen in config[CONF_GENERAL]:
+    for gen in GENERAL:
         metric.append(ChargePointMetric(gen, central_sys, "G", config[CONF_NAME]))
         
     async_add_entities(metric, True)
-    
     """Set up services."""
 #    platform = entity_platform.async_get_current_platform()
 #    platform.async_register_entity_service(SERVICE_CHARGE_STOP, {}, "stop_charge")
@@ -146,11 +145,11 @@ class CentralSystem:
         self._cp_metrics = {}
 
     @staticmethod
-    async def create(host: str = "0.0.0.0", port: int = 9000):
+    async def create(host: str = LOCAL_HOST, port: int = DEFAULT_PORT, proto: str = DEFAULT_SUBPROTOCOL):
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem()
         server = await websockets.serve(
-            self.on_connect, "0.0.0.0", port, subprotocols=["ocpp1.6"]
+            self.on_connect, host, port, subprotocols=[proto]
         )
 
         self._server = server
@@ -204,9 +203,10 @@ class ChargePoint(cp):
         self._units = {}
         self._features_supported = {}
         self.preparing = asyncio.Event()
-        self._metrics["ID"] = id
         self._transactionId = 0
-        self._meter_start = 0
+        self._metrics["ID"] = id
+        self._units["Session.Energy"] = UnitOfMeasure.kwh
+        self._units["Meter.Start"] = UnitOfMeasure.kwh
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -406,12 +406,12 @@ class ChargePoint(cp):
             for sampled_value in bucket["sampled_value"]:
                 if ("measurand" in sampled_value):
                     self._metrics[sampled_value["measurand"]] = sampled_value["value"]
-                if (len(sampled_value.keys()) == 1) #for backwards compatibility
-                    self._metrics("Energy.Active.Import.Register") = sampled_value["value"]
+                if (len(sampled_value.keys()) == 1): #for backwards compatibility
+                    self._metrics[DEFAULT_MEASURAND] = sampled_value["value"]
                 if ("unit" in sampled_value):
                     self._units[sampled_value["measurand"]] = sampled_value["unit"]
-        self._metrics["Session.Energy"] = round(float(self._metrics["Energy.Active.Import.Register"]) - self._meter_start, 1)
-        self._units["Session.Energy"] = "kWh"
+        if ("Meter.Start" not in self._metrics): self._metrics["Meter.Start"] = self._metrics[DEFAULT_MEASURAND]
+        self._metrics["Session.Energy"] = round(float(self._metrics[DEFAULT_MEASURAND]) - float(self._metrics["Meter.Start"]), 1)
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -419,11 +419,11 @@ class ChargePoint(cp):
         self._metrics["Model"] = charge_point_model
         self._metrics["Vendor"] = charge_point_vendor
         self._metrics["FW.Version"] = kwargs.get("firmware_version")
-        _LOGGER.debug("Additional boot info: %s",kwargs)
+        _LOGGER.debug("Additional boot info for %s: %s", self.id, kwargs)
         return call_result.BootNotificationPayload(
             current_time=datetime.utcnow().isoformat(),
             interval=30,
-            status='Accepted'
+            status=RegistrationStatus.accepted
         )
 
     @on(Action.StatusNotification)
@@ -448,7 +448,7 @@ class ChargePoint(cp):
         self._transactionId = int(time.time())
         self._metrics["Stop.Reason"] = ""
         self._metrics["Transaction.Id"] = self._transactionId
-        self._meter_start = int(meter_start) / 1000.0
+        self._metrics["Meter.Start"] = int(meter_start) / 1000.0
         return call_result.StartTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted },
             transaction_id = self._transactionId
@@ -457,16 +457,16 @@ class ChargePoint(cp):
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
-        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - self._meter_start, 1)
+        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - self._metrics["Meter.Start"], 1)
         return call_result.StopTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted }            
         )
     
     @on(Action.DataTransfer)
     def on_data_transfer(self, vendor_id, **kwargs):
-        _LOGGER.debug("Datatransfer received from CP: %s",kwargs)
+        _LOGGER.debug("Datatransfer received from %s: %s", self.id, kwargs)
         return call_result.DataTransferPayload(
-            status = { "status" : DataTransferStatus.accepted } 
+            status = DataTransferStatus.accepted 
         )
     
     @on(Action.Heartbeat)

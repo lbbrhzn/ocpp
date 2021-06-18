@@ -22,20 +22,6 @@ sensor:
   - platform: ocpp
     name: charger_1
     meter_interval: 60
-    general:
-      - "ID"
-      - "Vendor"
-      - "Model"
-      - "FW.Version"
-      - "Features"
-      - "Connectors"
-      - "Transaction.Id"
-    monitored_conditions:
-      - "Status"
-      - "Stop.Reason"
-      - "Error.Code"
-      - "Heartbeat"
-      - "Session.Energy"
     monitored_variables:
       - "Current.Export"
       - "Current.Import"
