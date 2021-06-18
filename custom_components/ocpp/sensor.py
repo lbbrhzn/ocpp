@@ -131,8 +131,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         
     async_add_entities(metric, True)
     """Set up services."""
-#    platform = entity_platform.async_get_current_platform()
-#    platform.async_register_entity_service(SERVICE_CHARGE_STOP, {}, "stop_charge")
+    platform = entity_platform.current_platform.get()
+    platform.async_register_entity_service(SERVICE_CHARGE_STOP, {}, "stop_transaction")
 
 class CentralSystem:
     """Server for handling OCPP connections."""
@@ -231,7 +231,7 @@ class ChargePoint(cp):
             self._metrics["Connectors"] = resp.configuration_key[0]["value"]
 #            await self.start_transaction()
         except (ConfigurationError, NotImplementedError) as e:
-            _LOGGER.error("Configuration of the charger failed: %r", e)
+            _LOGGER.error("Configuration of the charger failed: %s", e)
 
     async def get_supported_features(self):
         req = call.GetConfigurationPayload(key=["SupportedFeatureProfiles"])
@@ -239,7 +239,7 @@ class ChargePoint(cp):
         for key_value in resp.configuration_key:
             self._features_supported = key_value["value"]
             self._metrics["Features"] = self._features_supported
-            _LOGGER.debug("SupportedFeatureProfiles: %r",self._features_supported)
+            _LOGGER.debug("SupportedFeatureProfiles: %s",self._features_supported)
 
     async def trigger_boot_notification(self):
         while True:
@@ -411,6 +411,7 @@ class ChargePoint(cp):
                 if ("unit" in sampled_value):
                     self._units[sampled_value["measurand"]] = sampled_value["unit"]
         if ("Meter.Start" not in self._metrics): self._metrics["Meter.Start"] = self._metrics[DEFAULT_MEASURAND]
+        if ("Transaction.Id" not in self._metrics): self._metrics["Transaction.Id"] = kwargs.get("transaction_id")
         self._metrics["Session.Energy"] = round(float(self._metrics[DEFAULT_MEASURAND]) - float(self._metrics["Meter.Start"]), 1)
         return call_result.MeterValuesPayload()
 
@@ -457,7 +458,7 @@ class ChargePoint(cp):
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
-        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - self._metrics["Meter.Start"], 1)
+        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - float(self._metrics["Meter.Start"]), 1)
         return call_result.StopTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted }            
         )
