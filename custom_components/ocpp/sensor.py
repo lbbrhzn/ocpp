@@ -459,6 +459,9 @@ class ChargePoint(cp):
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
         self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - float(self._metrics["Meter.Start"]), 1)
+        if ("Current.Import" in self._metrics): self._metrics["Current.Import"] = 0
+        if ("Power.Active.Import" in self._metrics): self._metrics["Power.Active.Import"] = 0
+        if ("Power.Reactive.Import" in self._metrics): self._metrics["Power.Reactive.Import"] = 0
         return call_result.StopTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted }            
         )
