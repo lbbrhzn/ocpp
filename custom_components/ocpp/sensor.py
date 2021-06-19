@@ -74,6 +74,10 @@ MEASURANDS = [
     "Voltage"
     ]
 DEFAULT_MEASURAND = "Energy.Active.Import.Register"
+DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh
+DEFAULT_POWER_UNIT = UnitOfMeasure.w
+HA_ENERGY_UNIT = UnitOfMeasure.kwh
+HA_POWER_UNIT = UnitOfMeasure.kw
 
 #Additional conditions/states to monitor
 CONDITIONS = [
@@ -411,8 +415,16 @@ class ChargePoint(cp):
                     self._metrics[sampled_value["measurand"]] = sampled_value["value"]
                 if (len(sampled_value.keys()) == 1): #for backwards compatibility
                     self._metrics[DEFAULT_MEASURAND] = sampled_value["value"]
+                    self._units[DEFAULT_MEASURAND] = DEFAULT_ENERGY_UNIT
                 if ("unit" in sampled_value):
                     self._units[sampled_value["measurand"]] = sampled_value["unit"]
+                    if (self._units[sampled_value["measurand"]] == DEFAULT_POWER_UNIT): 
+                        self._metrics[sampled_value["measurand"]] = float(self._metrics[sampled_value["measurand"]])/1000
+                        self._units[sampled_value["measurand"]] = HA_POWER_UNIT
+                    if (self._units[sampled_value["measurand"]] == DEFAULT_ENERGY_UNIT): 
+                        self._metrics[sampled_value["measurand"]] = float(self._metrics[sampled_value["measurand"]])/1000
+                        self._units[sampled_value["measurand"]] = HA_ENERGY_UNIT
+                self._metrics[sampled_value["measurand"]] = round(float(self._metrics[sampled_value["measurand"]]),1)
         if ("Meter.Start" not in self._metrics): self._metrics["Meter.Start"] = self._metrics[DEFAULT_MEASURAND]
         if ("Transaction.Id" not in self._metrics): self._metrics["Transaction.Id"] = kwargs.get("transaction_id")
         self._metrics["Session.Time"] = round((int(time.time()) - float(self._metrics["Transaction.Id"]))/60)
@@ -454,7 +466,7 @@ class ChargePoint(cp):
         self._transactionId = int(time.time())
         self._metrics["Stop.Reason"] = ""
         self._metrics["Transaction.Id"] = self._transactionId
-        self._metrics["Meter.Start"] = int(meter_start) / 1000.0
+        self._metrics["Meter.Start"] = int(meter_start) / 1000
         return call_result.StartTransactionPayload(
             id_tag_info = { "status" : AuthorizationStatus.accepted },
             transaction_id = self._transactionId
@@ -463,7 +475,7 @@ class ChargePoint(cp):
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         self._metrics["Stop.Reason"] = reason
-        self._metrics["Session.Energy"] = round(int(meter_stop)/1000.0 - float(self._metrics["Meter.Start"]), 1)
+        self._metrics["Session.Energy"] = round(int(meter_stop)/1000 - float(self._metrics["Meter.Start"]), 1)
         if ("Current.Import" in self._metrics): self._metrics["Current.Import"] = 0
         if ("Power.Active.Import" in self._metrics): self._metrics["Power.Active.Import"] = 0
         if ("Power.Reactive.Import" in self._metrics): self._metrics["Power.Reactive.Import"] = 0
