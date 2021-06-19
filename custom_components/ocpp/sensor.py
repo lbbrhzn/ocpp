@@ -14,7 +14,7 @@ import websockets
 
 from homeassistant.core import ServiceCall, callback
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_PORT, CONF_NAME, CONF_MONITORED_CONDITIONS
+from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_PORT, CONF_NAME, CONF_MONITORED_CONDITIONS, TIME_MINUTES
 from homeassistant.helpers import config_validation as cv, entity_platform, service
 from homeassistant.helpers.entity import Entity
 #from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -82,6 +82,7 @@ CONDITIONS = [
     "Error.Code",
     "Stop.Reason",
     "FW.Status",
+    "Session.Time", #in min
     "Session.Energy", #in kWh
     "Meter.Start" #in kWh
 ]
@@ -132,8 +133,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         
     async_add_entities(metric, True)
     """Set up services."""
-    platform = entity_platform.current_platform.get()
-    platform.async_register_entity_service(SERVICE_CHARGE_STOP, {}, "stop_transaction")
+#    platform = entity_platform.current_platform.get()
+#    platform.async_register_entity_service(SERVICE_CHARGE_STOP, {}, "stop_transaction")
 
 class CentralSystem:
     """Server for handling OCPP connections."""
@@ -206,6 +207,7 @@ class ChargePoint(cp):
         self.preparing = asyncio.Event()
         self._transactionId = 0
         self._metrics["ID"] = id
+        self._units["Session.Time"] = TIME_MINUTES
         self._units["Session.Energy"] = UnitOfMeasure.kwh
         self._units["Meter.Start"] = UnitOfMeasure.kwh
 
@@ -413,6 +415,7 @@ class ChargePoint(cp):
                     self._units[sampled_value["measurand"]] = sampled_value["unit"]
         if ("Meter.Start" not in self._metrics): self._metrics["Meter.Start"] = self._metrics[DEFAULT_MEASURAND]
         if ("Transaction.Id" not in self._metrics): self._metrics["Transaction.Id"] = kwargs.get("transaction_id")
+        self._metrics["Session.Time"] = round((int(time.time()) - float(self._metrics["Transaction.Id"]))/60)
         self._metrics["Session.Energy"] = round(float(self._metrics[DEFAULT_MEASURAND]) - float(self._metrics["Meter.Start"]), 1)
         return call_result.MeterValuesPayload()
 
