@@ -21,9 +21,9 @@
       # The default field value
 #      default: "22000"
       
-stop_charge:
-  name: Stop charging
-  description: Stops a charge session in progress
-  target:
-    entity:
-      integration: ocpp
+#stop_charge:
+#  name: Stop charging
+#  description: Stops a charge session in progress
+#  target:
+#    entity:
+#      integration: ocpp

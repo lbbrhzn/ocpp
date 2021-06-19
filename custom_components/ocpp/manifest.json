@@ -6,7 +6,7 @@
   "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
   "requirements": [
       "ocpp==0.8.1",
-      "websockets==8.1"
+      "websockets==9.1"
   ],
   "codeowners": ["lbbrhzn"]
 }
