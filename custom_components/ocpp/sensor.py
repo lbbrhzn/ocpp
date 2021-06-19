@@ -91,6 +91,7 @@ GENERAL = [
     "ID",
     "Vendor",
     "Model",
+    "Serial",
     "FW.Version",
     "Features",
     "Connectors",
@@ -420,6 +421,7 @@ class ChargePoint(cp):
         self._metrics["Model"] = charge_point_model
         self._metrics["Vendor"] = charge_point_vendor
         self._metrics["FW.Version"] = kwargs.get("firmware_version")
+        self._metrics["Serial"] = kwargs.get("charge_point_serial_number")
         _LOGGER.debug("Additional boot info for %s: %s", self.id, kwargs)
         return call_result.BootNotificationPayload(
             current_time=datetime.utcnow().isoformat(),
