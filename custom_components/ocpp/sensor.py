@@ -447,7 +447,7 @@ class ChargePoint(cp):
     @on(Action.StatusNotification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         self._metrics["Status"] = status
-        if (status == ChargePointStatus.suspended_ev || status == ChargePointStatus.suspended_evse): 
+        if (status == ChargePointStatus.suspended_ev or status == ChargePointStatus.suspended_evse): 
             if ("Current.Import" in self._metrics): self._metrics["Current.Import"] = 0
             if ("Power.Active.Import" in self._metrics): self._metrics["Power.Active.Import"] = 0
             if ("Power.Reactive.Import" in self._metrics): self._metrics["Power.Reactive.Import"] = 0
