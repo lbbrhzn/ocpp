@@ -1,15 +1,30 @@
 """Adds config flow for ocpp."""
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 import voluptuous as vol
 
-from .const import DEFAULT_HOST, DEFAULT_NAME, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_HOST,
+    CONF_METER_INTERVAL,
+    CONF_MONITORED_VARIABLES,
+    CONF_NAME,
+    CONF_PORT,
+    DEFAULT_HOST,
+    DEFAULT_METER_INTERVAL,
+    DEFAULT_MONITORED_VARIABLES,
+    DEFAULT_NAME,
+    DEFAULT_PORT,
+    DOMAIN,
+)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
         vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): str,
+        vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
+        vol.Required(
+            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
+        ): str,
     }
 )
 
@@ -31,4 +46,5 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=self._errors
             )
-        return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
+        my_data = user_input
+        return self.async_create_entry(title=user_input[CONF_NAME], data=my_data)

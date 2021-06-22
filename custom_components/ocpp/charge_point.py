@@ -5,7 +5,7 @@ import logging
 import time
 from typing import Dict
 
-from homeassistant.const import CONF_MONITORED_VARIABLES, TIME_MINUTES
+from homeassistant.const import TIME_MINUTES
 import websockets
 
 from ocpp.exceptions import NotImplementedError
@@ -38,6 +38,7 @@ from .const import (
     FEATURE_PROFILE_REMOTE,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    MEASURANDS,
     SLEEP_TIME,
 )
 from .exception import ConfigurationError
@@ -77,10 +78,11 @@ class ChargePoint(cp):
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configure("HeartbeatInterval")
-            await self.configure("WebSocketPingInterval", "60")
+            # WebSocketPingInterval is readonly
+            # await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData",
-                ",".join(self.config[CONF_MONITORED_VARIABLES]),
+                ",".join(MEASURANDS),
             )
             await self.configure(
                 "MeterValueSampleInterval", str(self.config[CONF_METER_INTERVAL])

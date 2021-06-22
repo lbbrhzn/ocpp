@@ -1,14 +1,12 @@
 """Implement a OCCP Central System."""
 import logging
-from typing import Optional
 
 import websockets
 
 from .charge_point import ChargePoint
-from .const import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL, DOMAIN
+from .const import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL
 
 _LOGGER = logging.getLogger(__name__)
-logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 
 
 class CentralSystem:
@@ -17,7 +15,7 @@ class CentralSystem:
     def __init__(self, config):
         """Instantiate instance of a CentralSystem."""
         self._server = None
-        self._connected_charger: Optional[ChargePoint] = None
+        self._connected_charger = None
         self._last_connected_id = ""
         self._cp_metrics = {}
         self.config = config

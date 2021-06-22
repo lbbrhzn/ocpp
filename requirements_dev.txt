@@ -1,4 +1,3 @@
-ocpp
-websocket
+
 pre-commit
 homeassistant

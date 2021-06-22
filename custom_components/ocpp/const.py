@@ -1,13 +1,22 @@
 """Define constants for OCPP integration."""
+import homeassistant.const as ha
+
 from ocpp.v16.enums import UnitOfMeasure
 
 DOMAIN = "ocpp"
 CONF_METER_INTERVAL = "meter_interval"
-CONF_CONNECTIONS = "connections"
+CONF_USERNAME = ha.CONF_USERNAME
+CONF_PASSWORD = ha.CONF_PASSWORD
+CONF_HOST = ha.CONF_HOST
+CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
+CONF_NAME = ha.CONF_NAME
+CONF_PORT = ha.CONF_PORT
 DEFAULT_NAME = "ocpp"
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9000
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
+DEFAULT_METER_INTERVAL = 60
+
 ICON = "mdi:ev-station"
 SLEEP_TIME = 60
 
@@ -58,6 +67,7 @@ MEASURANDS = [
     "Voltage",
 ]
 DEFAULT_MEASURAND = "Energy.Active.Import.Register"
+DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
 DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh
 DEFAULT_POWER_UNIT = UnitOfMeasure.w
 HA_ENERGY_UNIT = UnitOfMeasure.kwh
@@ -86,6 +96,3 @@ GENERAL = [
     "Connectors",
     "Transaction.Id",
 ]
-
-# Interval between measurand meters being sent
-CONF_METER_INTERVAL = "meter_interval"

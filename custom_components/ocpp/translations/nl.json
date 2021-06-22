@@ -1,0 +1,22 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Open Charge Point Protocol",
+                "description": "Kijk hier wanneer je hulp nodig hebt met de instellingen: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "name": "Naam",
+                    "host": "Adres",
+                    "port": "Poort",
+                    "meter_interval": "Meter Interval"
+                }
+            }
+        },
+        "error": {
+            "auth": "Username/Password is wrong."
+        },
+        "abort": {
+            "single_instance_allowed": "Er is maar één exemplaar van deze integratie toegestaan."
+        }
+    }
+}
