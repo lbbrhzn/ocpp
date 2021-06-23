@@ -77,7 +77,7 @@ class ChargePoint(cp):
                 await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
-            await self.get_configure("HeartbeatInterval")
+            await self.get_configuration("HeartbeatInterval")
             # WebSocketPingInterval is readonly
             # await self.configure("WebSocketPingInterval", "60")
             await self.configure(
@@ -90,7 +90,7 @@ class ChargePoint(cp):
             #            await self.configure(
             #                "StopTxnSampledData", ",".join(self.config[CONF_MONITORED_VARIABLES])
             #            )
-            resp = await self.get_configure("NumberOfConnectors")
+            resp = await self.get_configuration("NumberOfConnectors")
             self._metrics["Connectors"] = resp.configuration_key[0]["value"]
         #            await self.start_transaction()
         except (NotImplementedError) as e:
@@ -196,7 +196,7 @@ class ChargePoint(cp):
                 break
             await asyncio.sleep(SLEEP_TIME)
 
-    async def get_configure(self, key: str):
+    async def get_configuration(self, key: str):
         """Get Configuration of charger for supported keys."""
         req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
@@ -225,16 +225,14 @@ class ChargePoint(cp):
                 return
 
             if key_value.get("readonly", False):
-                raise ConfigurationError(f"'{key}' is a read only setting")
+                _LOGGER.warning("%s is a read only setting", key)
 
         req = call.ChangeConfigurationPayload(key=key, value=value)
 
         resp = await self.call(req)
 
         if resp.status in [ConfigurationStatus.rejected, "NotSupported"]:
-            raise ConfigurationError(
-                f"charger returned '{resp.status}' while setting '{key}' to '{value}'"
-            )
+            _LOGGER.warning("%s while setting %s to %s", resp.status, key, value)
 
         if resp.status == ConfigurationStatus.reboot_required:
             self._requires_reboot = True
@@ -374,9 +372,10 @@ class ChargePoint(cp):
     def on_stop_transaction(self, meter_stop, transaction_id, reason, **kwargs):
         """Stop the current transaction."""
         self._metrics["Stop.Reason"] = reason
-        self._metrics["Session.Energy"] = round(
-            int(meter_stop) / 1000 - float(self._metrics["Meter.Start"]), 1
-        )
+        if "Meter.Start" in self._metrics:
+            self._metrics["Session.Energy"] = round(
+                int(meter_stop) / 1000 - float(self._metrics["Meter.Start"]), 1
+            )
         if "Current.Import" in self._metrics:
             self._metrics["Current.Import"] = 0
         if "Power.Active.Import" in self._metrics:
