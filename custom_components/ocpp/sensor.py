@@ -1,6 +1,6 @@
 """Sensor platform for ocpp."""
 
-from homeassistant.const import CONF_NAME, CONF_MONITORED_VARIABLES
+from homeassistant.const import CONF_NAME
 from homeassistant.helpers.entity import Entity
 
 from .const import CONDITIONS, DOMAIN, GENERAL, ICON, MEASURANDS
@@ -11,7 +11,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     central_sys = hass.data[DOMAIN][entry.entry_id]
 
     metrics = []
-    for measurand in entry.data[CONF_MONITORED_VARIABLES]:
+    for measurand in MEASURANDS:
         metrics.append(
             ChargePointMetric(measurand, central_sys, "M", entry.data[CONF_NAME])
         )
