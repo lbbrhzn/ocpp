@@ -31,6 +31,7 @@ from ocpp.v16.enums import (
 
 from .const import (
     CONF_METER_INTERVAL,
+    CONF_MONITORED_VARIABLES,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_MEASURAND,
     DEFAULT_POWER_UNIT,
@@ -82,7 +83,7 @@ class ChargePoint(cp):
             # await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData",
-                ",".join(MEASURANDS),
+                self.config[CONF_MONITORED_VARIABLES],
             )
             await self.configure(
                 "MeterValueSampleInterval", str(self.config[CONF_METER_INTERVAL])

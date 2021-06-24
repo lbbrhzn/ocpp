@@ -10,7 +10,7 @@ from .const import (
     CONF_PORT,
     DEFAULT_HOST,
     DEFAULT_METER_INTERVAL,
-    DEFAULT_MONITORED_VARIABLES,
+    DEFAULT_MEASURAND,
     DEFAULT_NAME,
     DEFAULT_PORT,
     DOMAIN,
@@ -23,7 +23,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(
-            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
+            CONF_MONITORED_VARIABLES, default=DEFAULT_MEASURAND
         ): str,
     }
 )
