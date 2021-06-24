@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.const import TIME_MINUTES
 import websockets
 
-from ocpp.exceptions import NotImplementedError
+#from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cp, call, call_result
@@ -39,7 +39,6 @@ from .const import (
     FEATURE_PROFILE_REMOTE,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-    MEASURANDS,
     SLEEP_TIME,
 )
 from .exception import ConfigurationError

@@ -3,7 +3,7 @@
 from homeassistant.const import CONF_NAME, CONF_MONITORED_VARIABLES
 from homeassistant.helpers.entity import Entity
 
-from .const import CONDITIONS, DOMAIN, GENERAL, ICON, MEASURANDS
+from .const import CONDITIONS, DOMAIN, GENERAL, ICON
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
