@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.const import TIME_MINUTES
 import websockets
 
-#from ocpp.exceptions import NotImplementedError
+from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cp, call, call_result
@@ -41,7 +41,7 @@ from .const import (
     HA_POWER_UNIT,
     SLEEP_TIME,
 )
-from .exception import ConfigurationError
+# from .exception import ConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
