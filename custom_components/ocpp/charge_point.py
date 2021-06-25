@@ -78,8 +78,7 @@ class ChargePoint(cp):
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration("HeartbeatInterval")
-            # WebSocketPingInterval is readonly
-            # await self.configure("WebSocketPingInterval", "60")
+            await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData",
                 self.config[CONF_MONITORED_VARIABLES],
