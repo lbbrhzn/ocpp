@@ -1,0 +1,7 @@
+# Do not check paths including `/tests/`:
+# they use `assert`, leading to B101 false positives.
+
+exclude_dirs:
+    - 'tests/'
+
+skips: ['B104']

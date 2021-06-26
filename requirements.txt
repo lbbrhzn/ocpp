@@ -1,0 +1,2 @@
+ocpp>=0.8
+websocket>=8.0

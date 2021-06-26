@@ -1,12 +1,16 @@
 {
   "domain": "ocpp",
-  "name": "ocpp",
-  "version": "0.1",
+  "name": "Open Charge Point Protocol (OCPP)",
   "documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
+  "iot_class": "local_push",
   "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
-  "requirements": [
-      "ocpp==0.8.1",
-      "websockets==9.1"
+  "version": "0.2.0",
+  "config_flow": true,
+  "codeowners": [
+    "@lbbrhzn"
   ],
-  "codeowners": ["lbbrhzn"]
+  "requirements": [
+    "ocpp==0.8.3",
+    "websockets==9.1"
+  ]
 }

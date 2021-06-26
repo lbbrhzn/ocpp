@@ -1,0 +1,51 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "OCCP Configuration",
+                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "name": "Name",
+                    "host": "Host",
+                    "port": "Port",
+                    "meter_interval": "Meter interval (seconds)"
+                }
+            },
+            "measurands": {
+                "title": "OCPP Measurands",
+                "description": "Select which measurand(s) should be shown in Home Assistant.",
+                "data": {
+                    "Current.Export": "Instantaneous current flow from EV",
+                    "Current.Import": "Instantaneous current flow to EV",
+                    "Current.Offered": "Maximum current offered to EV",
+                    "Energy.Active.Export.Register": "Active energy exported to the grid",
+                    "Energy.Active.Import.Register": "Active energy imported from the grid",
+                    "Energy.Reactive.Export.Register": "Reactive energy exported to the grid",
+                    "Energy.Reactive.Import.Register": "Reactive energy imported from the grid",
+                    "Energy.Active.Export.Interval": "Active energy exported to the grid during last interval",
+                    "Energy.Active.Import.Interval": "Active energy imported from the grid during last interval",
+                    "Energy.Reactive.Export.Interval": "Reactive energy exported to the grid during last interval",
+                    "Energy.Reactive.Import.Interval": "Reactive energy imported from the grid during last interval",
+                    "Frequency": "Powerline frequency",
+                    "Power.Active.Export": "Instantaneous active power exported by EV",
+                    "Power.Active.Import": "Instantaneous active power imported by EV",
+                    "Power.Factor": "Instantaneous power factor of total energy flow",
+                    "Power.Offered": "Maximum power offered to EV",
+                    "Power.Reactive.Export": "Instantaneous reactive power exported by EV",
+                    "Power.Reactive.Import": "Instantaneous reactive power imported by EV",
+                    "RPM": "Fan speed in RPM",
+                    "SoC": "State of charge of EV in percentage",
+                    "Temperature": "Temperature reading inside Charge Point",
+                    "Voltage": "Instantaneous AC RMS supply voltage"
+                }
+            }
+        },
+        "error": {
+            "auth": "Username/Password is wrong.",
+            "measurand": "Unknown measurand"
+        },
+        "abort": {
+            "single_instance_allowed": "Only a single instance is allowed."
+        }
+    }
+}
