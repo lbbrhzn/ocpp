@@ -12,23 +12,25 @@ _LOGGER = logging.getLogger(__name__)
 class CentralSystem:
     """Server for handling OCPP connections."""
 
-    def __init__(self, config):
+    def __init__(self, id, config):
         """Instantiate instance of a CentralSystem."""
         self._server = None
         self._connected_charger = None
-        self._last_connected_id = ""
+        self._connected_id = ""
         self._cp_metrics = {}
         self.config = config
+        self.id = id
 
     @staticmethod
     async def create(
+        id,
         config,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         proto: str = DEFAULT_SUBPROTOCOL,
     ):
         """Create instance and start listening for OCPP connections on given port."""
-        self = CentralSystem(config)
+        self = CentralSystem(id, config)
         server = await websockets.serve(
             self.on_connect, host, port, subprotocols=[proto]
         )
@@ -46,12 +48,12 @@ class CentralSystem:
         try:
             cp = ChargePoint(cp_id, websocket, self.config)
             self._connected_charger = cp
-            if self._last_connected_id == cp.id:
+            if self._connected_id == cp.id:
                 _LOGGER.debug(f"Charger {cp_id} reconnected.")
                 self._cp_metrics = await cp.reconnect(self._cp_metrics)
             else:
                 _LOGGER.info(f"Charger {cp_id} connected.")
-                self._last_connected_id = cp.id
+                self._connected_id = cp.id
                 self._cp_metrics = await cp.start()
         finally:
             self._connected_charger = None

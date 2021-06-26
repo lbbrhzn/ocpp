@@ -41,6 +41,7 @@ from .const import (
     HA_POWER_UNIT,
     SLEEP_TIME,
 )
+
 # from .exception import ConfigurationError
 
 _LOGGER = logging.getLogger(__name__)
