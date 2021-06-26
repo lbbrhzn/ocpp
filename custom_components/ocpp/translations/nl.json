@@ -1,0 +1,51 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "OCPP Configuratie",
+                "description": "Voor hulp bij configuratie kijk op: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "name": "Naam",
+                    "host": "Host",
+                    "port": "Poort",
+                    "meter_interval": "Meetinterval (secondes)"
+                }
+            },
+            "measurands": {
+                "title": "OCPP Metingen",
+                "description": "Selecteer welke meetgrootheden weergegeven worden.",
+                "data": {
+                    "Current.Export": "Instantane stroom van EV",
+                    "Current.Import": "Instantane stroom naar EV",
+                    "Current.Offered": "Maximale stroom aangeboden aan EV",
+                    "Energy.Active.Export.Register": "Actieve energie geexporteerd naar het net",
+                    "Energy.Active.Import.Register": "Actieve energie geimporteed vanaf het net",
+                    "Energy.Reactive.Export.Register": "Reactieve energie gexporteerd naar het net",
+                    "Energy.Reactive.Import.Register": "Reactieve energie geimporteerd van het net",
+                    "Energy.Active.Export.Interval": "Actieve energie geexporteerd naar het net tijdens het laatste meetinterval",
+                    "Energy.Active.Import.Interval": "Actieve energie geimporteerd van het net tijdens het laatste meetinterval",
+                    "Energy.Reactive.Export.Interval": "Reactieve energie geexporteerd naar het net tijdens het laatste meetinterval",
+                    "Energy.Reactive.Import.Interval": "Reactieve energie geimporteerd van het net tijdens het laatste meetinterval",
+                    "Frequency": "Netfrequentie",
+                    "Power.Active.Export": "Instantane actieve vermogen geexporteerd door EV",
+                    "Power.Active.Import": "Instantane active vermorgen geimporteerd door EV",
+                    "Power.Factor": "Instantane vermogensfactor can de totale energiestroom",
+                    "Power.Offered": "Maximale vermogen aangeboden aan EV",
+                    "Power.Reactive.Export": "Instantane reactive vermogen geexporteerd door EV",
+                    "Power.Reactive.Import": "Instantane reactieve vermogen geimporteerd door EV",
+                    "RPM": "Ventilator snelheid in RPM",
+                    "SoC": "Laadstand in procent",
+                    "Temperature": "Temperatuur in het laadpunt",
+                    "Voltage": "Instantane RMS waarde voedingsspanning"
+                }
+            }
+        },
+        "error": {
+            "auth": "Verkeerde gebruikersnaam of wachtwoord.",
+            "measurand": "Onbekende meetgrootheid"
+        },
+        "abort": {
+            "single_instance_allowed": "Slechts een exemplaar toegestaan."
+        }
+    }
+}
