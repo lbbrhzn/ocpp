@@ -27,7 +27,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     cfg_host = entry.data.get(CONF_HOST)
     cfg_port = entry.data.get(CONF_PORT)
 
-    central_sys = await CentralSystem.create(entry.data, host=cfg_host, port=cfg_port)
+    central_sys = await CentralSystem.create(
+        entry.entry_id, entry.data, host=cfg_host, port=cfg_port
+    )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
 
