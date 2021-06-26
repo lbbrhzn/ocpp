@@ -1,6 +1,6 @@
 """Sensor platform for ocpp."""
 
-from homeassistant.const import CONF_NAME, CONF_MONITORED_VARIABLES
+from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_NAME
 from homeassistant.helpers.entity import Entity
 
 from .const import CONDITIONS, DOMAIN, GENERAL, ICON
@@ -11,7 +11,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     central_sys = hass.data[DOMAIN][entry.entry_id]
 
     metrics = []
-    for measurand in entry.data[CONF_MONITORED_VARIABLES].split(','):
+    for measurand in entry.data[CONF_MONITORED_VARIABLES].split(","):
         metrics.append(
             ChargePointMetric(measurand, central_sys, "M", entry.data[CONF_NAME])
         )
@@ -41,6 +41,12 @@ class ChargePointMetric(Entity):
     def name(self):
         """Return the name of the sensor."""
         return self.prefix + "." + self.metric
+
+    @property
+    def unique_id(self):
+        """Return the unique id of this sensor."""
+        # This may need to be improved, perhaps use the vendor, model and serial number?
+        return ".".join(["sensor", self.central_sys.id, self.metric])
 
     @property
     def state(self):
