@@ -4,7 +4,7 @@ import logging
 import websockets
 
 from .charge_point import ChargePoint
-from .const import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL
+from .const import CONF_NAME, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,3 +69,14 @@ class CentralSystem:
         if self._connected_charger is not None:
             return self._connected_charger.get_unit(measurand)
         return None
+
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.id)},
+            "name": self.config[CONF_NAME],
+            "model": self.get_metric("Model"),
+            "manufacturer": self.get_metric("Vendor"),
+            "sw_version": self.get_metric("FW.Version"),
+            "suggested_area": "Garage",
+        }

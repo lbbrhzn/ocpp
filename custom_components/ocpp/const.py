@@ -24,7 +24,7 @@ SLEEP_TIME = 60
 BINARY_SENSOR = "binary_sensor"
 SENSOR = "sensor"
 SWITCH = "switch"
-PLATFORMS = [SENSOR]
+PLATFORMS = [SENSOR, SWITCH]
 
 # Ocpp SupportedFeatureProfiles
 FEATURE_PROFILE_CORE = "Core"
