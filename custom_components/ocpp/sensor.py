@@ -10,19 +10,20 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_sys = hass.data[DOMAIN][entry.entry_id]
 
-    metrics = []
+    entities = []
+
     for measurand in entry.data[CONF_MONITORED_VARIABLES].split(","):
-        metrics.append(
+        entities.append(
             ChargePointMetric(measurand, central_sys, "M", entry.data[CONF_NAME])
         )
     for condition in CONDITIONS:
-        metrics.append(
+        entities.append(
             ChargePointMetric(condition, central_sys, "S", entry.data[CONF_NAME])
         )
     for gen in GENERAL:
-        metrics.append(ChargePointMetric(gen, central_sys, "G", entry.data[CONF_NAME]))
+        entities.append(ChargePointMetric(gen, central_sys, "G", entry.data[CONF_NAME]))
 
-    async_add_devices(metrics)
+    async_add_devices(entities)
 
 
 class ChargePointMetric(Entity):
@@ -32,6 +33,7 @@ class ChargePointMetric(Entity):
         """Instantiate instance of a ChargePointMetrics."""
         self.metric = metric
         self.central_sys = central_sys
+        self._id = ".".join([DOMAIN, "sensor", self.central_sys.id, self.metric])
         self._genre = genre
         self.prefix = prefix
         self._state = None
@@ -40,13 +42,13 @@ class ChargePointMetric(Entity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        return self.prefix + "." + self.metric
+        return DOMAIN + "." + self.prefix + "." + self.metric
 
     @property
     def unique_id(self):
         """Return the unique id of this sensor."""
         # This may need to be improved, perhaps use the vendor, model and serial number?
-        return ".".join(["sensor", self.central_sys.id, self.metric])
+        return self._id
 
     @property
     def state(self):
@@ -67,6 +69,19 @@ class ChargePointMetric(Entity):
     def icon(self):
         """Return the icon to use in the frontend, if any."""
         return ICON
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return self.central_sys.device_info()
+
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes."""
+        return {
+            "unique_id": self.unique_id,
+            "integration": DOMAIN,
+        }
 
     def update(self):
         """Get the latest data and update the states."""
