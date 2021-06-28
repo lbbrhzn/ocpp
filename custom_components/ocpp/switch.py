@@ -80,7 +80,7 @@ class ChargePointSwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs):
         """Turn on device."""
         """For a pulse switch, reset to off afterwards"""
-        if self._purpose.get("pulse",False) == True:
+        if self._purpose.get("pulse",False) is True:
             resp = await self.central_sys.set_charger_state(self._purpose["on"])
             self._state = not resp
         else:
