@@ -153,10 +153,8 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status == AvailabilityStatus.accepted:
                 return True
-                break
             if resp.status == AvailabilityStatus.scheduled:
                 return True
-                break
             await asyncio.sleep(SLEEP_TIME)
 
     async def clear_profile(self):
@@ -189,7 +187,6 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status == RemoteStartStopStatus.accepted:
                 return True
-                break
             await asyncio.sleep(SLEEP_TIME)
 
     async def stop_transaction(self):
