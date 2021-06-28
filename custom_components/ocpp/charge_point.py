@@ -130,17 +130,32 @@ class ChargePoint(cp):
     async def become_operative(self):
         """Become operative."""
         while True:
+            resp = await self.set_availability()
+            if resp == True:
+                break
+            await asyncio.sleep(SLEEP_TIME)
+
+    async def set_availability(self, state: bool = True):
+        """Become operative."""
+        while True:
             """there could be an ongoing transaction. Terminate it"""
-            #            req = call.RemoteStopTransactionPayload(transaction_id=1234)
-            #            resp = await self.call(req)
+            if state == False and self._transactionId > 0:
+                await self.stop_transaction()
             """ change availability """
+            if state == True:
+                typ = AvailabilityType.operative
+            else:
+                typ = AvailabilityType.inoperative
+            
             req = call.ChangeAvailabilityPayload(
-                connector_id=0, type=AvailabilityType.operative
+                connector_id=0, type=typ
             )
             resp = await self.call(req)
             if resp.status == AvailabilityStatus.accepted:
+                return True
                 break
             if resp.status == AvailabilityStatus.scheduled:
+                return True
                 break
             await asyncio.sleep(SLEEP_TIME)
 
@@ -157,7 +172,6 @@ class ChargePoint(cp):
         """Start a Transaction."""
         while True:
             req = call.RemoteStartTransactionPayload(
-                connector_id=1,
                 id_tag="ID4",
                 charging_profile={
                     "chargingProfileId": 1,
@@ -165,25 +179,26 @@ class ChargePoint(cp):
                     "chargingProfileKind": "Relative",
                     "chargingProfilePurpose": "TxProfile",
                     "chargingSchedule": {
-                        "duration": 36000,
                         "chargingRateUnit": "W",
                         "chargingSchedulePeriod": [
-                            {"startPeriod": 0, "limit": {limit}}
+                            {"startPeriod": 0, "limit": 22000}
                         ],
                     },
                 },
             )
             resp = await self.call(req)
             if resp.status == RemoteStartStopStatus.accepted:
+                return True
                 break
             await asyncio.sleep(SLEEP_TIME)
 
     async def stop_transaction(self):
         """Request remote stop of current transaction."""
         while True:
-            req = call.RemoteStopTransactionPayload(transactionId=self._transactionId)
+            req = call.RemoteStopTransactionPayload(self._transactionId)
             resp = await self.call(req)
             if resp.status == RemoteStartStopStatus.accepted:
+                return True
                 break
             await asyncio.sleep(SLEEP_TIME)
 
@@ -193,6 +208,7 @@ class ChargePoint(cp):
             req = call.ResetPayload(typ)
             resp = await self.call(req)
             if resp.status == ResetStatus.accepted:
+                return True
                 break
             await asyncio.sleep(SLEEP_TIME)
 

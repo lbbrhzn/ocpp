@@ -4,8 +4,8 @@ import logging
 import websockets
 
 from .charge_point import ChargePoint
-from .const import CONF_NAME, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL, DOMAIN
-
+from .const import CONF_NAME, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_SUBPROTOCOL, DOMAIN, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET
+ 
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -69,6 +69,19 @@ class CentralSystem:
         if self._connected_charger is not None:
             return self._connected_charger.get_unit(measurand)
         return None
+        
+    async def set_charger_state(self, service_name: str, state: bool = True):
+        """Carry out requested service/state change on connected charger."""
+        if self._connected_charger is not None:
+            if service_name == SERVICE_AVAILABILITY:
+                resp= await self._connected_charger.set_availability(state)
+            if service_name == SERVICE_CHARGE_START:
+                resp= await self._connected_charger.start_transaction()
+            if service_name == SERVICE_CHARGE_STOP:
+                resp= await self._connected_charger.stop_transaction()
+            if service_name == SERVICE_RESET:
+                resp= await self._connected_charger.reset()
+        return resp
 
     def device_info(self):
         """Return device information."""
