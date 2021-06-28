@@ -196,7 +196,6 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status == RemoteStartStopStatus.accepted:
                 return True
-                break
             await asyncio.sleep(SLEEP_TIME)
 
     async def reset(self, typ: str = ResetType.soft):
@@ -206,7 +205,6 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status == ResetStatus.accepted:
                 return True
-                break
             await asyncio.sleep(SLEEP_TIME)
 
     async def get_configuration(self, key: str):
