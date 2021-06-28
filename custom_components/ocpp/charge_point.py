@@ -131,7 +131,7 @@ class ChargePoint(cp):
         """Become operative."""
         while True:
             resp = await self.set_availability()
-            if resp == True:
+            if resp is True:
                 break
             await asyncio.sleep(SLEEP_TIME)
 
@@ -139,10 +139,10 @@ class ChargePoint(cp):
         """Become operative."""
         while True:
             """there could be an ongoing transaction. Terminate it"""
-            if state == False and self._transactionId > 0:
+            if state is False and self._transactionId > 0:
                 await self.stop_transaction()
             """ change availability """
-            if state == True:
+            if state is True:
                 typ = AvailabilityType.operative
             else:
                 typ = AvailabilityType.inoperative

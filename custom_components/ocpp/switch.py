@@ -1,10 +1,9 @@
 """Switch platform for ocpp."""
 
-from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_NAME
-from homeassistant.helpers.entity import Entity
+from homeassistant.const import CONF_NAME
 from homeassistant.components.switch import SwitchEntity
 
-from .const import CONDITIONS, DOMAIN, GENERAL, ICON, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET
+from .const import DOMAIN, ICON, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET
 
 # At a minimum define switch name and on service call, pulse used to call a service once such as reset
 # metric and condition combination can be used to drive switch state, use default to set initial state to True 
