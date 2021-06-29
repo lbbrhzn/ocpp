@@ -10,8 +10,13 @@ CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_HOST = ha.CONF_HOST
 CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
 CONF_NAME = ha.CONF_NAME
+CONF_CPID = "cpid"
+CONF_CSID = "csid"
 CONF_PORT = ha.CONF_PORT
-DEFAULT_NAME = "ocpp"
+CONF_SUBPROTOCOL = "subprotocol"
+CONF_CPI = "charge_point_identity"
+DEFAULT_CSID = "central"
+DEFAULT_CPID = "charger"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9000
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
@@ -24,7 +29,7 @@ SLEEP_TIME = 60
 BINARY_SENSOR = "binary_sensor"
 SENSOR = "sensor"
 SWITCH = "switch"
-PLATFORMS = [SENSOR]
+PLATFORMS = [SENSOR, SWITCH]
 
 # Ocpp SupportedFeatureProfiles
 FEATURE_PROFILE_CORE = "Core"
@@ -88,8 +93,6 @@ CONDITIONS = [
 # Additional general information to report
 GENERAL = [
     "ID",
-    "Vendor",
-    "Model",
     "Serial",
     "FW.Version",
     "Features",
