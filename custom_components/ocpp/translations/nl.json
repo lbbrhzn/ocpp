@@ -5,14 +5,15 @@
                 "title": "OCPP Configuratie",
                 "description": "Voor hulp bij configuratie kijk op: https://github.com/lbbrhzn/ocpp",
                 "data": {
-                    "name": "Naam",
                     "host": "Host",
                     "port": "Poort",
+                    "csid": "Central system identifier",
+                    "cpid": "Charge point identifier",
                     "meter_interval": "Meetinterval (secondes)"
                 }
             },
             "measurands": {
-                "title": "OCPP Metingen",
+                "title": "OCPP Meetgrootheden",
                 "description": "Selecteer welke meetgrootheden weergegeven worden.",
                 "data": {
                     "Current.Export": "Instantane stroom van EV",

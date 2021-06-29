@@ -1,59 +1,81 @@
 """Sensor platform for ocpp."""
 
-from homeassistant.const import CONF_MONITORED_VARIABLES, CONF_NAME
+from homeassistant.const import CONF_MONITORED_VARIABLES
 from homeassistant.helpers.entity import Entity
 
-from .const import CONDITIONS, DOMAIN, GENERAL, ICON
+from .api import CentralSystem
+from .const import CONDITIONS, CONF_CPID, DOMAIN, GENERAL, ICON
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
-    central_sys = hass.data[DOMAIN][entry.entry_id]
+    central_system = hass.data[DOMAIN][entry.entry_id]
+    cp_id = entry.data[CONF_CPID]
 
     entities = []
 
     for measurand in entry.data[CONF_MONITORED_VARIABLES].split(","):
         entities.append(
-            ChargePointMetric(measurand, central_sys, "M", entry.data[CONF_NAME])
+            ChargePointMetric(
+                central_system,
+                cp_id,
+                measurand,
+                "M",
+            )
         )
     for condition in CONDITIONS:
         entities.append(
-            ChargePointMetric(condition, central_sys, "S", entry.data[CONF_NAME])
+            ChargePointMetric(
+                central_system,
+                cp_id,
+                condition,
+                "S",
+            )
         )
-    for gen in GENERAL:
-        entities.append(ChargePointMetric(gen, central_sys, "G", entry.data[CONF_NAME]))
+    for general in GENERAL:
+        entities.append(
+            ChargePointMetric(
+                central_system,
+                cp_id,
+                general,
+                "G",
+            )
+        )
 
-    async_add_devices(entities)
+    async_add_devices(entities, False)
 
 
 class ChargePointMetric(Entity):
     """Individual sensor for charge point metrics."""
 
-    def __init__(self, metric, central_sys, genre, prefix):
+    def __init__(
+        self,
+        central_system: CentralSystem,
+        cp_id: str,
+        metric: str,
+        genre: str,
+    ):
         """Instantiate instance of a ChargePointMetrics."""
+        self.central_system = central_system
+        self.cp_id = cp_id
         self.metric = metric
-        self.central_sys = central_sys
-        self._id = ".".join([DOMAIN, "sensor", self.central_sys.id, self.metric])
         self._genre = genre
-        self.prefix = prefix
         self._state = None
-        self.type = "connected_chargers"
 
     @property
     def name(self):
         """Return the name of the sensor."""
-        return DOMAIN + "." + self.prefix + "." + self.metric
+        return self.metric
 
     @property
     def unique_id(self):
         """Return the unique id of this sensor."""
-        # This may need to be improved, perhaps use the vendor, model and serial number?
-        return self._id
+        return ".".join([DOMAIN, self.cp_id, self.metric, "sensor"])
 
     @property
     def state(self):
         """Return the state of the sensor."""
-        return self.central_sys.get_metric(self.metric)
+        return self.central_system.get_metric(self.cp_id, self.metric)
 
     @property
     def genre(self):
@@ -63,7 +85,15 @@ class ChargePointMetric(Entity):
     @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""
-        return self.central_sys.get_unit(self.metric)
+        return self.central_system.get_unit(self.cp_id, self.metric)
+
+    @property
+    def should_poll(self):
+        """Return True if entity has to be polled for state.
+
+        False if entity pushes its state to HA.
+        """
+        return False
 
     @property
     def icon(self):
@@ -73,7 +103,10 @@ class ChargePointMetric(Entity):
     @property
     def device_info(self):
         """Return device information."""
-        return self.central_sys.device_info()
+        return {
+            "identifiers": {(DOMAIN, self.cp_id)},
+            "via_device": (DOMAIN, self.central_system.id),
+        }
 
     @property
     def extra_state_attributes(self):
