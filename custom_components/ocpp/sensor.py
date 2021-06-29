@@ -93,7 +93,7 @@ class ChargePointMetric(Entity):
 
         False if entity pushes its state to HA.
         """
-        return False
+        return True
 
     @property
     def icon(self):
