@@ -1,11 +1,14 @@
-"""Representation of a OCCP Charge Point."""
+"""Representation of a OCCP Entities."""
 import asyncio
 from datetime import datetime
 import logging
 import time
 from typing import Dict
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry
 import websockets
 
 from ocpp.exceptions import NotImplementedError
@@ -30,11 +33,21 @@ from ocpp.v16.enums import (
 )
 
 from .const import (
+    CONF_CPID,
+    CONF_CSID,
+    CONF_HOST,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_PORT,
+    CONF_SUBPROTOCOL,
+    DEFAULT_CPID,
+    DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_HOST,
     DEFAULT_MEASURAND,
+    DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
+    DEFAULT_SUBPROTOCOL,
     DOMAIN,
     FEATURE_PROFILE_REMOTE,
     HA_ENERGY_UNIT,
@@ -42,20 +55,96 @@ from .const import (
     SLEEP_TIME,
 )
 
-# from .exception import ConfigurationError
-
-_LOGGER = logging.getLogger(__name__)
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+
+
+class CentralSystem:
+    """Server for handling OCPP connections."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
+        """Instantiate instance of a CentralSystem."""
+        self.hass = hass
+        self.entry = entry
+        self.host = entry.data.get(CONF_HOST) or DEFAULT_HOST
+        self.port = entry.data.get(CONF_PORT) or DEFAULT_PORT
+        self.csid = entry.data.get(CONF_CSID) or DEFAULT_CSID
+        self.cpid = entry.data.get(CONF_CPID) or DEFAULT_CPID
+
+        self.subprotocol = entry.data.get(CONF_SUBPROTOCOL) or DEFAULT_SUBPROTOCOL
+        self._server = None
+        self.config = entry.data
+        self.id = entry.entry_id
+        self.charge_points = {}
+
+    @staticmethod
+    async def create(hass: HomeAssistant, entry: ConfigEntry):
+        """Create instance and start listening for OCPP connections on given port."""
+        self = CentralSystem(hass, entry)
+
+        server = await websockets.serve(
+            self.on_connect, self.host, self.port, subprotocols=self.subprotocol
+        )
+        self._server = server
+        return self
+
+    async def on_connect(self, websocket, path: str):
+        """Request handler executed for every new OCPP connection."""
+
+        _LOGGER.info(f"path={path}")
+        cp_id = path.strip("/")
+        try:
+            if cp_id not in self.charge_points:
+                _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
+                cp = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
+                self.charge_points[cp_id] = cp
+                await cp.start()
+            else:
+                _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
+                cp = self.charge_points[cp_id]
+                await cp.reconnect(websocket)
+        except Exception as e:
+            _LOGGER.info(f"Exception occurred:\n{e}")
+        finally:
+            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
+
+    def get_metric(self, cp_id: str, measurand: str):
+        """Return last known value for given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].get_metric(measurand)
+        return None
+
+    def get_unit(self, cp_id: str, measurand: str):
+        """Return unit of given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].get_unit(measurand)
+        return None
+
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.id)},
+        }
 
 
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
-    def __init__(self, id, connection, config, interval_meter_metrics: int = 10):
+    def __init__(
+        self,
+        id: str,
+        connection,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        central: CentralSystem,
+        interval_meter_metrics: int = 10,
+    ):
         """Instantiate instance of a ChargePoint."""
         super().__init__(id, connection)
         self.interval_meter_metrics = interval_meter_metrics
-        self.config = config
+        self.hass = hass
+        self.entry = entry
+        self.central = central
         self.status = "init"
         # Indicates if the charger requires a reboot to apply new
         # configuration.
@@ -82,17 +171,17 @@ class ChargePoint(cp):
             await self.configure("WebSocketPingInterval", "60")
             await self.configure(
                 "MeterValuesSampledData",
-                self.config[CONF_MONITORED_VARIABLES],
+                self.entry.data[CONF_MONITORED_VARIABLES],
             )
             await self.configure(
-                "MeterValueSampleInterval", str(self.config[CONF_METER_INTERVAL])
+                "MeterValueSampleInterval", str(self.entry.data[CONF_METER_INTERVAL])
             )
             #            await self.configure(
-            #                "StopTxnSampledData", ",".join(self.config[CONF_MONITORED_VARIABLES])
+            #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration("NumberOfConnectors")
             self._metrics["Connectors"] = resp.configuration_key[0]["value"]
-        #            await self.start_transaction()
+            #            await self.start_transaction()
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
@@ -273,16 +362,11 @@ class ChargePoint(cp):
             await asyncio.gather(super().start(), self.post_connect())
         except websockets.exceptions.ConnectionClosed as e:
             _LOGGER.debug(e)
-            return self._metrics
 
-    async def reconnect(self, last_metrics):
+    async def reconnect(self, connection):
         """Reconnect charge point."""
-        try:
-            self._metrics = last_metrics
-            await asyncio.gather(super().start())
-        except websockets.exceptions.ConnectionClosed as e:
-            _LOGGER.debug(e)
-            return self._metrics
+        self._connection = connection
+        await self.start()
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
@@ -323,14 +407,36 @@ class ChargePoint(cp):
         )
         return call_result.MeterValuesPayload()
 
+    async def async_update_device_info(self, boot_info: dict):
+        """Update device info asynchronuously."""
+
+        _LOGGER.debug("Updating device info %s: %s", self.id, boot_info)
+
+        dr = await device_registry.async_get_registry(self.hass)
+
+        serial = boot_info.get("charge_point_serial_number", None)
+
+        identifiers = {(DOMAIN, self.id)}
+        if serial is not None:
+            identifiers.add((DOMAIN, serial))
+
+        dr.async_get_or_create(
+            config_entry_id=self.entry.entry_id,
+            identifiers=identifiers,
+            name=self.id,
+            manufacturer=boot_info.get("charge_point_vendor", None),
+            model=boot_info.get("charge_point_model", None),
+            sw_version=boot_info.get("firmware_version", None),
+        )
+
     @on(Action.BootNotification)
-    def on_boot_notification(self, charge_point_model, charge_point_vendor, **kwargs):
+    def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
-        self._metrics["Model"] = charge_point_model
-        self._metrics["Vendor"] = charge_point_vendor
-        self._metrics["FW.Version"] = kwargs.get("firmware_version")
-        self._metrics["Serial"] = kwargs.get("charge_point_serial_number")
-        _LOGGER.debug("Additional boot info for %s: %s", self.id, kwargs)
+
+        _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+
+        asyncio.create_task(self.async_update_device_info(kwargs))
+
         return call_result.BootNotificationPayload(
             current_time=datetime.utcnow().isoformat(),
             interval=30,

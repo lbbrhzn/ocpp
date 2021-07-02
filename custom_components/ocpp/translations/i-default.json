@@ -2,12 +2,13 @@
     "config": {
         "step": {
             "user": {
-                "title": "OCCP Configuration",
+                "title": "OCPP Configuration",
                 "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
                 "data": {
-                    "name": "Name",
-                    "host": "Host",
-                    "port": "Port",
+                    "host": "Central system host address",
+                    "port": "Central system port number",
+                    "csid": "Central system identity",
+                    "cpid": "Charge point identity",
                     "meter_interval": "Meter interval (seconds)"
                 }
             },

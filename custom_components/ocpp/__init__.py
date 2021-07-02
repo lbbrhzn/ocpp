@@ -5,9 +5,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
+from homeassistant.helpers import device_registry
 
-from .central_system import CentralSystem
-from .const import CONF_HOST, CONF_PORT, DOMAIN, PLATFORMS
+from .api import CentralSystem
+from .const import CONF_CPID, CONF_CSID, DOMAIN, PLATFORMS
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
@@ -19,16 +20,30 @@ async def async_setup(hass: HomeAssistant, config: Config):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Set up this integration using UI."""
+    """Set up this integration from config entry."""
     if hass.data.get(DOMAIN) is None:
         hass.data.setdefault(DOMAIN, {})
         _LOGGER.info(entry.data)
 
-    cfg_host = entry.data.get(CONF_HOST)
-    cfg_port = entry.data.get(CONF_PORT)
+    central_sys = await CentralSystem.create(hass, entry)
 
-    central_sys = await CentralSystem.create(
-        entry.entry_id, entry.data, host=cfg_host, port=cfg_port
+    dr = await device_registry.async_get_registry(hass)
+
+    """ Create Central System Device """
+    dr.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.data[CONF_CSID])},
+        name=entry.data[CONF_CSID],
+        model="OCPP Central System",
+    )
+
+    """ Create Charge Point Device """
+    dr.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.data[CONF_CPID])},
+        name=entry.data[CONF_CPID],
+        default_model="OCPP Charge Point",
+        via_device=((DOMAIN), central_sys.id),
     )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
