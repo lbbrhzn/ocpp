@@ -65,7 +65,7 @@ class ChargePointMetric(Entity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        return self.metric
+        return ".".join([DOMAIN, self.cp_id, self.metric])
 
     @property
     def unique_id(self):
