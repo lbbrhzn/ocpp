@@ -275,6 +275,7 @@ class ChargePoint(cp):
         req = call.RemoteStartTransactionPayload(
             connector_id=1,
             id_tag=self._metrics["ID"],
+            """ more changes required to support SmartCharging"""
 #            charging_profile={
 #                "chargingProfileId": 1,
 #                "stackLevel": 999,

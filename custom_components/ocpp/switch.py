@@ -41,7 +41,8 @@ class ChargePointSwitch(SwitchEntity):
         else:
             self._state = False
         self._id = ".".join(["switch", DOMAIN, self.cp_id , self._purpose["name"]])
-        self.entity_id = "switch." + "_".join([DOMAIN , self.cp_id , self._purpose["name"]])
+        self._name =  ".".join([self.cp_id, self._purpose["name"]])
+        self.entity_id = "switch." + "_".join([self.cp_id , self._purpose["name"]])
 
     @property
     def unique_id(self):
@@ -92,7 +93,7 @@ class ChargePointSwitch(SwitchEntity):
     @property
     def name(self):
         """Return the name of this entity."""
-        return DOMAIN + "." + self.cp_id + "." + self._purpose["name"]
+        return self._name
 
     @property
     def icon(self):
