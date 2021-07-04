@@ -299,7 +299,7 @@ class ChargePoint(cp):
 
     async def stop_transaction(self):
         """Request remote stop of current transaction."""
-        req = call.RemoteStopTransactionPayload(transactionId=self._transactionId)
+        req = call.RemoteStopTransactionPayload(transaction_id=self._transactionId)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
