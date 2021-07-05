@@ -21,6 +21,10 @@ from ocpp.v16.enums import (
     AvailabilityStatus,
     AvailabilityType,
     ChargePointStatus,
+    ChargingRateUnitType,
+    ChargingProfileKindType,
+    ChargingProfilePurposeType,
+    ChargingProfileStatus,
     ClearChargingProfileStatus,
     ConfigurationStatus,
     DataTransferStatus,
@@ -30,6 +34,7 @@ from ocpp.v16.enums import (
     ResetType,
     TriggerMessageStatus,
     UnitOfMeasure,
+    UnlockStatus,
 )
 
 from .const import (
@@ -50,10 +55,11 @@ from .const import (
     DEFAULT_SUBPROTOCOL,
     DOMAIN,
     FEATURE_PROFILE_REMOTE,
+    FEATURE_PROFILE_SMART,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     SLEEP_TIME,
-    SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET,
+    SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET, SERVICE_UNLOCK,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -95,7 +101,7 @@ class CentralSystem:
         _LOGGER.info(f"path={path}")
         cp_id = path.strip("/")
         try:
-            if cp_id not in self.charge_points:
+            if self.cpid not in self.charge_points:
                 _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
                 cp = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
                 self.charge_points[self.cpid] = cp
@@ -132,6 +138,8 @@ class CentralSystem:
                 resp= await self.charge_points[cp_id].stop_transaction()
             if service_name == SERVICE_RESET:
                 resp= await self.charge_points[cp_id].reset()
+            if service_name == SERVICE_UNLOCK:
+                resp= await self.charge_points[cp_id].unlock()
         else:
             resp = False
         return resp
@@ -245,6 +253,43 @@ class ChargePoint(cp):
             _LOGGER.debug("Failed with response: %s", resp.status)
             return False
             
+    async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
+        """Set a charging profile with defined limit."""
+        if FEATURE_PROFILE_SMART in self._features_supported:
+            resp = await self.get_configuration("ChargingScheduleAllowedChargingRateUnit")
+            _LOGGER.debug("Charger supports setting the following units: %s", resp.configuration_key[0]["value"])
+            _LOGGER.debug("If more than one unit supported default unit is amps")
+            if "current" in resp.configuration_key[0]["value"].lower():
+                lim = limit_amps
+                units = ChargingRateUnitType.amps
+            else:
+                lim = limit_watts
+                units = ChargingRateUnitType.watts
+            req = call.SetChargingProfilePayload(
+                connector_id=0,
+                cs_charging_profiles={
+                    "chargingProfileId": 8,
+                    "stackLevel": 999,
+                    "chargingProfileKind": ChargingProfileKindType.relative,
+                    "chargingProfilePurpose": ChargingProfilePurposeType.tx_profile,
+                    "chargingSchedule": {
+                        "chargingRateUnit": units,
+                        "chargingSchedulePeriod": [
+                            {"startPeriod": 0, "limit": lim}
+                        ],
+                    },
+                },
+            )
+        else:
+            _LOGGER.debug("Smart charging is not supported by this charger")
+            return False
+        resp = await self.call(req)
+        if resp.status == ChargingProfileStatus.accepted:
+            return True
+        else:
+            _LOGGER.debug("Failed with response: %s", resp.status)
+            return False
+            
     async def set_availability(self, state: bool = True):
         """Become operative."""
         """there could be an ongoing transaction. Terminate it"""
@@ -266,30 +311,42 @@ class ChargePoint(cp):
             _LOGGER.debug("Failed with response: %s", resp.status)
             return False
 
-    async def start_transaction(self, limit: int = 22000):
+    async def start_transaction(self, limit_amps: int = 32, limit_watts: int = 22000):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration("AuthorizeRemoteTxRequests")
         if resp.configuration_key[0]["value"].lower() == "true":
             await self.configure("AuthorizeRemoteTxRequests","false")
-        req = call.RemoteStartTransactionPayload(
-            connector_id=1,
-            id_tag=self._metrics["ID"],
-            """ more changes required to support SmartCharging"""
-#            charging_profile={
-#                "chargingProfileId": 1,
-#                "stackLevel": 999,
-#                "chargingProfileKind": "Relative",
-#                "chargingProfilePurpose": "TxProfile",
-#                "chargingSchedule": {
-#                    "duration": 36000,
-#                    "chargingRateUnit": "W",
-#                    "chargingSchedulePeriod": [
-#                        {"startPeriod": 0, "limit": {limit}}
-#                    ],
-#                },
-#            },
-        )
+        if FEATURE_PROFILE_SMART in self._features_supported:
+            resp = await self.get_configuration("ChargingScheduleAllowedChargingRateUnit")
+            _LOGGER.debug("Charger supports setting the following units: %s", resp.configuration_key[0]["value"])
+            _LOGGER.debug("If more than one unit supported default unit is amps")
+            if "current" in resp.configuration_key[0]["value"].lower():
+                lim = limit_amps
+                units = ChargingRateUnitType.amps
+            else:
+                lim = limit_watts
+                units = ChargingRateUnitType.watts
+            req = call.RemoteStartTransactionPayload(
+                connector_id=1,
+                id_tag=self._metrics["ID"],
+                charging_profile={
+                    "chargingProfileId": 1,
+                    "stackLevel": 999,
+                    "chargingProfileKind": ChargingProfileKindType.relative,
+                    "chargingProfilePurpose": ChargingProfilePurposeType.tx_profile,
+                    "chargingSchedule": {
+                        "chargingRateUnit": units,
+                        "chargingSchedulePeriod": [
+                            {"startPeriod": 0, "limit": lim}
+                        ],
+                    },
+                },
+            )
+        else:
+            req = call.RemoteStartTransactionPayload(
+                connector_id=1,
+                id_tag=self._metrics["ID"])
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -312,6 +369,16 @@ class ChargePoint(cp):
         req = call.ResetPayload(typ)
         resp = await self.call(req)
         if resp.status == ResetStatus.accepted:
+            return True
+        else:
+            _LOGGER.debug("Failed with response: %s", resp.status)
+            return False
+            
+    async def unlock(self, connector_id: int = 1):
+        """Unlock charger if requested."""
+        req = call.UnlockConnectorPayload(connector_id)
+        resp = await self.call(req)
+        if resp.status == UnlockStatus.unlocked:
             return True
         else:
             _LOGGER.debug("Failed with response: %s", resp.status)
