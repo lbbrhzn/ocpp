@@ -8,13 +8,16 @@ This is a home assistant integration for a simple OCPP server (central system) f
 
 ## Installation
 
-1. In home assistant, select Configuration / Integrations / Add Integration.
-2. Search for 'OCPP' and add the integration.
-3. Configure the Central System settings. The default port '0.0.0.0' will listen to all interfaces on your home assistant server.
-5. Select which measurands you would like to become available as sensor entities.
-6. After the integration has been added, click on devices and select the Charge Point device to see the device info.
-7. From the device info you can add the entities to a lovelace dashboard.
-9. Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000 )
+1. **Add the OCPP integration**
+- In Home Assistant, select Configuration / Integrations / Add Integration. Search for 'OCPP' and add the integration.
+2. **Configure the Central System**
+- The default port '0.0.0.0' will listen to all interfaces on your home assistant server.
+- Select which measurands you would like to become available as sensor entities.
+3. **Configure your charger**
+- Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000). This is charger specific, so consult your manual! 
+4. **Add the entities to your dashboard**
+- In Home Assistant, click on the the Charge Point device see the device info.
+- Add the the entities to a lovelace dashboard using the button
 
 ## Screenshot
 
