@@ -4,14 +4,14 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 
 from .api import CentralSystem
-from .const import CONF_CPID, DOMAIN, GENERAL, ICON, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET
+from .const import CONF_CPID, DOMAIN, GENERAL, ICON, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET, SERVICE_UNLOCK
 
 # At a minimum define switch name and on service call, pulse used to call a service once such as reset
 # metric and condition combination can be used to drive switch state, use default to set initial state to True 
 SWITCH_CHARGE = {"name":"Charge_Control","on":SERVICE_CHARGE_START, "off":SERVICE_CHARGE_STOP, "metric": "Status", "condition":"Charging"}
 SWITCH_AVAILABILITY = {"name":"Availability","on":SERVICE_AVAILABILITY, "off":SERVICE_AVAILABILITY, "default": True}
 SWITCH_RESET = {"name":"Reset","on":SERVICE_RESET, "pulse": True}
-
+SWITCH_UNLOCK = {"name":"Unlock","on":SERVICE_UNLOCK, "pulse": True}
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
@@ -23,6 +23,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_CHARGE))
     entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_AVAILABILITY))
     entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_RESET))
+    entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_UNLOCK))
 
     async_add_devices(entities, False)
 

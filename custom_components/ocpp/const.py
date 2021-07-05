@@ -43,8 +43,9 @@ FEATURE_PROFILE_AUTH = "LocalAuthListManagement"
 SERVICE_CHARGE_START = "start_transaction"
 SERVICE_CHARGE_STOP = "stop_transaction"
 SERVICE_AVAILABILITY = "availability"
-SERVICE_SET_CHARGE_RATE = "max_charge_rate"
+SERVICE_SET_CHARGE_RATE = "set_charge_rate"
 SERVICE_RESET = "reset"
+SERVICE_UNLOCK = "unlock"
 
 # Ocpp supported measurands
 MEASURANDS = [
