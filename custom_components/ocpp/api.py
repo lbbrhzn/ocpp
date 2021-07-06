@@ -1,6 +1,6 @@
 """Representation of a OCCP Entities."""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import time
 from typing import Dict
@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry
+import voluptuous as vol
 import websockets
 
 from ocpp.exceptions import NotImplementedError
@@ -393,19 +394,21 @@ class ChargePoint(cp):
         else:
             _LOGGER.debug("Failed with response: %s", resp.status)
             return False
-            
+
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
         """Update charger with new firmware if available."""
         """where firmware_url is the http or https url of the new firmware"""
         """and wait_time is hours from now to wait before install"""
         if FEATURE_PROFILE_FW in self._features_supported:
-            schema = Schema(Url())
+            schema = vol.Schema(vol.Url())
             try:
                 url = schema(firmware_url)
                 raise AssertionError("Multiple invalid not raised")
-            except MultipleInvalid as e:
+            except vol.MultipleInvalid as e:
                 _LOGGER.debug("Failed to parse url: %s", e)
-            update_time = (datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)).isoformat()
+            update_time = (
+                datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)
+            ).isoformat()
             req = call.UpdateFirmwarePayload(location=url, retrieve_date=update_time)
             resp = await self.call(req)
             _LOGGER.debug("Response: %s", resp)
