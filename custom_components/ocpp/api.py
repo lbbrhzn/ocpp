@@ -536,6 +536,12 @@ class ChargePoint(cp):
 
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
 
+        # update metrics
+        self._metrics["Model"] = kwargs.get("charge_point_model", None)
+        self._metrics["Vendor"] = kwargs.get("charge_point_vendor", None)
+        self._metrics["FW.Version"] = kwargs.get("firmware_version", None)
+        self._metrics["Serial"] = kwargs.get("charge_point_serial_number", None)
+
         asyncio.create_task(self.async_update_device_info(kwargs))
 
         return call_result.BootNotificationPayload(

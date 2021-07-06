@@ -94,6 +94,8 @@ CONDITIONS = [
 # Additional general information to report
 GENERAL = [
     "ID",
+    "Model",
+    "Vendor",
     "Serial",
     "FW.Version",
     "Features",
