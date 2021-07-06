@@ -4,14 +4,35 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 
 from .api import CentralSystem
-from .const import CONF_CPID, DOMAIN, GENERAL, ICON, SERVICE_CHARGE_START, SERVICE_CHARGE_STOP, SERVICE_AVAILABILITY, SERVICE_RESET, SERVICE_UNLOCK
+from .const import (
+    CONF_CPID,
+    DOMAIN,
+    ICON,
+    SERVICE_AVAILABILITY,
+    SERVICE_CHARGE_START,
+    SERVICE_CHARGE_STOP,
+    SERVICE_RESET,
+    SERVICE_UNLOCK,
+)
 
 # At a minimum define switch name and on service call, pulse used to call a service once such as reset
-# metric and condition combination can be used to drive switch state, use default to set initial state to True 
-SWITCH_CHARGE = {"name":"Charge_Control","on":SERVICE_CHARGE_START, "off":SERVICE_CHARGE_STOP, "metric": "Status", "condition":"Charging"}
-SWITCH_AVAILABILITY = {"name":"Availability","on":SERVICE_AVAILABILITY, "off":SERVICE_AVAILABILITY, "default": True}
-SWITCH_RESET = {"name":"Reset","on":SERVICE_RESET, "pulse": True}
-SWITCH_UNLOCK = {"name":"Unlock","on":SERVICE_UNLOCK, "pulse": True}
+# metric and condition combination can be used to drive switch state, use default to set initial state to True
+SWITCH_CHARGE = {
+    "name": "Charge_Control",
+    "on": SERVICE_CHARGE_START,
+    "off": SERVICE_CHARGE_STOP,
+    "metric": "Status",
+    "condition": "Charging",
+}
+SWITCH_AVAILABILITY = {
+    "name": "Availability",
+    "on": SERVICE_AVAILABILITY,
+    "off": SERVICE_AVAILABILITY,
+    "default": True,
+}
+SWITCH_RESET = {"name": "Reset", "on": SERVICE_RESET, "pulse": True}
+SWITCH_UNLOCK = {"name": "Unlock", "on": SERVICE_UNLOCK, "pulse": True}
+
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
@@ -41,9 +62,9 @@ class ChargePointSwitch(SwitchEntity):
             self._state = bool(self._purpose["default"])
         else:
             self._state = False
-        self._id = ".".join(["switch", DOMAIN, self.cp_id , self._purpose["name"]])
-        self._name =  ".".join([self.cp_id, self._purpose["name"]])
-        self.entity_id = "switch." + "_".join([self.cp_id , self._purpose["name"]])
+        self._id = ".".join(["switch", DOMAIN, self.cp_id, self._purpose["name"]])
+        self._name = ".".join([self.cp_id, self._purpose["name"]])
+        self.entity_id = "switch." + "_".join([self.cp_id, self._purpose["name"]])
 
     @property
     def unique_id(self):
@@ -65,15 +86,19 @@ class ChargePointSwitch(SwitchEntity):
                 self._state = True
             else:
                 self._state = False
-        return self._state # type: ignore [no-any-return]
+        return self._state  # type: ignore [no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """For a pulse switch, reset to off afterwards"""
-        if self._purpose.get("pulse",False) == True:
-            resp = await self.central_system.set_charger_state(self.cp_id, self._purpose["on"])
+        """For a pulse switch, reset to off afterwards."""
+        if self._purpose.get("pulse", False) is True:
+            resp = await self.central_system.set_charger_state(
+                self.cp_id, self._purpose["on"]
+            )
             self._state = not resp
         else:
-            self._state = await self.central_system.set_charger_state(self.cp_id, self._purpose["on"])
+            self._state = await self.central_system.set_charger_state(
+                self.cp_id, self._purpose["on"]
+            )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
@@ -81,9 +106,13 @@ class ChargePointSwitch(SwitchEntity):
         if self._purpose.get("off") is None:
             resp = True
         elif self._purpose["off"] == self._purpose["on"]:
-            resp = await self.central_system.set_charger_state(self.cp_id, self._purpose["off"], False)
+            resp = await self.central_system.set_charger_state(
+                self.cp_id, self._purpose["off"], False
+            )
         else:
-            resp = await self.central_system.set_charger_state(self.cp_id, self._purpose["off"])
+            resp = await self.central_system.set_charger_state(
+                self.cp_id, self._purpose["off"]
+            )
         self._state = not resp
 
     @property
