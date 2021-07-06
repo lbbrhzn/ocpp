@@ -1,6 +1,6 @@
 """Representation of a OCCP Entities."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import time
 from typing import Dict
@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_SUBPROTOCOL,
     DOMAIN,
+    FEATURE_PROFILE_FW,
     FEATURE_PROFILE_REMOTE,
     FEATURE_PROFILE_SMART,
     HA_ENERGY_UNIT,
@@ -392,6 +393,26 @@ class ChargePoint(cp):
         else:
             _LOGGER.debug("Failed with response: %s", resp.status)
             return False
+            
+    async def update_firmware(self, firmware_url: str, wait_time: int = 0):
+        """Update charger with new firmware if available."""
+        """where firmware_url is the http or https url of the new firmware"""
+        """and wait_time is hours from now to wait before install"""
+        if FEATURE_PROFILE_FW in self._features_supported:
+            schema = Schema(Url())
+            try:
+                url = schema(firmware_url)
+                raise AssertionError("Multiple invalid not raised")
+            except MultipleInvalid as e:
+                _LOGGER.debug("Failed to parse url: %s", e)
+            update_time = (datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)).isoformat()
+            req = call.UpdateFirmwarePayload(location=url, retrieve_date=update_time)
+            resp = await self.call(req)
+            _LOGGER.debug("Response: %s", resp)
+            return True
+        else:
+            _LOGGER.debug("Charger does not support ocpp firmware updating")
+            return False
 
     async def get_configuration(self, key: str = ""):
         """Get Configuration of charger for supported keys."""
@@ -545,7 +566,7 @@ class ChargePoint(cp):
         asyncio.create_task(self.async_update_device_info(kwargs))
 
         return call_result.BootNotificationPayload(
-            current_time=datetime.utcnow().isoformat(),
+            current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
             status=RegistrationStatus.accepted,
         )
@@ -620,7 +641,7 @@ class ChargePoint(cp):
     @on(Action.Heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
         self._metrics["Heartbeat"] = now
         self._units["Heartbeat"] = "time"
         return call_result.HeartbeatPayload(current_time=now)
