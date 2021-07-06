@@ -7,14 +7,23 @@ This is a home assistant integration for chargers that support the Open Charge P
 
 ## Installation
 
-1. **Add the OCPP integration**
+
+1. **Add the OCPP integration to HACS**
+- If you have not yet installed HACS, go get it at https://hacs.xyz/ and walk through the installation and configuration.
+- Go to the settings and add  this integration through the custom repositories:
+
+![image](https://user-images.githubusercontent.com/13691266/124573829-2e42ad80-de4a-11eb-8ac7-5d141f237608.png)
+- Add the url of this git repo: https://github.com/lbbrhzn/ocpp
+- Restart Home Assistant!
+- Install the new integration through *Configuration -> Integrations* in HA (see below).
+2. **Add the OCPP integration**
 - In Home Assistant, select Configuration / Integrations / Add Integration. Search for 'OCPP' and add the integration.
-2. **Configure the Central System**
+3. **Configure the Central System**
 - The default port '0.0.0.0' will listen to all interfaces on your home assistant server.
 - Select which measurands you would like to become available as sensor entities.
-3. **Configure your charger**
+4. **Configure your charger**
 - Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000). This is charger specific, so consult your manual. 
-4. **Add the entities to your dashboard**
+5. **Add the entities to your dashboard**
 - In Home Assistant, click on the the Charge Point device see the device info.
 - Add the the entities to a lovelace dashboard using the button
 
