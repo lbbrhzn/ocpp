@@ -499,24 +499,30 @@ class ChargePoint(cp):
             for sampled_value in bucket["sampled_value"]:
                 if "measurand" in sampled_value:
                     self._metrics[sampled_value["measurand"]] = sampled_value["value"]
+                    self._metrics[sampled_value["measurand"]] = round(
+                        float(self._metrics[sampled_value["measurand"]]), 1
+                    )
+                    if "unit" in sampled_value:
+                        self._units[sampled_value["measurand"]] = sampled_value["unit"]
+                        if (
+                            self._units[sampled_value["measurand"]]
+                            == DEFAULT_POWER_UNIT
+                        ):
+                            self._metrics[sampled_value["measurand"]] = (
+                                float(self._metrics[sampled_value["measurand"]]) / 1000
+                            )
+                            self._units[sampled_value["measurand"]] = HA_POWER_UNIT
+                        if (
+                            self._units[sampled_value["measurand"]]
+                            == DEFAULT_ENERGY_UNIT
+                        ):
+                            self._metrics[sampled_value["measurand"]] = (
+                                float(self._metrics[sampled_value["measurand"]]) / 1000
+                            )
+                            self._units[sampled_value["measurand"]] = HA_ENERGY_UNIT
                 if len(sampled_value.keys()) == 1:  # for backwards compatibility
                     self._metrics[DEFAULT_MEASURAND] = sampled_value["value"]
                     self._units[DEFAULT_MEASURAND] = DEFAULT_ENERGY_UNIT
-                if "unit" in sampled_value:
-                    self._units[sampled_value["measurand"]] = sampled_value["unit"]
-                    if self._units[sampled_value["measurand"]] == DEFAULT_POWER_UNIT:
-                        self._metrics[sampled_value["measurand"]] = (
-                            float(self._metrics[sampled_value["measurand"]]) / 1000
-                        )
-                        self._units[sampled_value["measurand"]] = HA_POWER_UNIT
-                    if self._units[sampled_value["measurand"]] == DEFAULT_ENERGY_UNIT:
-                        self._metrics[sampled_value["measurand"]] = (
-                            float(self._metrics[sampled_value["measurand"]]) / 1000
-                        )
-                        self._units[sampled_value["measurand"]] = HA_ENERGY_UNIT
-                self._metrics[sampled_value["measurand"]] = round(
-                    float(self._metrics[sampled_value["measurand"]]), 1
-                )
         if "Meter.Start" not in self._metrics:
             self._metrics["Meter.Start"] = self._metrics[DEFAULT_MEASURAND]
         if "Transaction.Id" not in self._metrics:
