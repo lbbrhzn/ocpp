@@ -504,12 +504,18 @@ class ChargePoint(cp):
                     )
                     if "unit" in sampled_value:
                         self._units[sampled_value["measurand"]] = sampled_value["unit"]
-                        if self._units[sampled_value["measurand"]] == DEFAULT_POWER_UNIT:
+                        if (
+                            self._units[sampled_value["measurand"]]
+                            == DEFAULT_POWER_UNIT
+                        ):
                             self._metrics[sampled_value["measurand"]] = (
                                 float(self._metrics[sampled_value["measurand"]]) / 1000
                             )
                             self._units[sampled_value["measurand"]] = HA_POWER_UNIT
-                        if self._units[sampled_value["measurand"]] == DEFAULT_ENERGY_UNIT:
+                        if (
+                            self._units[sampled_value["measurand"]]
+                            == DEFAULT_ENERGY_UNIT
+                        ):
                             self._metrics[sampled_value["measurand"]] = (
                                 float(self._metrics[sampled_value["measurand"]]) / 1000
                             )
