@@ -29,6 +29,7 @@ from ocpp.v16.enums import (
     ClearChargingProfileStatus,
     ConfigurationStatus,
     DataTransferStatus,
+    Measurand,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -588,12 +589,12 @@ class ChargePoint(cp):
             status == ChargePointStatus.suspended_ev
             or status == ChargePointStatus.suspended_evse
         ):
-            if "Current.Import" in self._metrics:
-                self._metrics["Current.Import"] = 0
-            if "Power.Active.Import" in self._metrics:
-                self._metrics["Power.Active.Import"] = 0
-            if "Power.Reactive.Import" in self._metrics:
-                self._metrics["Power.Reactive.Import"] = 0
+            if Measurand.current_import in self._metrics:
+                self._metrics[Measurand.current_import] = 0
+            if Measurand.power_active_import in self._metrics:
+                self._metrics[Measurand.power_active_import] = 0
+            if Measurand.power_reactive_import in self._metrics:
+                self._metrics[Measurand.power_reactive_import] = 0
         self._metrics["Error.Code"] = error_code
         return call_result.StatusNotificationPayload()
 
@@ -631,12 +632,12 @@ class ChargePoint(cp):
             self._metrics["Session.Energy"] = round(
                 int(meter_stop) / 1000 - float(self._metrics["Meter.Start"]), 1
             )
-        if "Current.Import" in self._metrics:
-            self._metrics["Current.Import"] = 0
-        if "Power.Active.Import" in self._metrics:
-            self._metrics["Power.Active.Import"] = 0
-        if "Power.Reactive.Import" in self._metrics:
-            self._metrics["Power.Reactive.Import"] = 0
+        if Measurand.current_import in self._metrics:
+            self._metrics[Measurand.current_import] = 0
+        if Measurand.power_active_import in self._metrics:
+            self._metrics[Measurand.power_active_import] = 0
+        if Measurand.power_reactive_import in self._metrics:
+            self._metrics[Measurand.power_reactive_import] = 0
         return call_result.StopTransactionPayload(
             id_tag_info={"status": AuthorizationStatus.accepted}
         )

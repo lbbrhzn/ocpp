@@ -1,7 +1,7 @@
 """Define constants for OCPP integration."""
 import homeassistant.const as ha
 
-from ocpp.v16.enums import UnitOfMeasure
+from ocpp.v16.enums import Measurand, UnitOfMeasure
 
 DOMAIN = "ocpp"
 CONF_METER_INTERVAL = "meter_interval"
@@ -49,30 +49,30 @@ SERVICE_UNLOCK = "unlock"
 
 # Ocpp supported measurands
 MEASURANDS = [
-    "Current.Export",
-    "Current.Import",
-    "Current.Offered",
-    "Energy.Active.Export.Register",
-    "Energy.Active.Import.Register",
-    "Energy.Reactive.Export.Register",
-    "Energy.Reactive.Import.Register",
-    "Energy.Active.Export.Interval",
-    "Energy.Active.Import.Interval",
-    "Energy.Reactive.Export.Interval",
-    "Energy.Reactive.Import.Interval",
-    "Frequency",
-    "Power.Active.Export",
-    "Power.Active.Import",
-    "Power.Factor",
-    "Power.Offered",
-    "Power.Reactive.Export",
-    "Power.Reactive.Import",
-    "RPM",
-    "SoC",
-    "Temperature",
-    "Voltage",
+    Measurand.current_export,
+    Measurand.current_import,
+    Measurand.current_offered,
+    Measurand.energy_active_export_register,
+    Measurand.energy_active_import_register,
+    Measurand.energy_reactive_export_register,
+    Measurand.energy_reactive_import_register,
+    Measurand.energy_active_export_interval,
+    Measurand.energy_active_import_interval,
+    Measurand.energy_reactive_export_interval,
+    Measurand.energy_reactive_import_interval,
+    Measurand.frequency,
+    Measurand.power_active_export,
+    Measurand.power_active_import,
+    Measurand.power_factor,
+    Measurand.power_offered,
+    Measurand.power_reactive_export,
+    Measurand.power_reactive_import,
+    Measurand.rpm,
+    Measurand.soc,
+    Measurand.temperature,
+    Measurand.voltage,
 ]
-DEFAULT_MEASURAND = "Energy.Active.Import.Register"
+DEFAULT_MEASURAND = Measurand.energy_active_import_register
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
 DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh
 DEFAULT_POWER_UNIT = UnitOfMeasure.w
