@@ -31,7 +31,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
     {
         vol.Required(m, default=(True if m == DEFAULT_MEASURAND else False)): bool
-        for m in MEASURANDS
+        for m in ",".join(MEASURANDS)
     }
 )
 
