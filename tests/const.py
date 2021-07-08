@@ -7,4 +7,3 @@ MOCK_CONFIG = {
     CONF_PORT: 9123,
 }
 DEFAULT_NAME = "test"
-HANDLER = "test"

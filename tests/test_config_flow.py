@@ -13,7 +13,7 @@ from custom_components.ocpp.const import (
     SWITCH,
 )
 
-from .const import HANDLER, MOCK_CONFIG
+from .const import MOCK_CONFIG
 
 
 # This fixture bypasses the actual setup of the integration
@@ -36,7 +36,7 @@ async def test_successful_config_flow(hass, bypass_get_data):
     """Test a successful config flow."""
     # Initialize a config flow
     result = await hass.config_entries.flow.async_init(
-        HANDLER, context={"source": config_entries.SOURCE_USER}
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
     # Check that the config flow shows the user form as the first step
@@ -65,7 +65,7 @@ async def test_failed_config_flow(hass, error_on_get_data):
     """Test a failed config flow due to credential validation failure."""
 
     result = await hass.config_entries.flow.async_init(
-        HANDLER, context={"source": config_entries.SOURCE_USER}
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
     assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
