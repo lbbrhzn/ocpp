@@ -3,6 +3,8 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 
+from ocpp.v16.enums import AvailabilityStatus
+
 from .api import CentralSystem
 from .const import (
     CONF_CPID,
@@ -22,13 +24,15 @@ SWITCH_CHARGE = {
     "on": SERVICE_CHARGE_START,
     "off": SERVICE_CHARGE_STOP,
     "metric": "Status",
-    "condition": "Charging",
+    "condition": AvailabilityStatus.charging,
 }
 SWITCH_AVAILABILITY = {
     "name": "Availability",
     "on": SERVICE_AVAILABILITY,
     "off": SERVICE_AVAILABILITY,
     "default": True,
+    "metric": "Status",
+    "condition": AvailabilityStatus.available,
 }
 SWITCH_RESET = {"name": "Reset", "on": SERVICE_RESET, "pulse": True}
 SWITCH_UNLOCK = {"name": "Unlock", "on": SERVICE_UNLOCK, "pulse": True}
@@ -82,7 +86,7 @@ class ChargePointSwitch(SwitchEntity):
         """Test metric state against condition if present"""
         if self._purpose.get("metric") is not None:
             resp = self.central_system.get_metric(self.cp_id, self._purpose["metric"])
-            if resp == self._purpose["condition"]:
+            if resp in self._purpose["condition"]:
                 self._state = True
             else:
                 self._state = False
