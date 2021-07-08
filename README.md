@@ -30,3 +30,28 @@ This is a home assistant integration for chargers that support the Open Charge P
 ## Screenshot
 
 ![example](https://github.com/lbbrhzn/ocpp/raw/main/example.png "Example")
+
+## Supported devices
+
+The following devices are supported :
+OCPP 1.6 compatible devices 
+
+
+## Development
+### Debugging
+
+To enable debug logging for this integration and related libraries you
+can control this in your Home Assistant `configuration.yaml`
+file. Example:
+
+```
+logger:
+  default: info
+  logs:
+    custom_components.ocpp: critical
+    websocket: debug
+```
+
+After a restart detailed log entries will appear in `/config/home-assistant.log`.
+
+
