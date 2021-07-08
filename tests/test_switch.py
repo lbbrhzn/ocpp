@@ -6,9 +6,9 @@ from homeassistant.const import ATTR_ENTITY_ID
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import async_setup_entry
-from custom_components.ocpp.const import DEFAULT_NAME, DOMAIN, SWITCH
+from custom_components.ocpp.const import DOMAIN, SWITCH
 
-from .const import MOCK_CONFIG
+from .const import DEFAULT_NAME, MOCK_CONFIG
 
 
 async def test_switch_services(hass):
