@@ -3,3 +3,4 @@ pre-commit==2.13.0
 black==21.6b0
 flake8==3.9.2
 reorder-python-imports==2.5.0
+websockets==9.1
