@@ -5,6 +5,7 @@ from custom_components.ocpp.const import (
     CONF_HOST,
     CONF_METER_INTERVAL,
     CONF_PORT,
+    MEASURANDS,
 )
 
 MOCK_CONFIG = {
@@ -14,5 +15,5 @@ MOCK_CONFIG = {
     CONF_CSID: "test_csid",
     CONF_METER_INTERVAL: 60,
 }
-MOCK_CONFIG_2 = {"Energy.Active.Import.Register": True}
+MOCK_CONFIG_2 = {MEASURANDS[1]: True}
 DEFAULT_NAME = "test"
