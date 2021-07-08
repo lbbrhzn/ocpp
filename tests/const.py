@@ -14,4 +14,5 @@ MOCK_CONFIG = {
     CONF_CSID: "test_csid",
     CONF_METER_INTERVAL: 60,
 }
+MOCK_CONFIG_2 = {"Energy.Active.Import.Register": True}
 DEFAULT_NAME = "test"

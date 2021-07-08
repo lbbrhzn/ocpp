@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR,; SWITCH,
     DOMAIN,
+    MEASURANDS,
 )
 
 from .const import MOCK_CONFIG
@@ -50,9 +51,9 @@ async def test_successful_config_flow(hass, bypass_get_data):
     assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
     assert result["step_id"] == "measurands"
 
-    # Call again for step_id == "measurands" with default input
+    # Call again for step_id == "measurands" with all measurands
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={}
+        result["flow_id"], user_input=MEASURANDS
     )
 
     # Check that the config flow is complete and a new entry is created with
