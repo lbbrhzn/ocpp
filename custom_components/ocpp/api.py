@@ -188,8 +188,8 @@ class ChargePoint(cp):
         self._transactionId = 0
         self._metrics["ID"] = id
         self._units["Session.Time"] = TIME_MINUTES
-        self._units["Session.Energy"] = UnitOfMeasure.kwh
-        self._units["Meter.Start"] = UnitOfMeasure.kwh
+        self._units["Session.Energy"] = UnitOfMeasure.kwh.value
+        self._units["Meter.Start"] = UnitOfMeasure.kwh.value
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""

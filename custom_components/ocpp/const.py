@@ -49,35 +49,35 @@ SERVICE_UNLOCK = "unlock"
 
 # Ocpp supported measurands
 MEASURANDS = [
-    str(Measurand.current_export),
-    str(Measurand.current_import),
-    str(Measurand.current_offered),
-    str(Measurand.energy_active_export_register),
-    str(Measurand.energy_active_import_register),
-    str(Measurand.energy_reactive_export_register),
-    str(Measurand.energy_reactive_import_register),
-    str(Measurand.energy_active_export_interval),
-    str(Measurand.energy_active_import_interval),
-    str(Measurand.energy_reactive_export_interval),
-    str(Measurand.energy_reactive_import_interval),
-    str(Measurand.frequency),
-    str(Measurand.power_active_export),
-    str(Measurand.power_active_import),
-    str(Measurand.power_factor),
-    str(Measurand.power_offered),
-    str(Measurand.power_reactive_export),
-    str(Measurand.power_reactive_import),
-    str(Measurand.rpm),
-    str(Measurand.soc),
-    str(Measurand.temperature),
-    str(Measurand.voltage),
+    Measurand.current_export.value,
+    Measurand.current_import.value,
+    Measurand.current_offered.value,
+    Measurand.energy_active_export_register.value,
+    Measurand.energy_active_import_register.value,
+    Measurand.energy_reactive_export_register.value,
+    Measurand.energy_reactive_import_register.value,
+    Measurand.energy_active_export_interval.value,
+    Measurand.energy_active_import_interval.value,
+    Measurand.energy_reactive_export_interval.value,
+    Measurand.energy_reactive_import_interval.value,
+    Measurand.frequency.value,
+    Measurand.power_active_export.value,
+    Measurand.power_active_import.value,
+    Measurand.power_factor.value,
+    Measurand.power_offered.value,
+    Measurand.power_reactive_export.value,
+    Measurand.power_reactive_import.value,
+    Measurand.rpm.value,
+    Measurand.soc.value,
+    Measurand.temperature.value,
+    Measurand.voltage.value,
 ]
-DEFAULT_MEASURAND = str(Measurand.energy_active_import_register)
+DEFAULT_MEASURAND = Measurand.energy_active_import_register.value
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
-DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh
-DEFAULT_POWER_UNIT = UnitOfMeasure.w
-HA_ENERGY_UNIT = UnitOfMeasure.kwh
-HA_POWER_UNIT = UnitOfMeasure.kw
+DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
+DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
+HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
+HA_POWER_UNIT = UnitOfMeasure.kw.value
 
 # Additional conditions/states to monitor
 CONDITIONS = [
