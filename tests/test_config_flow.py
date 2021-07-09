@@ -8,7 +8,7 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG, MOCK_CONFIG_2
+from .const import MOCK_CONFIG, MOCK_CONFIG_2, MOCK_CONFIG_DATA
 
 # from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -59,7 +59,7 @@ async def test_successful_config_flow(hass, bypass_get_data):
     # the input data
     assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
     assert result["title"] == "test_csid"
-    assert result["data"] == MOCK_CONFIG_2
+    assert result["data"] == MOCK_CONFIG_DATA
     assert result["result"]
 
 

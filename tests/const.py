@@ -39,4 +39,12 @@ MOCK_CONFIG_2 = {
     str(Measurand.temperature): True,
     str(Measurand.voltage): True,
 }
+MOCK_CONFIG_DATA = {
+    "host": "0.0.0.0",
+    "port": 9000,
+    "cpid": "test_cpid",
+    "csid": "test_csid",
+    "meter_interval": 60,
+    "monitored_variables": "Measurand.current_export,Measurand.current_import,Measurand.current_offered,Measurand.energy_active_export_register,Measurand.energy_active_import_register,Measurand.energy_reactive_export_register,Measurand.energy_reactive_import_register,Measurand.energy_active_export_interval,Measurand.energy_active_import_interval,Measurand.energy_reactive_export_interval,Measurand.energy_reactive_import_interval,Measurand.frequency,Measurand.power_active_export,Measurand.power_active_import,Measurand.power_factor,Measurand.power_offered,Measurand.power_reactive_export,Measurand.power_reactive_import,Measurand.rpm,Measurand.soc,Measurand.temperature,Measurand.voltage",
+}
 DEFAULT_NAME = "test"
