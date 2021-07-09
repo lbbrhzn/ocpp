@@ -1,14 +1,16 @@
 """Test ocpp switch."""
-from unittest.mock import call, patch
+# from unittest.mock import call, patch
 
-from homeassistant.components.switch import SERVICE_TURN_OFF, SERVICE_TURN_ON
-from homeassistant.const import ATTR_ENTITY_ID
+# from homeassistant.components.switch import SERVICE_TURN_OFF, SERVICE_TURN_ON
+# from homeassistant.const import ATTR_ENTITY_ID
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import async_setup_entry
-from custom_components.ocpp.const import DOMAIN, SWITCH
+from custom_components.ocpp.const import DOMAIN  # SWITCH
 
-from .const import DEFAULT_NAME, MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA
+
+# from .const import DEFAULT_NAME
 
 
 async def test_switch_services(hass):
@@ -22,23 +24,23 @@ async def test_switch_services(hass):
 
     # Functions/objects can be patched directly in test code as well and can be used to test
     # additional things, like whether a function was called or what arguments it was called with
-    with patch("custom_components.ocpp.ocppApiClient.async_set_title") as title_func:
-        await hass.services.async_call(
-            SWITCH,
-            SERVICE_TURN_OFF,
-            service_data={ATTR_ENTITY_ID: f"{SWITCH}.{DEFAULT_NAME}_{SWITCH}"},
-            blocking=True,
-        )
-        assert title_func.called
-        assert title_func.call_args == call("foo")
-
-        title_func.reset_mock()
-
-        await hass.services.async_call(
-            SWITCH,
-            SERVICE_TURN_ON,
-            service_data={ATTR_ENTITY_ID: f"{SWITCH}.{DEFAULT_NAME}_{SWITCH}"},
-            blocking=True,
-        )
-        assert title_func.called
-        assert title_func.call_args == call("bar")
+    # with patch("custom_components.ocpp.ocppApiClient.async_set_title") as title_func:
+    #     await hass.services.async_call(
+    #         SWITCH,
+    #         SERVICE_TURN_OFF,
+    #         service_data={ATTR_ENTITY_ID: f"{SWITCH}.{DEFAULT_NAME}_{SWITCH}"},
+    #         blocking=True,
+    #     )
+    #     assert title_func.called
+    #     assert title_func.call_args == call("foo")
+    #
+    #     title_func.reset_mock()
+    #
+    #     await hass.services.async_call(
+    #         SWITCH,
+    #         SERVICE_TURN_ON,
+    #         service_data={ATTR_ENTITY_ID: f"{SWITCH}.{DEFAULT_NAME}_{SWITCH}"},
+    #         blocking=True,
+    #     )
+    #     assert title_func.called
+    #     assert title_func.call_args == call("bar")
