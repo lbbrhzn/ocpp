@@ -24,7 +24,7 @@ SWITCH_CHARGE = {
     "on": SERVICE_CHARGE_START,
     "off": SERVICE_CHARGE_STOP,
     "metric": "Status",
-    "condition": AvailabilityStatus.charging,
+    "condition": AvailabilityStatus.charging.value,
 }
 SWITCH_AVAILABILITY = {
     "name": "Availability",
@@ -32,7 +32,7 @@ SWITCH_AVAILABILITY = {
     "off": SERVICE_AVAILABILITY,
     "default": True,
     "metric": "Status",
-    "condition": AvailabilityStatus.available,
+    "condition": AvailabilityStatus.available.value,
 }
 SWITCH_RESET = {"name": "Reset", "on": SERVICE_RESET, "pulse": True}
 SWITCH_UNLOCK = {"name": "Unlock", "on": SERVICE_UNLOCK, "pulse": True}
