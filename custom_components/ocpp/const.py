@@ -49,30 +49,30 @@ SERVICE_UNLOCK = "unlock"
 
 # Ocpp supported measurands
 MEASURANDS = [
-    Measurand.current_export,
-    Measurand.current_import,
-    Measurand.current_offered,
-    Measurand.energy_active_export_register,
-    Measurand.energy_active_import_register,
-    Measurand.energy_reactive_export_register,
-    Measurand.energy_reactive_import_register,
-    Measurand.energy_active_export_interval,
-    Measurand.energy_active_import_interval,
-    Measurand.energy_reactive_export_interval,
-    Measurand.energy_reactive_import_interval,
-    Measurand.frequency,
-    Measurand.power_active_export,
-    Measurand.power_active_import,
-    Measurand.power_factor,
-    Measurand.power_offered,
-    Measurand.power_reactive_export,
-    Measurand.power_reactive_import,
-    Measurand.rpm,
-    Measurand.soc,
-    Measurand.temperature,
-    Measurand.voltage,
+    str(Measurand.current_export),
+    str(Measurand.current_import),
+    str(Measurand.current_offered),
+    str(Measurand.energy_active_export_register),
+    str(Measurand.energy_active_import_register),
+    str(Measurand.energy_reactive_export_register),
+    str(Measurand.energy_reactive_import_register),
+    str(Measurand.energy_active_export_interval),
+    str(Measurand.energy_active_import_interval),
+    str(Measurand.energy_reactive_export_interval),
+    str(Measurand.energy_reactive_import_interval),
+    str(Measurand.frequency),
+    str(Measurand.power_active_export),
+    str(Measurand.power_active_import),
+    str(Measurand.power_factor),
+    str(Measurand.power_offered),
+    str(Measurand.power_reactive_export),
+    str(Measurand.power_reactive_import),
+    str(Measurand.rpm),
+    str(Measurand.soc),
+    str(Measurand.temperature),
+    str(Measurand.voltage),
 ]
-DEFAULT_MEASURAND = Measurand.energy_active_import_register
+DEFAULT_MEASURAND = str(Measurand.energy_active_import_register)
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
 DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh
 DEFAULT_POWER_UNIT = UnitOfMeasure.w
