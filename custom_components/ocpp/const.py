@@ -78,27 +78,3 @@ DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
 DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
-
-# Additional conditions/states to monitor
-CONDITIONS = [
-    "Status",
-    "Heartbeat",
-    "Error.Code",
-    "Stop.Reason",
-    "FW.Status",
-    "Session.Time",  # in min
-    "Session.Energy",  # in kWh
-    "Meter.Start",  # in kWh
-]
-
-# Additional general information to report
-GENERAL = [
-    "ID",
-    "Model",
-    "Vendor",
-    "Serial",
-    "FW.Version",
-    "Features",
-    "Connectors",
-    "Transaction.Id",
-]
