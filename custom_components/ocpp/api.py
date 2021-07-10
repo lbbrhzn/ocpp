@@ -58,15 +58,11 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-    SERVICE_AVAILABILITY,
-    SERVICE_CHARGE_START,
-    SERVICE_CHARGE_STOP,
-    SERVICE_RESET,
-    SERVICE_UNLOCK,
 )
 from .enums import (
     ConfigurationKey,
     HAChargerDetails,
+    HAChargerServices,
     HAChargerSession,
     HAChargerStatuses,
     OcppMisc,
@@ -142,15 +138,15 @@ class CentralSystem:
     ):
         """Carry out requested service/state change on connected charger."""
         if cp_id in self.charge_points:
-            if service_name == SERVICE_AVAILABILITY:
+            if service_name == HAChargerServices.service_availability.name:
                 resp = await self.charge_points[cp_id].set_availability(state)
-            if service_name == SERVICE_CHARGE_START:
+            if service_name == HAChargerServices.service_charge_start.name:
                 resp = await self.charge_points[cp_id].start_transaction()
-            if service_name == SERVICE_CHARGE_STOP:
+            if service_name == HAChargerServices.service_charge_stop.name:
                 resp = await self.charge_points[cp_id].stop_transaction()
-            if service_name == SERVICE_RESET:
+            if service_name == HAChargerServices.service_reset.name:
                 resp = await self.charge_points[cp_id].reset()
-            if service_name == SERVICE_UNLOCK:
+            if service_name == HAChargerServices.service_unlock.name:
                 resp = await self.charge_points[cp_id].unlock()
         else:
             resp = False
