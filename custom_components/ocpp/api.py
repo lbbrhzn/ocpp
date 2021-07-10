@@ -56,9 +56,6 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_SUBPROTOCOL,
     DOMAIN,
-    FEATURE_PROFILE_FW,
-    FEATURE_PROFILE_REMOTE,
-    FEATURE_PROFILE_SMART,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     SERVICE_AVAILABILITY,
@@ -202,7 +199,7 @@ class ChargePoint(cp):
         """Logic to be executed right after a charger connects."""
         try:
             await self.get_supported_features()
-            if FEATURE_PROFILE_REMOTE in self._features_supported:
+            if OcppMisc.feature_profile_remote.value in self._features_supported:
                 await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
@@ -281,7 +278,7 @@ class ChargePoint(cp):
 
     async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
         """Set a charging profile with defined limit."""
-        if FEATURE_PROFILE_SMART in self._features_supported:
+        if OcppMisc.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
                 ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value
             )
@@ -350,7 +347,7 @@ class ChargePoint(cp):
             await self.configure(
                 ConfigurationKey.authorize_remote_tx_requests.value, "false"
             )
-        if FEATURE_PROFILE_SMART in self._features_supported:
+        if OcppMisc.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
                 ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value
             )
@@ -426,7 +423,7 @@ class ChargePoint(cp):
         """Update charger with new firmware if available."""
         """where firmware_url is the http or https url of the new firmware"""
         """and wait_time is hours from now to wait before install"""
-        if FEATURE_PROFILE_FW in self._features_supported:
+        if OcppMisc.feature_profile_firmware.value in self._features_supported:
             schema = vol.Schema(vol.Url())
             try:
                 url = schema(firmware_url)

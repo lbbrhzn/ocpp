@@ -2,6 +2,19 @@
 from enum import Enum
 
 
+class HAChargerServices(str, Enum):
+    """Charger status conditions to report in home assistant."""
+
+    """For HA service reference use .name for function to call use .value"""
+
+    service_charge_start = "start_transaction"
+    service_charge_stop = "stop_transaction"
+    service_availability = "availability"
+    service_set_charge_rate = "set_charge_rate"
+    service_reset = "reset"
+    service_unlock = "unlock"
+
+
 class HAChargerStatuses(str, Enum):
     """Charger status conditions to report in home assistant."""
 
@@ -55,6 +68,12 @@ class OcppMisc(str, Enum):
     charging_rate_unit = "chargingRateUnit"
     charging_schedule_period = "chargingSchedulePeriod"
     start_period = "startPeriod"
+    feature_profile_core = "Core"
+    feature_profile_firmware = "FirmwareManagement"
+    feature_profile_smart = "SmartCharging"
+    feature_profile_reservation = "Reservation"
+    feature_profile_remote = "RemoteTrigger"
+    feature_profile_auth = "LocalAuthListManagement"
 
 
 class ConfigurationKey(str, Enum):

@@ -31,14 +31,6 @@ SENSOR = "sensor"
 SWITCH = "switch"
 PLATFORMS = [SENSOR, SWITCH]
 
-# Ocpp SupportedFeatureProfiles
-FEATURE_PROFILE_CORE = "Core"
-FEATURE_PROFILE_FW = "FirmwareManagement"
-FEATURE_PROFILE_SMART = "SmartCharging"
-FEATURE_PROFILE_RESERV = "Reservation"
-FEATURE_PROFILE_REMOTE = "RemoteTrigger"
-FEATURE_PROFILE_AUTH = "LocalAuthListManagement"
-
 # Services to register for use in HA
 SERVICE_CHARGE_START = "start_transaction"
 SERVICE_CHARGE_STOP = "stop_transaction"
