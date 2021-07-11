@@ -285,21 +285,21 @@ class ChargePoint(cp):
             _LOGGER.debug("If more than one unit supported default unit is amps")
             if "current" in resp.configuration_key[0]["value"].lower():
                 lim = limit_amps
-                units = ChargingRateUnitType.amps
+                units = ChargingRateUnitType.amps.value
             else:
                 lim = limit_watts
-                units = ChargingRateUnitType.watts
+                units = ChargingRateUnitType.watts.value
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
-                    OcppMisc.charging_profile_id.name: 8,
-                    OcppMisc.stack_level.name: 999,
-                    OcppMisc.charging_profile_kind.name: ChargingProfileKindType.relative,
-                    OcppMisc.charging_profile_purpose.name: ChargingProfilePurposeType.tx_profile,
-                    OcppMisc.charging_schedule.name: {
-                        OcppMisc.charging_rate_unit.name: units,
-                        OcppMisc.charging_schedule_period.name: [
-                            {OcppMisc.start_period.name: 0, OcppMisc.limit.name: lim}
+                    OcppMisc.charging_profile_id.value: 8,
+                    OcppMisc.stack_level.value: 999,
+                    OcppMisc.charging_profile_kind.value: ChargingProfileKindType.relative.value,
+                    OcppMisc.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
+                    OcppMisc.charging_schedule.value: {
+                        OcppMisc.charging_rate_unit.value: units,
+                        OcppMisc.charging_schedule_period.value: [
+                            {OcppMisc.start_period.value: 0, OcppMisc.limit.value: lim}
                         ],
                     },
                 },
@@ -321,9 +321,9 @@ class ChargePoint(cp):
             await self.stop_transaction()
         """ change availability """
         if state is True:
-            typ = AvailabilityType.operative
+            typ = AvailabilityType.operative.value
         else:
-            typ = AvailabilityType.inoperative
+            typ = AvailabilityType.inoperative.value
 
         req = call.ChangeAvailabilityPayload(connector_id=0, type=typ)
         resp = await self.call(req)
@@ -354,22 +354,22 @@ class ChargePoint(cp):
             _LOGGER.debug("If more than one unit supported default unit is amps")
             if "current" in resp.configuration_key[0]["value"].lower():
                 lim = limit_amps
-                units = ChargingRateUnitType.amps
+                units = ChargingRateUnitType.amps.value
             else:
                 lim = limit_watts
-                units = ChargingRateUnitType.watts
+                units = ChargingRateUnitType.watts.value
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[HAChargerDetails.identifier.value],
                 charging_profile={
-                    OcppMisc.charging_profile_id.name: 1,
-                    OcppMisc.stack_level.name: 999,
-                    OcppMisc.charging_profile_kind.name: ChargingProfileKindType.relative,
-                    OcppMisc.charging_profile_purpose.name: ChargingProfilePurposeType.tx_profile,
-                    OcppMisc.charging_schedule.name: {
-                        OcppMisc.charging_rate_unit.name: units,
-                        OcppMisc.charging_schedule_period.name: [
-                            {OcppMisc.start_period.name: 0, OcppMisc.limit.name: lim}
+                    OcppMisc.charging_profile_id.value: 1,
+                    OcppMisc.stack_level.value: 999,
+                    OcppMisc.charging_profile_kind.value: ChargingProfileKindType.relative.value,
+                    OcppMisc.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
+                    OcppMisc.charging_schedule.value: {
+                        OcppMisc.charging_rate_unit.value: units,
+                        OcppMisc.charging_schedule_period.value: [
+                            {OcppMisc.start_period.value: 0, OcppMisc.limit.value: lim}
                         ],
                     },
                 },
@@ -634,7 +634,7 @@ class ChargePoint(cp):
         return call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
-            status=RegistrationStatus.accepted,
+            status=RegistrationStatus.accepted.value,
         )
 
     @on(Action.StatusNotification)
@@ -642,15 +642,15 @@ class ChargePoint(cp):
         """Handle a status notification."""
         self._metrics[HAChargerStatuses.status.value] = status
         if (
-            status == ChargePointStatus.suspended_ev
-            or status == ChargePointStatus.suspended_evse
+            status == ChargePointStatus.suspended_ev.value
+            or status == ChargePointStatus.suspended_evse.value
         ):
-            if Measurand.current_import in self._metrics:
-                self._metrics[Measurand.current_import] = 0
-            if Measurand.power_active_import in self._metrics:
-                self._metrics[Measurand.power_active_import] = 0
-            if Measurand.power_reactive_import in self._metrics:
-                self._metrics[Measurand.power_reactive_import] = 0
+            if Measurand.current_import.value in self._metrics:
+                self._metrics[Measurand.current_import.value] = 0
+            if Measurand.power_active_import.value in self._metrics:
+                self._metrics[Measurand.power_active_import.value] = 0
+            if Measurand.power_reactive_import.value in self._metrics:
+                self._metrics[Measurand.power_reactive_import.value] = 0
         self._metrics[HAChargerStatuses.error_code.value] = error_code
         return call_result.StatusNotificationPayload()
 
@@ -664,7 +664,7 @@ class ChargePoint(cp):
     def on_authorize(self, id_tag, **kwargs):
         """Handle a Authorization request."""
         return call_result.AuthorizePayload(
-            id_tag_info={HAChargerStatuses.status.value: AuthorizationStatus.accepted}
+            id_tag_info={OcppMisc.status.value: AuthorizationStatus.accepted.value}
         )
 
     @on(Action.StartTransaction)
@@ -675,7 +675,7 @@ class ChargePoint(cp):
         self._metrics[HAChargerSession.transaction_id.value] = self._transactionId
         self._metrics[HAChargerSession.meter_start.value] = int(meter_start) / 1000
         return call_result.StartTransactionPayload(
-            id_tag_info={HAChargerStatuses.status.value: AuthorizationStatus.accepted},
+            id_tag_info={OcppMisc.status.value: AuthorizationStatus.accepted.value},
             transaction_id=self._transactionId,
         )
 
@@ -692,21 +692,21 @@ class ChargePoint(cp):
                 - float(self._metrics[HAChargerSession.meter_start.value]),
                 1,
             )
-        if Measurand.current_import in self._metrics:
-            self._metrics[Measurand.current_import] = 0
-        if Measurand.power_active_import in self._metrics:
-            self._metrics[Measurand.power_active_import] = 0
-        if Measurand.power_reactive_import in self._metrics:
-            self._metrics[Measurand.power_reactive_import] = 0
+        if Measurand.current_import.value in self._metrics:
+            self._metrics[Measurand.current_import.value] = 0
+        if Measurand.power_active_import.value in self._metrics:
+            self._metrics[Measurand.power_active_import.value] = 0
+        if Measurand.power_reactive_import.value in self._metrics:
+            self._metrics[Measurand.power_reactive_import.value] = 0
         return call_result.StopTransactionPayload(
-            id_tag_info={HAChargerStatuses.status.value: AuthorizationStatus.accepted}
+            id_tag_info={OcppMisc.status.value: AuthorizationStatus.accepted.value}
         )
 
     @on(Action.DataTransfer)
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Datatransfer received from %s: %s", self.id, kwargs)
-        return call_result.DataTransferPayload(status=DataTransferStatus.accepted)
+        return call_result.DataTransferPayload(status=DataTransferStatus.accepted.value)
 
     @on(Action.Heartbeat)
     def on_heartbeat(self, **kwargs):

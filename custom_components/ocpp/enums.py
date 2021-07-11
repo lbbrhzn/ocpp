@@ -49,12 +49,13 @@ class HAChargerSession(str, Enum):
 class OcppMisc(str, Enum):
     """Miscellaneous strings used in ocpp v1.6 responses."""
 
-    """For pythonic version use .name for ocpp json use .value"""
+    """For pythonic version use .name (eg with kwargs) for ocpp json use .value"""
 
     limit = "limit"
     measurand = "measurand"
     reason = "reason"
     readonly = "readonly"
+    status = "status"
     transaction_id = "transactionId"
     charge_point_serial_number = "chargePointSerialNumber"
     charge_point_vendor = "chargePointVendor"
