@@ -76,6 +76,10 @@ class OcppMisc(str, Enum):
     feature_profile_remote = "RemoteTrigger"
     feature_profile_auth = "LocalAuthListManagement"
 
+    # for use with Smart Charging
+    current = "Current"
+    power = "Power"
+
 
 class ConfigurationKey(str, Enum):
     """Configuration Key Names."""

@@ -276,18 +276,22 @@ class ChargePoint(cp):
                 "Charger supports setting the following units: %s",
                 resp.configuration_key[0]["value"],
             )
-            _LOGGER.debug("If more than one unit supported default unit is amps")
-            if "current" in resp.configuration_key[0]["value"].lower():
+            _LOGGER.debug("If more than one unit supported default unit is Amps")
+            if om.current.value in resp.configuration_key[0]["value"]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
                 lim = limit_watts
                 units = ChargingRateUnitType.watts.value
+            resp = await self.get_configuration(
+                ckey.charge_profile_max_stack_level.value
+            )
+            stack_level = resp.configuration_key[0]["value"]
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
-                    om.stack_level.value: 999,
+                    om.stack_level.value: stack_level,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
                     om.charging_schedule.value: {
@@ -341,19 +345,23 @@ class ChargePoint(cp):
                 "Charger supports setting the following units: %s",
                 resp.configuration_key[0]["value"],
             )
-            _LOGGER.debug("If more than one unit supported default unit is amps")
-            if "current" in resp.configuration_key[0]["value"].lower():
+            _LOGGER.debug("If more than one unit supported default unit is Amps")
+            if om.current.value in resp.configuration_key[0]["value"]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
                 lim = limit_watts
                 units = ChargingRateUnitType.watts.value
+            resp = await self.get_configuration(
+                ckey.charge_profile_max_stack_level.value
+            )
+            stack_level = resp.configuration_key[0]["value"]
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
                 charging_profile={
                     om.charging_profile_id.value: 1,
-                    om.stack_level.value: 999,
+                    om.stack_level.value: stack_level,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
                     om.charging_schedule.value: {
@@ -377,6 +385,8 @@ class ChargePoint(cp):
 
     async def stop_transaction(self):
         """Request remote stop of current transaction."""
+        """Leaves charger in finishing state until unplugged"""
+        """Use reset() to make the charger available again for remote start"""
         req = call.RemoteStopTransactionPayload(transaction_id=self._transactionId)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
