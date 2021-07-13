@@ -286,7 +286,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = resp.configuration_key[0]["value"]
+            stack_level = int(resp.configuration_key[0]["value"])
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
@@ -355,7 +355,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = resp.configuration_key[0]["value"]
+            stack_level = int(resp.configuration_key[0]["value"])
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
