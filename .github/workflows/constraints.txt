@@ -4,5 +4,5 @@ black==21.6b0
 flake8==3.9.2
 reorder-python-imports==2.5.0
 websockets==9.1
-sqlalchemy==1.4.17
+sqlalchemy==1.4.21
 ocpp>=0.8.3
