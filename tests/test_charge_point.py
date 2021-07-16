@@ -99,7 +99,7 @@ class ChargePoint(cpclass):
                     {
                         "key": key[0],
                         "readonly": False,
-                        "value": "Core,FirmwareManagement,SmartCharging",
+                        "value": "Core,FirmwareManagement,RemoteTrigger,SmartCharging",
                     }
                 ]
             )
@@ -222,7 +222,8 @@ class ChargePoint(cpclass):
         request = call.FirmwareStatusNotificationPayload(
             status=FirmwareStatus.downloaded
         )
-        await self.call(request)
+        resp = await self.call(request)
+        assert resp is not None
 
     async def send_data_transfer(self):
         """Send a data transfer."""
@@ -257,8 +258,8 @@ class ChargePoint(cpclass):
             vendor_id="The Mobility House",
             vendor_error_code="Test error",
         )
-        await self.call(request)
-        # check an error is not thrown?
+        resp = await self.call(request)
+        assert resp is not None
 
     async def send_meter_data(self):
         """Send meter data notification."""
@@ -409,8 +410,8 @@ class ChargePoint(cpclass):
                 }
             ],
         )
-        await self.call(request)
-        # check an error is not thrown?
+        resp = await self.call(request)
+        assert resp is not None
 
     async def send_stop_transaction(self):
         """Send a stop transaction notification."""
