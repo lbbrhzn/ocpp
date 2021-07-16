@@ -3,35 +3,39 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 
+from ocpp.v16.enums import ChargePointStatus
+
 from .api import CentralSystem
-from .const import (
-    CONF_CPID,
-    DOMAIN,
-    ICON,
-    SERVICE_AVAILABILITY,
-    SERVICE_CHARGE_START,
-    SERVICE_CHARGE_STOP,
-    SERVICE_RESET,
-    SERVICE_UNLOCK,
-)
+from .const import CONF_CPID, DOMAIN, ICON
+from .enums import HAChargerServices, HAChargerStatuses
 
 # At a minimum define switch name and on service call, pulse used to call a service once such as reset
 # metric and condition combination can be used to drive switch state, use default to set initial state to True
 SWITCH_CHARGE = {
     "name": "Charge_Control",
-    "on": SERVICE_CHARGE_START,
-    "off": SERVICE_CHARGE_STOP,
-    "metric": "Status",
-    "condition": "Charging",
+    "on": HAChargerServices.service_charge_start.name,
+    "off": HAChargerServices.service_charge_stop.name,
+    "metric": HAChargerStatuses.status.value,
+    "condition": ChargePointStatus.charging.value,
 }
 SWITCH_AVAILABILITY = {
     "name": "Availability",
-    "on": SERVICE_AVAILABILITY,
-    "off": SERVICE_AVAILABILITY,
+    "on": HAChargerServices.service_availability.name,
+    "off": HAChargerServices.service_availability.name,
     "default": True,
+    "metric": HAChargerStatuses.status.value,
+    "condition": ChargePointStatus.available.value,
 }
-SWITCH_RESET = {"name": "Reset", "on": SERVICE_RESET, "pulse": True}
-SWITCH_UNLOCK = {"name": "Unlock", "on": SERVICE_UNLOCK, "pulse": True}
+SWITCH_RESET = {
+    "name": "Reset",
+    "on": HAChargerServices.service_reset.name,
+    "pulse": True,
+}
+SWITCH_UNLOCK = {
+    "name": "Unlock",
+    "on": HAChargerServices.service_unlock.name,
+    "pulse": True,
+}
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -41,10 +45,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     entities = []
 
-    entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_CHARGE))
-    entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_AVAILABILITY))
-    entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_RESET))
-    entities.append(ChargePointSwitch(central_system, cp_id, SWITCH_UNLOCK))
+    for ent in [SWITCH_CHARGE, SWITCH_AVAILABILITY, SWITCH_RESET, SWITCH_UNLOCK]:
+        entities.append(ChargePointSwitch(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
