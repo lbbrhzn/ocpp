@@ -1,29 +1,83 @@
 # Service ID
-#start_charge:
+set_charge_rate:
   # Service name as shown in UI
-#  name: Start charging
+  name: Set maximum charge rate
   # Description of the service
-#  description: Starts a charge session
+  description: Sets the maximum charge rate in Amps or Watts (dependent on charger support)
   # If the service accepts entity IDs, target allows the user to specify entities by entity, device, or area. If `target` is specified, `entity_id` should not be defined in the `fields` map. By default it shows only targets matching entities from the same domain as the service, but if further customization is required, target supports the entity, device, and area selectors (https://www.home-assistant.io/docs/blueprint/selectors/). Entity selector parameters will automatically be applied to device and area, and device selector parameters will automatically be applied to area. 
-#  target:
+  #target:
+  #   entity:
+  #     integration: ocpp
   # Different fields that your service accepts
-#      limit:
+  fields:
+    # Key of the field
+    limit_amps:
       # Field name as shown in UI
-#      name: Charge limit
+      name: Limit (A)
       # Description of the field
-#      description: Maximum charge rate in W
+      description: Maximum charge rate in Amps
       # Whether or not field is required (default = false)
-#      required: false
+      required: false
       # Advanced fields are only shown when the advanced mode is enabled for the user (default = false)
-#      advanced: false
+      advanced: true
       # Example value that can be passed for this field
-#      example: "1500"
+      example: 16
       # The default field value
-#      default: "22000"
+      default: 32
+    limit_watts:
+      name: Limit (W)
+      description: Maximum charge rate in Watts
+      required: false
+      advanced: true
+      example: 1500
+      default: 22000
       
-#stop_charge:
-#  name: Stop charging
-#  description: Stops a charge session in progress
-#  target:
-#    entity:
-#      integration: ocpp
+clear_profile:
+  name: Clear charging profiles
+  description: Clears all charging profiles (limits) set (dependent on charger support)
+
+update_firmware:
+  name: Update charger firmware
+  description: Specify server to download firmware and time to delay updating (dependent on charger support)
+  fields:
+    firmware_url:
+      name: Url of firmware
+      description: Full url of firmware file (http or https)
+      required: true
+      advanced: true
+      example: "http://www.charger.com/firmware.bin"
+    delay_hours:
+      name: Delay hours
+      description: Hours to delay charger update
+      required: false
+      advanced: true
+      example: 12
+      default: 0
+      
+configure:
+  name: Configure charger features
+  description: Change supported Ocpp v1.6 configuration values
+  fields:
+    ocpp_key:
+      name: Configuration key name 
+      description: Write-enabled key name supported 
+      required: true
+      advanced: true
+      example: "WebSocketPingInterval"
+    value:
+      name: Key value
+      description: Value to write to key
+      required: true
+      advanced: true
+      example: "60"
+      
+get_configuration:
+  name: Get configuration values for charger
+  description: Change supported Ocpp v1.6 configuration values
+  fields:
+    ocpp_key:
+      name: Configuration key name 
+      description: Key name supported 
+      required: true
+      advanced: true
+      example: "WebSocketPingInterval"

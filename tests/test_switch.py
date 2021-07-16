@@ -8,7 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ocpp import async_setup_entry
 from custom_components.ocpp.const import DOMAIN  # SWITCH
 
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_SWITCH
 
 # from .const import DEFAULT_NAME
 
@@ -17,7 +17,7 @@ async def test_switch_services(hass):
     """Test switch services."""
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
+        domain=DOMAIN, data=MOCK_CONFIG_SWITCH, entry_id="test_switch"
     )
     assert await async_setup_entry(hass, config_entry)
     await hass.async_block_till_done()
