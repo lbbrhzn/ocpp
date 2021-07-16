@@ -30,7 +30,7 @@ def skip_notifications_fixture():
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
     # with patch("custom_components.ocpp.ocppApiClient.async_get_data"):
-    #    yield
+    yield
 
 
 # In this fixture, we are forcing calls to async_get_data to raise an Exception. This is useful
@@ -42,4 +42,4 @@ def error_get_data_fixture():
     #    "custom_components.ocpp.ocppApiClient.async_get_data",
     #    side_effect=Exception,
     # ):
-    #    yield
+    yield
