@@ -133,7 +133,7 @@ class CentralSystem:
         except KeyError:
             _LOGGER.error("Client hasn't requested any Subprotocol. Closing Connection")
             return await websocket.close()
-        if websocket.subprotocol:
+        if websocket.subprotocol == DEFAULT_SUBPROTOCOL:
             _LOGGER.info("Protocols Matched: %s", websocket.subprotocol)
         else:
             # In the websockets lib if no subprotocols are supported by the
