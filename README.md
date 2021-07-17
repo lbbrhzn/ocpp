@@ -38,7 +38,6 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 - [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 - [EVlink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
 
-## Development
 ### Debugging
 
 To enable debug logging for this integration and related libraries you
@@ -55,4 +54,9 @@ logger:
 
 After a restart detailed log entries will appear in `/config/home-assistant.log`.
 
+## Support
+**💡 Tip:** If you like this project consider buying me a cocktail 🍹:
 
+<a href="https://www.buymeacoffee.com/lbbrhzn" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/default-black.png" alt="Buy Me A Coffee" width="150px">
+</a>
