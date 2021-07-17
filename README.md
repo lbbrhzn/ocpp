@@ -33,7 +33,7 @@ This is a home assistant integration for chargers that support the Open Charge P
 
 ## Supported devices
 
-All OCPP 1.6j compatible devices should be supported, but not every device offers the same level of finctionality. So far, we've tried:
+All OCPP 1.6j compatible devices should be supported, but not every device offers the same level of functionality. So far, we've tried:
 
 - [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 - [Evlink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
