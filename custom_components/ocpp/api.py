@@ -644,7 +644,7 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            for sv in bucket[om.sampled_value.value]:
+            for sv in bucket[om.sampled_value.name]:
                 if om.measurand.value in sv:
                     self._metrics[sv[om.measurand.value]] = sv[om.value.value]
                     self._metrics[sv[om.measurand.value]] = round(
@@ -663,8 +663,8 @@ class ChargePoint(cp):
                             )
                             self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
                 if len(sv.keys()) == 1:  # for backwards compatibility
-                    self._metrics[DEFAULT_MEASURAND] = sv[om.value.value]
-                    self._units[DEFAULT_MEASURAND] = DEFAULT_ENERGY_UNIT
+                    self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
+                    self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
         if csess.transaction_id.value not in self._metrics:
