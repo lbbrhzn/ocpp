@@ -281,7 +281,9 @@ class ChargePoint(cp):
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value] = resp.configuration_key[0]["value"]
+            self._metrics[cdet.connectors.value] = resp.configuration_key[0][
+                om.value.value
+            ]
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -322,7 +324,7 @@ class ChargePoint(cp):
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            self._features_supported = key_value["value"]
+            self._features_supported = key_value[om.value.value]
             self._metrics[cdet.features.value] = self._features_supported
             _LOGGER.debug("Supported feature profiles: %s", self._features_supported)
 
@@ -373,10 +375,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0]["value"],
+                resp.configuration_key[0][om.value.value],
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0]["value"]:
+            if om.current.value in resp.configuration_key[0][om.value.value]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -385,7 +387,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0]["value"])
+            stack_level = int(resp.configuration_key[0][om.value.value])
 
             req = call.SetChargingProfilePayload(
                 connector_id=0,
@@ -435,7 +437,7 @@ class ChargePoint(cp):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.configuration_key[0]["value"].lower() == "true":
+        if resp.configuration_key[0][om.value.value].lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         if om.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
@@ -446,7 +448,7 @@ class ChargePoint(cp):
                 resp.configuration_key[0]["value"],
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0]["value"]:
+            if om.current.value in resp.configuration_key[0][om.value.value]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -455,7 +457,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0]["value"])
+            stack_level = int(resp.configuration_key[0][om.value.value])
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
@@ -544,7 +546,9 @@ class ChargePoint(cp):
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            _LOGGER.debug("Get Configuration for %s: %s", key, key_value["value"])
+            _LOGGER.debug(
+                "Get Configuration for %s: %s", key, key_value[om.value.value]
+            )
         return resp
 
     async def configure(self, key: str, value: str):
@@ -564,7 +568,7 @@ class ChargePoint(cp):
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
             # it.
-            if key_value["key"] == key and key_value["value"] == value:
+            if key_value[om.key.value] == key and key_value[om.value.value] == value:
                 return
 
             if key_value.get(om.readonly.name, False):
