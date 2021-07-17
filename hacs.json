@@ -1,5 +1,5 @@
 {
-  "name": "ocpp",
+  "name": "Open Charge Point Protocol",
   "content_in_root": false,
   "domains": [
     "sensor"
