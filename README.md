@@ -38,6 +38,9 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 - [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 - [EVlink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
 
+### Devices with known issues
+- [EVBox Elvi](https://evbox.com/en/products/home-chargers/elvi?language=en) appears to require a secure connection, which we do not support (yet).
+
 ### Debugging
 
 To enable debug logging for this integration and related libraries you
