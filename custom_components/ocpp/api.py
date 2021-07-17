@@ -246,20 +246,14 @@ class ChargePoint(cp):
             """Handle the configure service call."""
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
-            for line in ckey:
-                if key == line.value:
-                    await self.configure(key, value)
-                    return
-            _LOGGER.error("Ocpp key not supported: %s ", key)
+            await self.configure(key, value)
+            return
 
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
             key = call.data.get("ocpp_key")
-            for line in ckey:
-                if key == line.value:
-                    await self.get_configuration(key)
-                    return
-            _LOGGER.error("Ocpp key not supported: %s ", key)
+            await self.get_configuration(key)
+            return
 
         try:
             await self.get_supported_features()
