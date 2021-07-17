@@ -31,46 +31,30 @@ SENSOR = "sensor"
 SWITCH = "switch"
 PLATFORMS = [SENSOR, SWITCH]
 
-# Ocpp SupportedFeatureProfiles
-FEATURE_PROFILE_CORE = "Core"
-FEATURE_PROFILE_FW = "FirmwareManagement"
-FEATURE_PROFILE_SMART = "SmartCharging"
-FEATURE_PROFILE_RESERV = "Reservation"
-FEATURE_PROFILE_REMOTE = "RemoteTrigger"
-FEATURE_PROFILE_AUTH = "LocalAuthListManagement"
-
-# Services to register for use in HA
-SERVICE_CHARGE_START = "start_transaction"
-SERVICE_CHARGE_STOP = "stop_transaction"
-SERVICE_AVAILABILITY = "availability"
-SERVICE_SET_CHARGE_RATE = "set_charge_rate"
-SERVICE_RESET = "reset"
-SERVICE_UNLOCK = "unlock"
-
 # Ocpp supported measurands
 MEASURANDS = [
-    Measurand.current_export.value,
+    Measurand.energy_active_import_register.value,
+    Measurand.energy_reactive_import_register.value,
+    Measurand.energy_active_import_interval.value,
+    Measurand.energy_reactive_import_interval.value,
+    Measurand.power_active_import.value,
+    Measurand.power_reactive_import.value,
+    Measurand.power_offered.value,
+    Measurand.power_factor.value,
     Measurand.current_import.value,
     Measurand.current_offered.value,
-    Measurand.energy_active_export_register.value,
-    Measurand.energy_active_import_register.value,
-    Measurand.energy_reactive_export_register.value,
-    Measurand.energy_reactive_import_register.value,
-    Measurand.energy_active_export_interval.value,
-    Measurand.energy_active_import_interval.value,
-    Measurand.energy_reactive_export_interval.value,
-    Measurand.energy_reactive_import_interval.value,
+    Measurand.voltage.value,
     Measurand.frequency.value,
-    Measurand.power_active_export.value,
-    Measurand.power_active_import.value,
-    Measurand.power_factor.value,
-    Measurand.power_offered.value,
-    Measurand.power_reactive_export.value,
-    Measurand.power_reactive_import.value,
     Measurand.rpm.value,
     Measurand.soc.value,
     Measurand.temperature.value,
-    Measurand.voltage.value,
+    Measurand.current_export.value,
+    Measurand.energy_active_export_register.value,
+    Measurand.energy_reactive_export_register.value,
+    Measurand.energy_active_export_interval.value,
+    Measurand.energy_reactive_export_interval.value,
+    Measurand.power_active_export.value,
+    Measurand.power_reactive_export.value,
 ]
 DEFAULT_MEASURAND = Measurand.energy_active_import_register.value
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)

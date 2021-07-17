@@ -55,11 +55,18 @@ class OcppMisc(str, Enum):
 
     """For pythonic version use .name (eg with kwargs) for ocpp json use .value"""
 
+    context = "context"
+    key = "key"
     limit = "limit"
+    location = "location"
     measurand = "measurand"
+    phase = "phase"
     reason = "reason"
     readonly = "readonly"
     status = "status"
+    unit = "unit"
+    value = "value"
+    sampled_value = "sampledValue"
     transaction_id = "transactionId"
     charge_point_serial_number = "chargePointSerialNumber"
     charge_point_vendor = "chargePointVendor"
