@@ -644,42 +644,26 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            for sampled_value in bucket["sampled_value"]:
-                if om.measurand.value in sampled_value:
-                    self._metrics[sampled_value[om.measurand.value]] = sampled_value[
-                        "value"
-                    ]
-                    self._metrics[sampled_value[om.measurand.value]] = round(
-                        float(self._metrics[sampled_value[om.measurand.value]]), 1
+            for sv in bucket[om.sampled_value.value]:
+                if om.measurand.value in sv:
+                    self._metrics[sv[om.measurand.value]] = sv[om.value.value]
+                    self._metrics[sv[om.measurand.value]] = round(
+                        float(self._metrics[sv[om.measurand.value]]), 1
                     )
-                    if "unit" in sampled_value:
-                        self._units[sampled_value[om.measurand.value]] = sampled_value[
-                            "unit"
-                        ]
-                        if (
-                            self._units[sampled_value[om.measurand.value]]
-                            == DEFAULT_POWER_UNIT
-                        ):
-                            self._metrics[sampled_value[om.measurand.value]] = (
-                                float(self._metrics[sampled_value[om.measurand.value]])
-                                / 1000
+                    if om.unit.value in sv:
+                        self._units[sv[om.measurand.value]] = sv[om.unit.value]
+                        if self._units[sv[om.measurand.value]] == DEFAULT_POWER_UNIT:
+                            self._metrics[sv[om.measurand.value]] = (
+                                float(self._metrics[sv[om.measurand.value]]) / 1000
                             )
-                            self._units[
-                                sampled_value[om.measurand.value]
-                            ] = HA_POWER_UNIT
-                        if (
-                            self._units[sampled_value[om.measurand.value]]
-                            == DEFAULT_ENERGY_UNIT
-                        ):
-                            self._metrics[sampled_value[om.measurand.value]] = (
-                                float(self._metrics[sampled_value[om.measurand.value]])
-                                / 1000
+                            self._units[sv[om.measurand.value]] = HA_POWER_UNIT
+                        if self._units[sv[om.measurand.value]] == DEFAULT_ENERGY_UNIT:
+                            self._metrics[sv[om.measurand.value]] = (
+                                float(self._metrics[sv[om.measurand.value]]) / 1000
                             )
-                            self._units[
-                                sampled_value[om.measurand.value]
-                            ] = HA_ENERGY_UNIT
-                if len(sampled_value.keys()) == 1:  # for backwards compatibility
-                    self._metrics[DEFAULT_MEASURAND] = sampled_value["value"]
+                            self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
+                if len(sv.keys()) == 1:  # for backwards compatibility
+                    self._metrics[DEFAULT_MEASURAND] = sv[om.value.value]
                     self._units[DEFAULT_MEASURAND] = DEFAULT_ENERGY_UNIT
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
