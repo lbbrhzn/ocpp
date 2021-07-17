@@ -131,23 +131,23 @@ class CentralSystem:
         try:
             requested_protocols = websocket.request_headers["Sec-WebSocket-Protocol"]
         except KeyError:
-            _LOGGER.error("Client hasn't requested any Subprotocol. Closing Connection")
+            _LOGGER.error("Client hasn't requested any Subprotocol. Closing connection")
             return await websocket.close()
-        if websocket.subprotocol == DEFAULT_SUBPROTOCOL:
-            _LOGGER.info("Protocols Matched: %s", websocket.subprotocol)
+        if requested_protocols in websocket.available_subprotocols:
+            _LOGGER.info("Websocket Subprotocol matched: %s", requested_protocols)
         else:
             # In the websockets lib if no subprotocols are supported by the
             # client and the server, it proceeds without a subprotocol,
             # so we have to manually close the connection.
             _LOGGER.warning(
-                "Protocols Mismatched | Expected Subprotocols: %s,"
+                "Protocols mismatched | expected Subprotocols: %s,"
                 " but client supports  %s | Closing connection",
                 websocket.available_subprotocols,
                 requested_protocols,
             )
             return await websocket.close()
 
-        _LOGGER.info(f"path={path}")
+        _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
         try:
             if self.cpid not in self.charge_points:
