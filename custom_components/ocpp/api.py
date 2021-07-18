@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
+
 import voluptuous as vol
 import websockets
 
@@ -207,6 +208,7 @@ class CentralSystem:
             if SENSOR in ent.entity_id:
                 # _LOGGER.info("Entity id: %s updating", ent.entity_id)
                 entity_component.async_update_entity(self.hass, ent.entity_id)
+
 
     def device_info(self):
         """Return device information."""
