@@ -206,7 +206,9 @@ class CentralSystem:
         for ent in entity_registry.async_entries_for_device(er, dev.id):
             if SENSOR in ent.entity_id:
                 # _LOGGER.info("Entity id: %s updating", ent.entity_id)
-                entity_component.async_update_entity(self.hass, ent.entity_id)
+                self.hass.async_create_task(
+                    entity_component.async_update_entity(self.hass, ent.entity_id)
+                )
 
     def device_info(self):
         """Return device information."""
