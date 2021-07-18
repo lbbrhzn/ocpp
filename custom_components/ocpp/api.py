@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry
+from homeassistant.helpers import device_registry, entity_registry
 import voluptuous as vol
 import websockets
 
@@ -59,6 +59,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    SENSOR,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -194,6 +195,16 @@ class CentralSystem:
         else:
             resp = False
         return resp
+
+    async def update(self, cp_id: str):
+        """Update sensors values in HA."""
+        er = await entity_registry.async_get(self.hass)
+        dr = await device_registry.async_get_registry(self.hass)
+        identifiers = {(DOMAIN, cp_id)}
+        dev = dr.async_get_device(identifiers)
+        for ent in er.async_entries_for_device(dev):
+            if ent.platform == SENSOR:
+                self.hass.async_create_task(ent.update())
 
     def device_info(self):
         """Return device information."""
@@ -692,6 +703,7 @@ class ChargePoint(cp):
             - float(self._metrics[csess.meter_start.value]),
             1,
         )
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -733,6 +745,7 @@ class ChargePoint(cp):
             if Measurand.power_reactive_import.value in self._metrics:
                 self._metrics[Measurand.power_reactive_import.value] = 0
         self._metrics[cstat.error_code.value] = error_code
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)

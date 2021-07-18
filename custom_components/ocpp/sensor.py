@@ -100,6 +100,6 @@ class ChargePointMetric(Entity):
             "integration": DOMAIN,
         }
 
-    def update(self):
+    async def update(self):
         """Get the latest data and update the states."""
-        pass
+        await self.async_write_ha_state()
