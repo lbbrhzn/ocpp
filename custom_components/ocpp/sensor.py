@@ -102,4 +102,4 @@ class ChargePointMetric(Entity):
 
     def update(self):
         """Get the latest data and update the states."""
-        pass
+        self._state = self.central_system.get_metric(self.cp_id, self.metric)
