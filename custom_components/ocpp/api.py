@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
-
 import voluptuous as vol
 import websockets
 
@@ -60,7 +59,6 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-    SENSOR,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -205,12 +203,10 @@ class CentralSystem:
         dev = dr.async_get_device(identifiers)
         # _LOGGER.info("Device id: %s updating", dev.name)
         for ent in entity_registry.async_entries_for_device(er, dev.id):
-            if SENSOR in ent.entity_id:
-                # _LOGGER.info("Entity id: %s updating", ent.entity_id)
-                self.hass.async_create_task(
-                    entity_component.async_update_entity(self.hass, ent.entity_id)
-                )
-
+            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
+            self.hass.async_create_task(
+                entity_component.async_update_entity(self.hass, ent.entity_id)
+            )
 
     def device_info(self):
         """Return device information."""
