@@ -202,7 +202,7 @@ class CentralSystem:
         dr = device_registry.async_get(self.hass)
         identifiers = {(DOMAIN, cp_id)}
         dev = dr.async_get_device(identifiers)
-        for ent in er.async_entries_for_device(dev):
+        for ent in entity_registry.async_entries_for_device(er, dev):
             if ent.platform == SENSOR:
                 self.hass.async_create_task(ent.update())
 
