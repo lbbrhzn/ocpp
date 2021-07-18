@@ -198,8 +198,8 @@ class CentralSystem:
 
     async def update(self, cp_id: str):
         """Update sensors values in HA."""
-        er = await entity_registry.async_get(self.hass)
-        dr = await device_registry.async_get_registry(self.hass)
+        er = entity_registry.async_get(self.hass)
+        dr = device_registry.async_get(self.hass)
         identifiers = {(DOMAIN, cp_id)}
         dev = dr.async_get_device(identifiers)
         for ent in er.async_entries_for_device(dev):
