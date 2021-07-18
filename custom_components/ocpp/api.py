@@ -8,7 +8,8 @@ from typing import Dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers import device_registry, entity_component, entity_registry
+
 import voluptuous as vol
 import websockets
 
@@ -202,9 +203,14 @@ class CentralSystem:
         dr = device_registry.async_get(self.hass)
         identifiers = {(DOMAIN, cp_id)}
         dev = dr.async_get_device(identifiers)
-        for ent in entity_registry.async_entries_for_device(er, dev):
-            if ent.platform == SENSOR:
-                self.hass.async_create_task(ent.update())
+        # _LOGGER.info("Device id: %s updating", dev.name)
+        for ent in entity_registry.async_entries_for_device(er, dev.id):
+            if SENSOR in ent.entity_id:
+                # _LOGGER.info("Entity id: %s updating", ent.entity_id)
+                self.hass.async_create_task(
+                    entity_component.async_update_entity(self.hass, ent.entity_id)
+                )
+
 
     def device_info(self):
         """Return device information."""
@@ -646,7 +652,7 @@ class ChargePoint(cp):
 
         _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
 
-        dr = await device_registry.async_get_registry(self.hass)
+        dr = device_registry.async_get(self.hass)
 
         serial = boot_info.get(om.charge_point_serial_number.name, None)
 
@@ -723,7 +729,7 @@ class ChargePoint(cp):
         )
 
         asyncio.create_task(self.async_update_device_info(kwargs))
-
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
@@ -752,6 +758,7 @@ class ChargePoint(cp):
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value] = status
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.FirmwareStatusNotificationPayload()
 
     @on(Action.Authorize)
@@ -768,6 +775,7 @@ class ChargePoint(cp):
         self._metrics[cstat.stop_reason.value] = ""
         self._metrics[csess.transaction_id.value] = self._transactionId
         self._metrics[csess.meter_start.value] = int(meter_start) / 1000
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StartTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
             transaction_id=self._transactionId,
@@ -789,6 +797,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_import.value] = 0
         if Measurand.power_reactive_import.value in self._metrics:
             self._metrics[Measurand.power_reactive_import.value] = 0
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -804,7 +813,7 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=timezone.utc).isoformat()
         self._metrics[cstat.heartbeat.value] = now
-        self._units[cstat.heartbeat.value] = "time"
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.HeartbeatPayload(current_time=now)
 
     def get_metric(self, measurand: str):
