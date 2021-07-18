@@ -148,6 +148,12 @@ class ChargePointSwitch(SwitchEntity):
             "integration": DOMAIN,
         }
 
-    def update(self):
+    async def async_update(self):
         """Get the latest data and update the states."""
-        pass
+        if self._purpose.get("metric") is not None:
+            resp = self.central_system.get_metric(self.cp_id, self._purpose["metric"])
+            if resp == self._purpose["condition"]:
+                self._state = True
+            else:
+                self._state = False
+        return self._state
