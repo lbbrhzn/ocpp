@@ -4,7 +4,8 @@ from homeassistant.const import CONF_MONITORED_VARIABLES
 from homeassistant.helpers.entity import Entity
 
 from .api import CentralSystem
-from .const import CONDITIONS, CONF_CPID, DOMAIN, GENERAL, ICON
+from .const import CONF_CPID, DOMAIN, ICON
+from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -20,27 +21,17 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 central_system,
                 cp_id,
                 measurand,
-                "M",
             )
         )
-    for condition in CONDITIONS:
-        entities.append(
-            ChargePointMetric(
-                central_system,
-                cp_id,
-                condition,
-                "S",
+    for list in [HAChargerDetails, HAChargerSession, HAChargerStatuses]:
+        for sensor in list:
+            entities.append(
+                ChargePointMetric(
+                    central_system,
+                    cp_id,
+                    sensor.value,
+                )
             )
-        )
-    for general in GENERAL:
-        entities.append(
-            ChargePointMetric(
-                central_system,
-                cp_id,
-                general,
-                "G",
-            )
-        )
 
     async_add_devices(entities, False)
 
@@ -53,13 +44,11 @@ class ChargePointMetric(Entity):
         central_system: CentralSystem,
         cp_id: str,
         metric: str,
-        genre: str,
     ):
         """Instantiate instance of a ChargePointMetrics."""
         self.central_system = central_system
         self.cp_id = cp_id
         self.metric = metric
-        self._genre = genre
         self._state = None
 
     @property
@@ -76,11 +65,6 @@ class ChargePointMetric(Entity):
     def state(self):
         """Return the state of the sensor."""
         return self.central_system.get_metric(self.cp_id, self.metric)
-
-    @property
-    def genre(self):
-        """Return the type of sensor "M"=measurand "S"=status "G"= general info."""
-        return self._genre
 
     @property
     def unit_of_measurement(self):
@@ -116,6 +100,6 @@ class ChargePointMetric(Entity):
             "integration": DOMAIN,
         }
 
-    def update(self):
+    async def update(self):
         """Get the latest data and update the states."""
-        pass
+        await self.async_write_ha_state()

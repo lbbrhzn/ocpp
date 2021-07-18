@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry
+from homeassistant.helpers import device_registry, entity_registry
 import voluptuous as vol
 import websockets
 
@@ -59,6 +59,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    SENSOR,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -128,8 +129,26 @@ class CentralSystem:
 
     async def on_connect(self, websocket, path: str):
         """Request handler executed for every new OCPP connection."""
+        try:
+            requested_protocols = websocket.request_headers["Sec-WebSocket-Protocol"]
+        except KeyError:
+            _LOGGER.error("Client hasn't requested any Subprotocol. Closing connection")
+            return await websocket.close()
+        if requested_protocols in websocket.available_subprotocols:
+            _LOGGER.info("Websocket Subprotocol matched: %s", requested_protocols)
+        else:
+            # In the websockets lib if no subprotocols are supported by the
+            # client and the server, it proceeds without a subprotocol,
+            # so we have to manually close the connection.
+            _LOGGER.warning(
+                "Protocols mismatched | expected Subprotocols: %s,"
+                " but client supports  %s | Closing connection",
+                websocket.available_subprotocols,
+                requested_protocols,
+            )
+            return await websocket.close()
 
-        _LOGGER.info(f"path={path}")
+        _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
         try:
             if self.cpid not in self.charge_points:
@@ -176,6 +195,16 @@ class CentralSystem:
         else:
             resp = False
         return resp
+
+    async def update(self, cp_id: str):
+        """Update sensors values in HA."""
+        er = entity_registry.async_get(self.hass)
+        dr = device_registry.async_get(self.hass)
+        identifiers = {(DOMAIN, cp_id)}
+        dev = dr.async_get_device(identifiers)
+        for ent in entity_registry.async_entries_for_device(er, dev):
+            if ent.platform == SENSOR:
+                self.hass.async_create_task(ent.update())
 
     def device_info(self):
         """Return device information."""
@@ -246,20 +275,14 @@ class ChargePoint(cp):
             """Handle the configure service call."""
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
-            for line in ckey:
-                if key == line.value:
-                    await self.configure(key, value)
-                    return
-            _LOGGER.error("Ocpp key not supported: %s ", key)
+            await self.configure(key, value)
+            return
 
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
             key = call.data.get("ocpp_key")
-            for line in ckey:
-                if key == line.value:
-                    await self.get_configuration(key)
-                    return
-            _LOGGER.error("Ocpp key not supported: %s ", key)
+            await self.get_configuration(key)
+            return
 
         try:
             await self.get_supported_features()
@@ -281,7 +304,9 @@ class ChargePoint(cp):
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value] = resp.configuration_key[0]["value"]
+            self._metrics[cdet.connectors.value] = resp.configuration_key[0][
+                om.value.value
+            ]
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -322,7 +347,7 @@ class ChargePoint(cp):
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            self._features_supported = key_value["value"]
+            self._features_supported = key_value[om.value.value]
             self._metrics[cdet.features.value] = self._features_supported
             _LOGGER.debug("Supported feature profiles: %s", self._features_supported)
 
@@ -373,10 +398,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0]["value"],
+                resp.configuration_key[0][om.value.value],
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0]["value"]:
+            if om.current.value in resp.configuration_key[0][om.value.value]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -385,7 +410,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0]["value"])
+            stack_level = int(resp.configuration_key[0][om.value.value])
 
             req = call.SetChargingProfilePayload(
                 connector_id=0,
@@ -435,7 +460,7 @@ class ChargePoint(cp):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.configuration_key[0]["value"].lower() == "true":
+        if resp.configuration_key[0][om.value.value].lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         if om.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
@@ -446,7 +471,7 @@ class ChargePoint(cp):
                 resp.configuration_key[0]["value"],
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0]["value"]:
+            if om.current.value in resp.configuration_key[0][om.value.value]:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -455,7 +480,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0]["value"])
+            stack_level = int(resp.configuration_key[0][om.value.value])
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
@@ -544,7 +569,9 @@ class ChargePoint(cp):
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            _LOGGER.debug("Get Configuration for %s: %s", key, key_value["value"])
+            _LOGGER.debug(
+                "Get Configuration for %s: %s", key, key_value[om.value.value]
+            )
         return resp
 
     async def configure(self, key: str, value: str):
@@ -564,7 +591,7 @@ class ChargePoint(cp):
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
             # it.
-            if key_value["key"] == key and key_value["value"] == value:
+            if key_value[om.key.value] == key and key_value[om.value.value] == value:
                 return
 
             if key_value.get(om.readonly.name, False):
@@ -640,43 +667,27 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            for sampled_value in bucket["sampled_value"]:
-                if om.measurand.value in sampled_value:
-                    self._metrics[sampled_value[om.measurand.value]] = sampled_value[
-                        "value"
-                    ]
-                    self._metrics[sampled_value[om.measurand.value]] = round(
-                        float(self._metrics[sampled_value[om.measurand.value]]), 1
+            for sv in bucket[om.sampled_value.name]:
+                if om.measurand.value in sv:
+                    self._metrics[sv[om.measurand.value]] = sv[om.value.value]
+                    self._metrics[sv[om.measurand.value]] = round(
+                        float(self._metrics[sv[om.measurand.value]]), 1
                     )
-                    if "unit" in sampled_value:
-                        self._units[sampled_value[om.measurand.value]] = sampled_value[
-                            "unit"
-                        ]
-                        if (
-                            self._units[sampled_value[om.measurand.value]]
-                            == DEFAULT_POWER_UNIT
-                        ):
-                            self._metrics[sampled_value[om.measurand.value]] = (
-                                float(self._metrics[sampled_value[om.measurand.value]])
-                                / 1000
+                    if om.unit.value in sv:
+                        self._units[sv[om.measurand.value]] = sv[om.unit.value]
+                        if self._units[sv[om.measurand.value]] == DEFAULT_POWER_UNIT:
+                            self._metrics[sv[om.measurand.value]] = (
+                                float(self._metrics[sv[om.measurand.value]]) / 1000
                             )
-                            self._units[
-                                sampled_value[om.measurand.value]
-                            ] = HA_POWER_UNIT
-                        if (
-                            self._units[sampled_value[om.measurand.value]]
-                            == DEFAULT_ENERGY_UNIT
-                        ):
-                            self._metrics[sampled_value[om.measurand.value]] = (
-                                float(self._metrics[sampled_value[om.measurand.value]])
-                                / 1000
+                            self._units[sv[om.measurand.value]] = HA_POWER_UNIT
+                        if self._units[sv[om.measurand.value]] == DEFAULT_ENERGY_UNIT:
+                            self._metrics[sv[om.measurand.value]] = (
+                                float(self._metrics[sv[om.measurand.value]]) / 1000
                             )
-                            self._units[
-                                sampled_value[om.measurand.value]
-                            ] = HA_ENERGY_UNIT
-                if len(sampled_value.keys()) == 1:  # for backwards compatibility
-                    self._metrics[DEFAULT_MEASURAND] = sampled_value["value"]
-                    self._units[DEFAULT_MEASURAND] = DEFAULT_ENERGY_UNIT
+                            self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
+                if len(sv.keys()) == 1:  # for backwards compatibility
+                    self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
+                    self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
         if csess.transaction_id.value not in self._metrics:
@@ -692,6 +703,7 @@ class ChargePoint(cp):
             - float(self._metrics[csess.meter_start.value]),
             1,
         )
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -733,6 +745,7 @@ class ChargePoint(cp):
             if Measurand.power_reactive_import.value in self._metrics:
                 self._metrics[Measurand.power_reactive_import.value] = 0
         self._metrics[cstat.error_code.value] = error_code
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
