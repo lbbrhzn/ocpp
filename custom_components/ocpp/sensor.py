@@ -102,4 +102,4 @@ class ChargePointMetric(Entity):
 
     async def async_update(self):
         """Get the latest data and update the states."""
-        self._state = self.central_system.get_metric(self.cp_id, self.metric)
+        pass
