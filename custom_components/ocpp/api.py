@@ -687,7 +687,7 @@ class ChargePoint(cp):
             l1l2l3[0] = {om.unit.value: sv.get(om.unit.value)}
             extra_attr[sv[om.measurand.value]] = l1l2l3
         for metric, value in extra_attr.items():
-            if metric in [Measurand.voltage.value, Measurand.current_import.value]:
+            if metric in Measurand.voltage.value:
                 self._metrics[metric] = round(
                     (
                         value[1][Phase.l1_n.value]
@@ -697,6 +697,17 @@ class ChargePoint(cp):
                     / 3,
                     1,
                 )
+            if metric in Measurand.current_import.value:
+                self._metrics[metric] = round(
+                    (
+                        value[1][Phase.l1.value]
+                        + value[2][Phase.l2.value]
+                        + value[3][Phase.l3.value]
+                    )
+                    / 3,
+                    1,
+                )
+            _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value.values())
             self._extra_attr[metric] = value.values()
 
     @on(Action.MeterValues)
