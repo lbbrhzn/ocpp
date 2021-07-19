@@ -758,7 +758,7 @@ class ChargePoint(cp):
                 unprocessed.pop(idx)
             _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
             if unprocessed is not None:
-                self.process_phases(unprocessed.values())
+                self.process_phases(unprocessed)
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
         if csess.transaction_id.value not in self._metrics:
