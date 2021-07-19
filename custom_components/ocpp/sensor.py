@@ -50,6 +50,7 @@ class ChargePointMetric(Entity):
         self.cp_id = cp_id
         self.metric = metric
         self._state = None
+        self._extra_attr = {}
 
     @property
     def name(self):
@@ -95,11 +96,8 @@ class ChargePointMetric(Entity):
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        return {
-            "unique_id": self.unique_id,
-            "integration": DOMAIN,
-        }
+        return self.central_system.get_extra_attr(self.cp_id, self.metric)
 
     async def async_update(self):
         """Get the latest data and update the states."""
-        self._state = self.central_system.get_metric(self.cp_id, self.metric)
+        pass
