@@ -679,25 +679,24 @@ class ChargePoint(cp):
         for sv in data:
             # ordered Dict for each phase eg {0:{"unit":"V"},1:{"L1":"230"}...}
             if sv.get(om.phase.value) is not None:
+                metric = sv[om.measurand.value]
+                extra_attr[metric] = {0: {om.unit.value: sv.get(om.unit.value)}}
                 if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
-                    extra_attr[sv[om.measurand.value]][1] = {
-                        sv.get(om.phase.value): float(sv[om.value.value])
+                    extra_attr[metric] = {
+                        1: {sv.get(om.phase.value): float(sv[om.value.value])}
                     }
                 if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
-                    extra_attr[sv[om.measurand.value]][2] = {
-                        sv.get(om.phase.value): float(sv[om.value.value])
+                    extra_attr[metric] = {
+                        2: {sv.get(om.phase.value): float(sv[om.value.value])}
                     }
                 if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
-                    extra_attr[sv[om.measurand.value]][3] = {
-                        sv.get(om.phase.value): float(sv[om.value.value])
+                    extra_attr[metric] = {
+                        3: {sv.get(om.phase.value): float(sv[om.value.value])}
                     }
-                extra_attr[sv[om.measurand.value]][0] = {
-                    om.unit.value: sv.get(om.unit.value)
-                }
                 _LOGGER.debug(
                     "Metric: %s, extra attributes: %s",
-                    sv[om.measurand.value],
-                    extra_attr[sv[om.measurand.value]],
+                    metric,
+                    extra_attr[metric],
                 )
         for metric, value in extra_attr.items():
             _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
