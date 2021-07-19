@@ -31,6 +31,7 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
+    Phase,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -176,6 +177,12 @@ class CentralSystem:
             return self.charge_points[cp_id].get_unit(measurand)
         return None
 
+    def get_extra_attr(self, cp_id: str, measurand: str):
+        """Return last known extra attributes for given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].get_extra_attr(measurand)
+        return None
+
     async def set_charger_state(
         self, cp_id: str, service_name: str, state: bool = True
     ):
@@ -239,6 +246,7 @@ class ChargePoint(cp):
         self._requires_reboot = False
         self._metrics = {}
         self._units = {}
+        self._extra_attr = {}
         self._features_supported = {}
         self.preparing = asyncio.Event()
         self._transactionId = 0
@@ -665,31 +673,54 @@ class ChargePoint(cp):
             sw_version=boot_info.get(om.firmware_version.name, None),
         )
 
+    async def process_phases(self, data):
+        """Process phase data from meter values payload."""
+        extra_attr = {}
+        l1l2l3 = {}  # ordered Dict for each phase eg {0:{"unit":"V"},1:{"l1":"230"}...}
+        for sv in data:
+            if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
+                l1l2l3[1] = {sv.get(om.phase.value): float(sv[om.value.value])}
+            if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
+                l1l2l3[2] = {sv.get(om.phase.value): float(sv[om.value.value])}
+            if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
+                l1l2l3[3] = {sv.get(om.phase.value): float(sv[om.value.value])}
+            l1l2l3[0] = {om.unit.value: sv.get(om.unit.value)}
+            extra_attr[sv[om.measurand.value]] = l1l2l3
+        for metric, value in extra_attr.items():
+            if metric in [Measurand.voltage.value, Measurand.current_import.value]:
+                self._metrics[metric] = round((value[1] + value[2] + value[3]) / 3, 0)
+            self._extra_attr[metric] = value.values()
+
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            for sv in bucket[om.sampled_value.name]:
-                if om.measurand.value in sv:
-                    self._metrics[sv[om.measurand.value]] = sv[om.value.value]
+            unprocessed = enumerate(bucket[om.sampled_value.name])
+            for idx, sv in enumerate(bucket[om.sampled_value.name]):
+                if om.measurand.value in sv and om.phase.value not in sv:
                     self._metrics[sv[om.measurand.value]] = round(
-                        float(self._metrics[sv[om.measurand.value]]), 1
+                        float(sv[om.value.value]), 1
                     )
                     if om.unit.value in sv:
-                        self._units[sv[om.measurand.value]] = sv[om.unit.value]
-                        if self._units[sv[om.measurand.value]] == DEFAULT_POWER_UNIT:
+                        if sv[om.unit.value] == DEFAULT_POWER_UNIT:
                             self._metrics[sv[om.measurand.value]] = (
-                                float(self._metrics[sv[om.measurand.value]]) / 1000
+                                float(sv[om.value.value]) / 1000
                             )
                             self._units[sv[om.measurand.value]] = HA_POWER_UNIT
-                        if self._units[sv[om.measurand.value]] == DEFAULT_ENERGY_UNIT:
+                        if sv[om.unit.value] == DEFAULT_ENERGY_UNIT:
                             self._metrics[sv[om.measurand.value]] = (
-                                float(self._metrics[sv[om.measurand.value]]) / 1000
+                                float(sv[om.value.value]) / 1000
                             )
                             self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
+                    unprocessed.pop(idx)
                 if len(sv.keys()) == 1:  # for backwards compatibility
                     self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
                     self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
+                    unprocessed.pop(idx)
+                self._extra_attr[om.location.value] = sv.get(om.location.value)
+            _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
+            if unprocessed is not None:
+                self.process_phases(unprocessed)
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
         if csess.transaction_id.value not in self._metrics:
@@ -815,6 +846,10 @@ class ChargePoint(cp):
     def get_metric(self, measurand: str):
         """Return last known value for given measurand."""
         return self._metrics.get(measurand, None)
+
+    def get_extra_attr(self, measurand: str):
+        """Return last known extra attributes for given measurand."""
+        return self._extra_attr.get(measurand, None)
 
     def get_unit(self, measurand: str):
         """Return unit of given measurand."""
