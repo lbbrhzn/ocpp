@@ -709,7 +709,12 @@ class ChargePoint(cp):
                 )
                 if sum > 0:
                     self._metrics[metric] = round(sum / 3, 1)
-            if metric in Measurand.current_import.value:
+                else:
+                    self._metrics[metric] = round(sum, 1)
+            if metric in [
+                Measurand.current_import.value,
+                Measurand.current_export.value,
+            ]:
                 sum = (
                     value[1][Phase.l1.value]
                     + value[2][Phase.l2.value]
@@ -717,6 +722,8 @@ class ChargePoint(cp):
                 )
                 if sum > 0:
                     self._metrics[metric] = round(sum / 3, 1)
+                else:
+                    self._metrics[metric] = round(sum, 1)
             _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value.values())
             self._extra_attr[metric] = value.values()
 
