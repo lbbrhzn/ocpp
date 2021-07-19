@@ -676,7 +676,7 @@ class ChargePoint(cp):
     def process_phases(self, data):
         """Process phase data from meter values payload."""
         extra_attr = {}
-        l1l2l3 = {}  # ordered Dict for each phase eg {0:{"unit":"V"},1:{"l1":"230"}...}
+        l1l2l3 = {}  # ordered Dict for each phase eg {0:{"unit":"V"},1:{"L1":"230"}...}
         for sv in data:
             if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
                 l1l2l3[1] = {sv.get(om.phase.value): float(sv[om.value.value])}
