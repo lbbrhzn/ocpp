@@ -688,7 +688,15 @@ class ChargePoint(cp):
             extra_attr[sv[om.measurand.value]] = l1l2l3
         for metric, value in extra_attr.items():
             if metric in [Measurand.voltage.value, Measurand.current_import.value]:
-                self._metrics[metric] = round((value[1] + value[2] + value[3]) / 3, 0)
+                self._metrics[metric] = round(
+                    (
+                        value[1][Phase.l1_n.value]
+                        + value[2][Phase.l2_n.value]
+                        + value[3][Phase.l3_n.value]
+                    )
+                    / 3,
+                    1,
+                )
             self._extra_attr[metric] = value.values()
 
     @on(Action.MeterValues)
