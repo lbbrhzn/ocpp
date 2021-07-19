@@ -687,7 +687,11 @@ class ChargePoint(cp):
                 l1l2l3[3] = {sv.get(om.phase.value): float(sv[om.value.value])}
             l1l2l3[0] = {om.unit.value: sv.get(om.unit.value)}
             extra_attr[sv[om.measurand.value]] = l1l2l3
+            _LOGGER.debug(
+                "Metric: %s, extra attributes: %s", sv[om.measurand.value], l1l2l3
+            )
         for metric, value in extra_attr.items():
+            _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
             if metric in Measurand.voltage.value:
                 self._metrics[metric] = round(
                     (
