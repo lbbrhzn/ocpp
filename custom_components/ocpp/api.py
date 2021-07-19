@@ -673,7 +673,7 @@ class ChargePoint(cp):
             sw_version=boot_info.get(om.firmware_version.name, None),
         )
 
-    async def process_phases(self, data):
+    def process_phases(self, data):
         """Process phase data from meter values payload."""
         extra_attr = {}
         l1l2l3 = {}  # ordered Dict for each phase eg {0:{"unit":"V"},1:{"l1":"230"}...}
