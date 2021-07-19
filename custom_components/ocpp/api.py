@@ -677,22 +677,22 @@ class ChargePoint(cp):
         """Process phase data from meter values payload."""
         extra_attr = {}
         for sv in data:
-            # ordered Dict for each phase eg {0:{"unit":"V"},1:{"L1":"230"}...}
+            # ordered Dict for each phase eg {"metric":{"unit":"V","L1":"230"...}}
             if sv.get(om.phase.value) is not None:
                 metric = sv[om.measurand.value]
-                extra_attr[metric] = {0: {om.unit.value: sv.get(om.unit.value)}}
+                extra_attr[metric] = {om.unit.value: sv.get(om.unit.value)}
                 if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
-                    extra_attr[metric] = {
-                        1: {sv.get(om.phase.value): float(sv[om.value.value])}
-                    }
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
                 if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
-                    extra_attr[metric] = {
-                        2: {sv.get(om.phase.value): float(sv[om.value.value])}
-                    }
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
                 if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
-                    extra_attr[metric] = {
-                        3: {sv.get(om.phase.value): float(sv[om.value.value])}
-                    }
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
                 _LOGGER.debug(
                     "Metric: %s, extra attributes: %s",
                     metric,
@@ -702,9 +702,9 @@ class ChargePoint(cp):
             _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
             if metric in Measurand.voltage.value:
                 sum = (
-                    value[1][Phase.l1_n.value]
-                    + value[2][Phase.l2_n.value]
-                    + value[3][Phase.l3_n.value]
+                    value[Phase.l1_n.value]
+                    + value[Phase.l2_n.value]
+                    + value[Phase.l3_n.value]
                 )
                 if sum > 0:
                     self._metrics[metric] = round(sum / 3, 1)
@@ -715,9 +715,9 @@ class ChargePoint(cp):
                 Measurand.current_export.value,
             ]:
                 sum = (
-                    value[1][Phase.l1.value]
-                    + value[2][Phase.l2.value]
-                    + value[3][Phase.l3.value]
+                    value[Phase.l1.value]
+                    + value[Phase.l2.value]
+                    + value[Phase.l3.value]
                 )
                 if sum > 0:
                     self._metrics[metric] = round(sum / 3, 1)
