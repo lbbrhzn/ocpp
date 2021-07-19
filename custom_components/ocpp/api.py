@@ -695,13 +695,8 @@ class ChargePoint(cp):
                     (extra_attr[metric])[sv.get(om.phase.value)] = float(
                         sv[om.value.value]
                     )
-                _LOGGER.debug(
-                    "Metric: %s, extra attributes: %s",
-                    metric,
-                    extra_attr[metric],
-                )
         for metric, value in extra_attr.items():
-            _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
+            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
             if metric in Measurand.voltage.value:
                 sum = (
                     value[Phase.l1_n.value]
@@ -725,7 +720,6 @@ class ChargePoint(cp):
                     self._metrics[metric] = round(sum / 3, 1)
                 else:
                     self._metrics[metric] = round(sum, 1)
-            _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value.values())
             self._extra_attr[metric] = value
 
     @on(Action.MeterValues)
@@ -758,7 +752,7 @@ class ChargePoint(cp):
                 self._extra_attr[om.location.value] = sv.get(om.location.value)
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
-            _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
+            # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
             if unprocessed is not None:
                 self.process_phases(unprocessed)
         if csess.meter_start.value not in self._metrics:
