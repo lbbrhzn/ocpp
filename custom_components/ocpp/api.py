@@ -679,39 +679,38 @@ class ChargePoint(cp):
         for sv in data:
             # ordered Dict for each phase eg {0:{"unit":"V"},1:{"L1":"230"}...}
             l1l2l3 = {}
-            if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
-                l1l2l3[1] = {sv.get(om.phase.value): float(sv[om.value.value])}
-            if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
-                l1l2l3[2] = {sv.get(om.phase.value): float(sv[om.value.value])}
-            if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
-                l1l2l3[3] = {sv.get(om.phase.value): float(sv[om.value.value])}
-            l1l2l3[0] = {om.unit.value: sv.get(om.unit.value)}
-            extra_attr[sv[om.measurand.value]] = l1l2l3
-            _LOGGER.debug(
-                "Metric: %s, extra attributes: %s", sv[om.measurand.value], l1l2l3
-            )
+            if sv.get(om.phase.value) is not None:
+                if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
+                    l1l2l3[1] = {sv.get(om.phase.value): float(sv[om.value.value])}
+                if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
+                    l1l2l3[2] = {sv.get(om.phase.value): float(sv[om.value.value])}
+                if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
+                    l1l2l3[3] = {sv.get(om.phase.value): float(sv[om.value.value])}
+                l1l2l3[0] = {om.unit.value: sv.get(om.unit.value)}
+                extra_attr[sv[om.measurand.value]] = l1l2l3
+                _LOGGER.debug(
+                    "Metric: %s, extra attributes: %s",
+                    sv[om.measurand.value],
+                    extra_attr[sv[om.measurand.value]],
+                )
         for metric, value in extra_attr.items():
             _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
             if metric in Measurand.voltage.value:
-                self._metrics[metric] = round(
-                    (
-                        value[1][Phase.l1_n.value]
-                        + value[2][Phase.l2_n.value]
-                        + value[3][Phase.l3_n.value]
-                    )
-                    / 3,
-                    1,
+                sum = (
+                    value[1][Phase.l1_n.value]
+                    + value[2][Phase.l2_n.value]
+                    + value[3][Phase.l3_n.value]
                 )
+                if sum > 0:
+                    self._metrics[metric] = round(sum / 3, 1)
             if metric in Measurand.current_import.value:
-                self._metrics[metric] = round(
-                    (
-                        value[1][Phase.l1.value]
-                        + value[2][Phase.l2.value]
-                        + value[3][Phase.l3.value]
-                    )
-                    / 3,
-                    1,
+                sum = (
+                    value[1][Phase.l1.value]
+                    + value[2][Phase.l2.value]
+                    + value[3][Phase.l3.value]
                 )
+                if sum > 0:
+                    self._metrics[metric] = round(sum / 3, 1)
             _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value.values())
             self._extra_attr[metric] = value.values()
 
