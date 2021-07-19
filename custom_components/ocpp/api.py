@@ -695,7 +695,7 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            unprocessed = enumerate(bucket[om.sampled_value.name])
+            unprocessed = bucket[om.sampled_value.name]
             for idx, sv in enumerate(bucket[om.sampled_value.name]):
                 if om.measurand.value in sv and om.phase.value not in sv:
                     self._metrics[sv[om.measurand.value]] = round(
