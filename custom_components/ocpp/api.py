@@ -680,6 +680,8 @@ class ChargePoint(cp):
             # ordered Dict for each phase eg {"metric":{"unit":"V","L1":"230"...}}
             if sv.get(om.phase.value) is not None:
                 metric = sv[om.measurand.value]
+                if extra_attr.get(metric) is None:
+                    extra_attr[metric] = {}
                 (extra_attr[metric])[om.unit.value] = sv.get(om.unit.value)
                 if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
                     (extra_attr[metric])[sv.get(om.phase.value)] = float(
