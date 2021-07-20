@@ -148,6 +148,6 @@ class ChargePointSwitch(SwitchEntity):
             "integration": DOMAIN,
         }
 
-    def update(self):
+    async def async_update(self):
         """Get the latest data and update the states."""
         pass

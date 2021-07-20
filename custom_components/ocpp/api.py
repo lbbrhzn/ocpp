@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry
+from homeassistant.helpers import device_registry, entity_component, entity_registry
 import voluptuous as vol
 import websockets
 
@@ -31,6 +31,7 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
+    Phase,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -176,6 +177,12 @@ class CentralSystem:
             return self.charge_points[cp_id].get_unit(measurand)
         return None
 
+    def get_extra_attr(self, cp_id: str, measurand: str):
+        """Return last known extra attributes for given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].get_extra_attr(measurand)
+        return None
+
     async def set_charger_state(
         self, cp_id: str, service_name: str, state: bool = True
     ):
@@ -194,6 +201,19 @@ class CentralSystem:
         else:
             resp = False
         return resp
+
+    async def update(self, cp_id: str):
+        """Update sensors values in HA."""
+        er = entity_registry.async_get(self.hass)
+        dr = device_registry.async_get(self.hass)
+        identifiers = {(DOMAIN, cp_id)}
+        dev = dr.async_get_device(identifiers)
+        # _LOGGER.info("Device id: %s updating", dev.name)
+        for ent in entity_registry.async_entries_for_device(er, dev.id):
+            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
+            self.hass.async_create_task(
+                entity_component.async_update_entity(self.hass, ent.entity_id)
+            )
 
     def device_info(self):
         """Return device information."""
@@ -226,6 +246,7 @@ class ChargePoint(cp):
         self._requires_reboot = False
         self._metrics = {}
         self._units = {}
+        self._extra_attr = {}
         self._features_supported = {}
         self.preparing = asyncio.Event()
         self._transactionId = 0
@@ -635,7 +656,7 @@ class ChargePoint(cp):
 
         _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
 
-        dr = await device_registry.async_get_registry(self.hass)
+        dr = device_registry.async_get(self.hass)
 
         serial = boot_info.get(om.charge_point_serial_number.name, None)
 
@@ -652,31 +673,88 @@ class ChargePoint(cp):
             sw_version=boot_info.get(om.firmware_version.name, None),
         )
 
+    def process_phases(self, data):
+        """Process phase data from meter values payload."""
+        extra_attr = {}
+        for sv in data:
+            # ordered Dict for each phase eg {"metric":{"unit":"V","L1":"230"...}}
+            if sv.get(om.phase.value) is not None:
+                metric = sv[om.measurand.value]
+                if extra_attr.get(metric) is None:
+                    extra_attr[metric] = {}
+                (extra_attr[metric])[om.unit.value] = sv.get(om.unit.value)
+                if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+                if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+                if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+        for metric, value in extra_attr.items():
+            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
+            if metric in Measurand.voltage.value:
+                sum = (
+                    value[Phase.l1_n.value]
+                    + value[Phase.l2_n.value]
+                    + value[Phase.l3_n.value]
+                )
+                if sum > 0:
+                    self._metrics[metric] = round(sum / 3, 1)
+                else:
+                    self._metrics[metric] = round(sum, 1)
+            if metric in [
+                Measurand.current_import.value,
+                Measurand.current_export.value,
+            ]:
+                sum = (
+                    value[Phase.l1.value]
+                    + value[Phase.l2.value]
+                    + value[Phase.l3.value]
+                )
+                if sum > 0:
+                    self._metrics[metric] = round(sum / 3, 1)
+                else:
+                    self._metrics[metric] = round(sum, 1)
+            self._extra_attr[metric] = value
+
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
         for bucket in meter_value:
-            for sv in bucket[om.sampled_value.name]:
-                if om.measurand.value in sv:
-                    self._metrics[sv[om.measurand.value]] = sv[om.value.value]
+            unprocessed = bucket[om.sampled_value.name]
+            processed_keys = []
+            for idx, sv in enumerate(bucket[om.sampled_value.name]):
+                if om.measurand.value in sv and om.phase.value not in sv:
                     self._metrics[sv[om.measurand.value]] = round(
-                        float(self._metrics[sv[om.measurand.value]]), 1
+                        float(sv[om.value.value]), 1
                     )
                     if om.unit.value in sv:
-                        self._units[sv[om.measurand.value]] = sv[om.unit.value]
-                        if self._units[sv[om.measurand.value]] == DEFAULT_POWER_UNIT:
+                        if sv[om.unit.value] == DEFAULT_POWER_UNIT:
                             self._metrics[sv[om.measurand.value]] = (
-                                float(self._metrics[sv[om.measurand.value]]) / 1000
+                                float(sv[om.value.value]) / 1000
                             )
                             self._units[sv[om.measurand.value]] = HA_POWER_UNIT
-                        if self._units[sv[om.measurand.value]] == DEFAULT_ENERGY_UNIT:
+                        if sv[om.unit.value] == DEFAULT_ENERGY_UNIT:
                             self._metrics[sv[om.measurand.value]] = (
-                                float(self._metrics[sv[om.measurand.value]]) / 1000
+                                float(sv[om.value.value]) / 1000
                             )
                             self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
+                    processed_keys.append(idx)
                 if len(sv.keys()) == 1:  # for backwards compatibility
                     self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
                     self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
+                    processed_keys.append(idx)
+                self._extra_attr[om.location.value] = sv.get(om.location.value)
+            for idx in sorted(processed_keys, reverse=True):
+                unprocessed.pop(idx)
+            # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
+            if unprocessed is not None:
+                self.process_phases(unprocessed)
         if csess.meter_start.value not in self._metrics:
             self._metrics[csess.meter_start.value] = self._metrics[DEFAULT_MEASURAND]
         if csess.transaction_id.value not in self._metrics:
@@ -692,6 +770,7 @@ class ChargePoint(cp):
             - float(self._metrics[csess.meter_start.value]),
             1,
         )
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -711,7 +790,7 @@ class ChargePoint(cp):
         )
 
         asyncio.create_task(self.async_update_device_info(kwargs))
-
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
@@ -733,12 +812,14 @@ class ChargePoint(cp):
             if Measurand.power_reactive_import.value in self._metrics:
                 self._metrics[Measurand.power_reactive_import.value] = 0
         self._metrics[cstat.error_code.value] = error_code
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value] = status
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.FirmwareStatusNotificationPayload()
 
     @on(Action.Authorize)
@@ -755,6 +836,7 @@ class ChargePoint(cp):
         self._metrics[cstat.stop_reason.value] = ""
         self._metrics[csess.transaction_id.value] = self._transactionId
         self._metrics[csess.meter_start.value] = int(meter_start) / 1000
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StartTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
             transaction_id=self._transactionId,
@@ -776,6 +858,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_import.value] = 0
         if Measurand.power_reactive_import.value in self._metrics:
             self._metrics[Measurand.power_reactive_import.value] = 0
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -791,12 +874,16 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=timezone.utc).isoformat()
         self._metrics[cstat.heartbeat.value] = now
-        self._units[cstat.heartbeat.value] = "time"
+        self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.HeartbeatPayload(current_time=now)
 
     def get_metric(self, measurand: str):
         """Return last known value for given measurand."""
         return self._metrics.get(measurand, None)
+
+    def get_extra_attr(self, measurand: str):
+        """Return last known extra attributes for given measurand."""
+        return self._extra_attr.get(measurand, None)
 
     def get_unit(self, measurand: str):
         """Return unit of given measurand."""
