@@ -716,7 +716,7 @@ class ChargePoint(cp):
                     + value[Phase.l2.value]
                     + value[Phase.l3.value]
                 )
-            self._metrics[metric] = round(sum, 1)
+                self._metrics[metric] = round(sum, 1)
             self._extra_attr[metric] = value
 
     @on(Action.MeterValues)
