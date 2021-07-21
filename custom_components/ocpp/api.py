@@ -716,10 +716,7 @@ class ChargePoint(cp):
                     + value[Phase.l2.value]
                     + value[Phase.l3.value]
                 )
-                if sum > 0:
-                    self._metrics[metric] = round(sum / 3, 1)
-                else:
-                    self._metrics[metric] = round(sum, 1)
+            self._metrics[metric] = round(sum, 1)
             self._extra_attr[metric] = value
 
     @on(Action.MeterValues)
