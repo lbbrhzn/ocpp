@@ -703,10 +703,7 @@ class ChargePoint(cp):
                     + value[Phase.l2_n.value]
                     + value[Phase.l3_n.value]
                 )
-                if sum > 0:
-                    self._metrics[metric] = round(sum / 3, 1)
-                else:
-                    self._metrics[metric] = round(sum, 1)
+                self._metrics[metric] = round(sum / 3, 1)
             if metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
@@ -746,7 +743,7 @@ class ChargePoint(cp):
                     self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
                     self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
                     processed_keys.append(idx)
-                self._extra_attr[om.location.value] = sv.get(om.location.value)
+                self._extra_attr[sv[om.location.value]] = sv.get(om.location.value)
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
             # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
