@@ -694,7 +694,7 @@ class ChargePoint(cp):
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
             if metric in Measurand.voltage.value:
-                if Phase.l1_n.value in phase_attr:
+                if Phase.l1_n.value in phase_info:
                     """Line-neutral voltages are averaged."""
                     metric_value = (
                         phase_info.get(Phase.l1_n.value,0)
@@ -708,20 +708,20 @@ class ChargePoint(cp):
                         + phase_info.get(Phase.l2_l3.value,0)
                         + phase_info.get(Phase.l3_l1.value,0)
                     ) / (3*sqrt(3))               
-            elseif metric_name in [
+            elseif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
                 Measurand.active_power_import.value,
                 Measurand.active_power_export.value
             ]:
                 """Line currents and powers are summed."""
-                if Phase.l1.value in metric_attr:
+                if Phase.l1.value in phase_info:
                     metric_value  = (
                         metric_attr.get(Phase.l1.value,0)
                         + metric_attr.get(Phase.l2.value,0)
                         + metric_attr.get(Phase.l3.value,0)
                     )
-            self._metrics[metric_name] = round(metric_value,1) if metric_value is not None
+            self._metrics[metric] = round(metric_value,1) if metric_value is not None
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
