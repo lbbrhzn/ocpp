@@ -682,8 +682,9 @@ class ChargePoint(cp):
             phase = sv.get(om.phase.value, None)
             value = sv.get(om.value.value, None)
             unit = sv.get(om.unit.value, None)
-            if measurand is not None and phase is not None:
-                measurand_data[measurand] = {} if measurand_data[measurand] is None       
+            if measurand is not None and phase is not None:    
+                if measurand_data[measurand] is None:
+                    measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
                 
@@ -721,7 +722,8 @@ class ChargePoint(cp):
                         + metric_attr.get(Phase.l2.value,0)
                         + metric_attr.get(Phase.l3.value,0)
                     )
-            self._metrics[metric] = round(metric_value,1) if metric_value is not None
+            if metric_value is not None:
+                self._metrics[metric] = round(metric_value,1) 
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
