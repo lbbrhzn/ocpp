@@ -702,14 +702,14 @@ class ChargePoint(cp):
                         + phase_info.get(Phase.l2_n.value,0)
                         + phase_info.get(Phase.l3_n.value,0)
                     ) / 3
-                elseif Phase.l1_l2.value in phase_info:
+                else if Phase.l1_l2.value in phase_info:
                     """Line-line voltages are converted to line-neutral and averaged."""
                     metric_value  = (
                         phase_info.get(Phase.l1_l2.value,0)
                         + phase_info.get(Phase.l2_l3.value,0)
                         + phase_info.get(Phase.l3_l1.value,0)
                     ) / (3*sqrt(3))               
-            elseif metric in [
+            else if metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
                 Measurand.active_power_import.value,
