@@ -8,7 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
-from custom_components.ocpp.const import DOMAIN, SWITCH
+from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
@@ -30,7 +30,7 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .const import MOCK_CONFIG_DATA, SWITCHES
+from .const import MOCK_CONFIG_DATA
 
 
 async def test_cms_responses(hass):
