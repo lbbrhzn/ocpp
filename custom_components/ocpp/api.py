@@ -687,7 +687,7 @@ class ChargePoint(cp):
                 if measurand_data[measurand] is None:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)  
+                measurand_data[measurand][phase] = float(value)
         # store the measurand data as extra attributes
         self._extra_attr.update(measurand_data)
         for metric, phase_info in measurand_data.items():
