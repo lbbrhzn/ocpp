@@ -683,13 +683,13 @@ class ChargePoint(cp):
             phase = sv.get(om.phase.value, None)
             value = sv.get(om.value.value, None)
             unit = sv.get(om.unit.value, None)
-            if measurand is not None and phase is not None:    
+            if measurand is not None and phase is not None:
                 if measurand_data[measurand] is None:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)              
-        # store the phase attributes o as extra attributes
-        self._extra_attr.update(measurand_data)        
+                measurand_data[measurand][phase] = float(value)  
+        # store the measurand data as extra attributes
+        self._extra_attr.update(measurand_data)
         for metric, phase_info in measurand_data.items():
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
