@@ -2,9 +2,9 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
+from math import sqrt
 import time
 from typing import Dict
-from math import sqrt
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
@@ -699,16 +699,16 @@ class ChargePoint(cp):
                 if Phase.l1_n.value in phase_info:
                     """Line-neutral voltages are averaged."""
                     metric_value = (
-                        phase_info.get(Phase.l1_n.value,0)
-                        + phase_info.get(Phase.l2_n.value,0)
-                        + phase_info.get(Phase.l3_n.value,0)
+                        phase_info.get(Phase.l1_n.value, 0)
+                        + phase_info.get(Phase.l2_n.value, 0)
+                        + phase_info.get(Phase.l3_n.value, 0)
                     ) / 3
                 elif Phase.l1_l2.value in phase_info:
                     """Line-line voltages are converted to line-neutral and averaged."""
                     metric_value  = (
-                        phase_info.get(Phase.l1_l2.value,0)
-                        + phase_info.get(Phase.l2_l3.value,0)
-                        + phase_info.get(Phase.l3_l1.value,0)
+                        phase_info.get(Phase.l1_l2.value, 0)
+                        + phase_info.get(Phase.l2_l3.value, 0)
+                        + phase_info.get(Phase.l3_l1.value, 0)
                     ) / (3*sqrt(3))               
             elif metric in [
                 Measurand.current_import.value,
@@ -719,9 +719,9 @@ class ChargePoint(cp):
                 """Line currents and powers are summed."""
                 if Phase.l1.value in phase_info:
                     metric_value  = (
-                        phase_info.get(Phase.l1.value,0)
-                        + phase_info.get(Phase.l2.value,0)
-                        + phase_info.get(Phase.l3.value,0)
+                        phase_info.get(Phase.l1.value, 0)
+                        + phase_info.get(Phase.l2.value, 0)
+                        + phase_info.get(Phase.l3.value, 0)
                     )
             if metric_value is not None:
                 self._metrics[metric] = round(metric_value,1) 
