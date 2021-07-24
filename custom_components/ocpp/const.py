@@ -1,7 +1,9 @@
 """Define constants for OCPP integration."""
 import homeassistant.const as ha
 
-from ocpp.v16.enums import Measurand, UnitOfMeasure
+from ocpp.v16.enums import ChargePointStatus, Measurand, UnitOfMeasure
+
+from .enums import HAChargerServices, HAChargerStatuses
 
 DOMAIN = "ocpp"
 CONF_METER_INTERVAL = "meter_interval"
@@ -63,26 +65,32 @@ DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
 
-# Additional conditions/states to monitor
-CONDITIONS = [
-    "Status",
-    "Heartbeat",
-    "Error.Code",
-    "Stop.Reason",
-    "FW.Status",
-    "Session.Time",  # in min
-    "Session.Energy",  # in kWh
-    "Meter.Start",  # in kWh
-]
-
-# Additional general information to report
-GENERAL = [
-    "ID",
-    "Model",
-    "Vendor",
-    "Serial",
-    "FW.Version",
-    "Features",
-    "Connectors",
-    "Transaction.Id",
-]
+# Switch configuration definitions
+# At a minimum define switch name and on service call, pulse used to call a service once such as reset
+# metric and condition combination can be used to drive switch state, use default to set initial state to True
+SWITCH_CHARGE = {
+    "name": "Charge_Control",
+    "on": HAChargerServices.service_charge_start.name,
+    "off": HAChargerServices.service_charge_stop.name,
+    "metric": HAChargerStatuses.status.value,
+    "condition": ChargePointStatus.charging.value,
+}
+SWITCH_AVAILABILITY = {
+    "name": "Availability",
+    "on": HAChargerServices.service_availability.name,
+    "off": HAChargerServices.service_availability.name,
+    "default": True,
+    "metric": HAChargerStatuses.status.value,
+    "condition": ChargePointStatus.available.value,
+}
+SWITCH_RESET = {
+    "name": "Reset",
+    "on": HAChargerServices.service_reset.name,
+    "pulse": True,
+}
+SWITCH_UNLOCK = {
+    "name": "Unlock",
+    "on": HAChargerServices.service_unlock.name,
+    "pulse": True,
+}
+SWITCHES = [SWITCH_CHARGE, SWITCH_RESET, SWITCH_UNLOCK, SWITCH_AVAILABILITY]
