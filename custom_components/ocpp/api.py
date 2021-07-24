@@ -709,7 +709,7 @@ class ChargePoint(cp):
                         phase_info.get(Phase.l1_l2.value, 0)
                         + phase_info.get(Phase.l2_l3.value, 0)
                         + phase_info.get(Phase.l3_l1.value, 0)
-                    ) / (3*sqrt(3))               
+                    ) / (3 * sqrt(3))               
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
@@ -724,7 +724,7 @@ class ChargePoint(cp):
                         + phase_info.get(Phase.l3.value, 0)
                     )
             if metric_value is not None:
-                self._metrics[metric] = round(metric_value,1) 
+                self._metrics[metric] = round(metric_value, 1) 
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
