@@ -705,7 +705,7 @@ class ChargePoint(cp):
                     ) / 3
                 elif Phase.l1_l2.value in phase_info:
                     """Line-line voltages are converted to line-neutral and averaged."""
-                    metric_value  = (
+                    metric_value = (
                         phase_info.get(Phase.l1_l2.value, 0)
                         + phase_info.get(Phase.l2_l3.value, 0)
                         + phase_info.get(Phase.l3_l1.value, 0)
@@ -714,11 +714,11 @@ class ChargePoint(cp):
                 Measurand.current_import.value,
                 Measurand.current_export.value,
                 Measurand.active_power_import.value,
-                Measurand.active_power_export.value
+                Measurand.active_power_export.value,
             ]:
                 """Line currents and powers are summed."""
                 if Phase.l1.value in phase_info:
-                    metric_value  = (
+                    metric_value = (
                         phase_info.get(Phase.l1.value, 0)
                         + phase_info.get(Phase.l2.value, 0)
                         + phase_info.get(Phase.l3.value, 0)
