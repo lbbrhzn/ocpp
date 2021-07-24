@@ -684,7 +684,7 @@ class ChargePoint(cp):
             value = sv.get(om.value.value, None)
             unit = sv.get(om.unit.value, None)
             if measurand is not None and phase is not None:
-                if measurand_data[measurand] is None:
+                if measurand not in measurand_data:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
