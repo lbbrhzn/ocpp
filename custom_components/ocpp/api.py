@@ -693,7 +693,7 @@ class ChargePoint(cp):
         for metric, phase_info in measurand_data.items():
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
-            if metric in Measurand.voltage.value:
+            if metric in [Measurand.voltage.value]:
                 if Phase.l1_n.value in phase_info:
                     """Line-neutral voltages are averaged."""
                     metric_value = (
