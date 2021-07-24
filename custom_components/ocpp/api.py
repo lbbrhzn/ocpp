@@ -687,11 +687,9 @@ class ChargePoint(cp):
                 if measurand_data[measurand] is None:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)
-                
+                measurand_data[measurand][phase] = float(value)              
         # store the phase attributes o as extra attributes
-        self._extra_attr.update(measurand_data)
-        
+        self._extra_attr.update(measurand_data)        
         for metric, phase_info in measurand_data.items():
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
@@ -709,7 +707,7 @@ class ChargePoint(cp):
                         phase_info.get(Phase.l1_l2.value, 0)
                         + phase_info.get(Phase.l2_l3.value, 0)
                         + phase_info.get(Phase.l3_l1.value, 0)
-                    ) / (3 * sqrt(3))               
+                    ) / (3 * sqrt(3))
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
@@ -724,7 +722,7 @@ class ChargePoint(cp):
                         + phase_info.get(Phase.l3.value, 0)
                     )
             if metric_value is not None:
-                self._metrics[metric] = round(metric_value, 1) 
+                self._metrics[metric] = round(metric_value, 1)
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
