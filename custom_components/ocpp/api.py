@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import time
 from typing import Dict
+from math import sqrt
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MINUTES
@@ -718,9 +719,9 @@ class ChargePoint(cp):
                 """Line currents and powers are summed."""
                 if Phase.l1.value in phase_info:
                     metric_value  = (
-                        metric_attr.get(Phase.l1.value,0)
-                        + metric_attr.get(Phase.l2.value,0)
-                        + metric_attr.get(Phase.l3.value,0)
+                        phase_info.get(Phase.l1.value,0)
+                        + phase_info.get(Phase.l2.value,0)
+                        + phase_info.get(Phase.l3.value,0)
                     )
             if metric_value is not None:
                 self._metrics[metric] = round(metric_value,1) 
