@@ -85,8 +85,8 @@ async def test_cms_responses(hass):
                     cp.send_status_notification(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
-                    cp.send_start_transaction(),
                     cp.send_meter_data(),
+                    cp.send_start_transaction(),
                     cp.send_stop_transaction(),
                 ),
                 timeout=4,
@@ -378,7 +378,7 @@ class ChargePoint(cpclass):
                             "context": "Sample.Periodic",
                             "measurand": "Power.Active.Import",
                             "location": "Outlet",
-                            "unit": "W",
+                            "unit": "kW",
                         },
                         {
                             "value": "0.000",
