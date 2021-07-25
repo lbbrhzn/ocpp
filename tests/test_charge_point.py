@@ -465,6 +465,20 @@ class ChargePoint(cpclass):
                             "unit": "V",
                             "phase": "L3-L1",
                         },
+                        {
+                            "value": "89.00",
+                            "context": "Sample.Periodic",
+                            "measurand": "Power.Reactive.Import",
+                            "unit": "W",
+                        },
+                        {
+                            "value": "0.010",
+                            "context": "Transaction.Begin",
+                            "unit": "kWh",
+                        },
+                        {
+                            "value": "398.900",
+                        },
                     ],
                 }
             ],
