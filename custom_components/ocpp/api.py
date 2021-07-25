@@ -658,6 +658,7 @@ class ChargePoint(cp):
         """Reconnect charge point."""
         self._connection = connection
         try:
+            self.status = STATE_OK
             await super().start()
         except websockets.exceptions.ConnectionClosed as e:
             _LOGGER.debug(e)

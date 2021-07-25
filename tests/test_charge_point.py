@@ -107,6 +107,7 @@ async def test_cms_responses(hass):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    test_switches(hass),
                     cs.charge_points["test_cpid"].start_transaction(),
                     cs.charge_points["test_cpid"].reset(),
                     cs.charge_points["test_cpid"].set_charge_rate(10, 2000),
@@ -116,7 +117,6 @@ async def test_cms_responses(hass):
                     ),
                     cs.charge_points["test_cpid"].unlock(),
                     cs.charge_points["test_cpid"].stop_transaction(),
-                    test_switches(hass),
                 ),
                 timeout=4,
             )
