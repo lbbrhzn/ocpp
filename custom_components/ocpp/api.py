@@ -302,6 +302,7 @@ class ChargePoint(cp):
             return
 
         try:
+            self.status = STATE_OK
             await self.get_supported_features()
             if om.feature_profile_remote.value in self._features_supported:
                 await self.trigger_boot_notification()
@@ -356,7 +357,6 @@ class ChargePoint(cp):
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
                 )
-            self.status = STATE_OK
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 

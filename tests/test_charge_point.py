@@ -75,33 +75,36 @@ async def test_cms_responses(hass):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_test", ws)
-        asyncio.create_task(cp.start())
-        await asyncio.sleep(1)
         try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.send_boot_notification(),
-                    cp.send_authorize(),
-                    cp.send_heartbeat(),
-                    cp.send_status_notification(),
-                    cp.send_firmware_status(),
-                    cp.send_data_transfer(),
-                    cp.send_start_transaction(),
-                    cp.send_meter_data(),
-                    cp.send_stop_transaction(),
-                    cs.charge_points["test_cpid"].start_transaction(),
-                    cs.charge_points["test_cpid"].reset(),
-                    cs.charge_points["test_cpid"].set_charge_rate(),
-                    cs.charge_points["test_cpid"].clear_profile(),
-                    cs.charge_points["test_cpid"].update_firmware(
-                        "http://www.charger.com/file.bin"
+            asyncio.create_task(cp.start())
+            await asyncio.sleep(1)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        cp.send_boot_notification(),
+                        cp.send_authorize(),
+                        cp.send_heartbeat(),
+                        cp.send_status_notification(),
+                        cp.send_firmware_status(),
+                        cp.send_data_transfer(),
+                        cp.send_start_transaction(),
+                        cp.send_meter_data(),
+                        cp.send_stop_transaction(),
+                        cs.charge_points["test_cpid"].start_transaction(),
+                        cs.charge_points["test_cpid"].reset(),
+                        cs.charge_points["test_cpid"].set_charge_rate(),
+                        cs.charge_points["test_cpid"].clear_profile(),
+                        cs.charge_points["test_cpid"].update_firmware(
+                            "http://www.charger.com/file.bin"
+                        ),
+                        cs.charge_points["test_cpid"].unlock(),
+                        test_switches(hass),
                     ),
-                    cs.charge_points["test_cpid"].unlock(),
-                    test_switches(hass),
-                ),
-                timeout=5,
-            )
-        except asyncio.TimeoutError:
+                    timeout=5,
+                )
+            except asyncio.TimeoutError:
+                pass
+        except websockets.ConnectionClosed:
             pass
         assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
             1305570 / 1000
