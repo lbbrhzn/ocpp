@@ -285,7 +285,7 @@ class ChargePoint(cpclass):
         request = call.StatusNotificationPayload(
             connector_id=1,
             error_code=ChargePointErrorCode.no_error,
-            status=ChargePointStatus.charging,
+            status=ChargePointStatus.suspended_ev,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
