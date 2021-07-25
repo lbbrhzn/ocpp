@@ -163,7 +163,7 @@ class CentralSystem:
         except Exception as e:
             _LOGGER.info(f"Exception occurred:\n{e}")
         finally:
-            self.charge_points[cp_id].status = STATE_UNAVAILABLE
+            self.charge_points[self.cpid].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
@@ -302,6 +302,7 @@ class ChargePoint(cp):
             return
 
         try:
+            self.status = STATE_OK
             await self.get_supported_features()
             if om.feature_profile_remote.value in self._features_supported:
                 await self.trigger_boot_notification()
@@ -356,7 +357,6 @@ class ChargePoint(cp):
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
                 )
-            self.status = STATE_OK
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
@@ -657,7 +657,11 @@ class ChargePoint(cp):
     async def reconnect(self, connection):
         """Reconnect charge point."""
         self._connection = connection
-        await self.start()
+        try:
+            self.status = STATE_OK
+            await super().start()
+        except websockets.exceptions.ConnectionClosed as e:
+            _LOGGER.debug(e)
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
