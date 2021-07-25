@@ -76,7 +76,7 @@ async def test_cms_responses(hass):
         # use a different id for debugging
         cp = ChargePoint("CP_1_test", ws)
         try:
-            asyncio.create_task(cp.start())
+            await asyncio.gather(cp.start())
             await asyncio.sleep(1)
             try:
                 await asyncio.wait_for(
