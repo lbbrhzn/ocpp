@@ -412,6 +412,11 @@ class ChargePoint(cpclass):
                             "measurand": "Power.Reactive.Import",
                             "unit": "W",
                         },
+                        {
+                            "value": "0.010",
+                            "context": "Transaction.Begin",
+                            "unit": "kWh",
+                        },
                     ],
                 }
             ],

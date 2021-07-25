@@ -738,9 +738,9 @@ class ChargePoint(cp):
                     self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
                     self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
                     processed_keys.append(idx)
-                if self._extra_attr.get(sv[m]) is None:
-                    self._extra_attr[sv[m]] = {}
                 if m in sv and om.location.value in sv:
+                    if self._extra_attr.get(sv[m]) is None:
+                        self._extra_attr[sv[m]] = {}
                     self._extra_attr[sv[m]][om.location.value] = sv.get(
                         om.location.value
                     )
