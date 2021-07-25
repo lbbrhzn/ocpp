@@ -89,7 +89,7 @@ async def test_cms_responses(hass):
                     cp.send_meter_data(),
                     cp.send_stop_transaction(),
                 ),
-                timeout=5,
+                timeout=4,
             )
         except asyncio.TimeoutError:
             pass
@@ -109,15 +109,16 @@ async def test_cms_responses(hass):
                     cp.start(),
                     cs.charge_points["test_cpid"].start_transaction(),
                     cs.charge_points["test_cpid"].reset(),
-                    cs.charge_points["test_cpid"].set_charge_rate(),
+                    cs.charge_points["test_cpid"].set_charge_rate(10, 2000),
                     cs.charge_points["test_cpid"].clear_profile(),
                     cs.charge_points["test_cpid"].update_firmware(
                         "http://www.charger.com/file.bin"
                     ),
                     cs.charge_points["test_cpid"].unlock(),
+                    cs.charge_points["test_cpid"].stop_transaction(),
                     test_switches(hass),
                 ),
-                timeout=3,
+                timeout=4,
             )
         except asyncio.TimeoutError:
             pass
