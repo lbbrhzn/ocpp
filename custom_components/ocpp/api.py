@@ -657,7 +657,10 @@ class ChargePoint(cp):
     async def reconnect(self, connection):
         """Reconnect charge point."""
         self._connection = connection
-        await self.start()
+        try:
+            await super().start()
+        except websockets.exceptions.ConnectionClosed as e:
+            _LOGGER.debug(e)
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""

@@ -89,7 +89,7 @@ async def test_cms_responses(hass):
                     cp.send_meter_data(),
                     cp.send_stop_transaction(),
                 ),
-                timeout=7,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
@@ -117,7 +117,7 @@ async def test_cms_responses(hass):
                     cs.charge_points["test_cpid"].unlock(),
                     test_switches(hass),
                 ),
-                timeout=7,
+                timeout=3,
             )
         except asyncio.TimeoutError:
             pass
