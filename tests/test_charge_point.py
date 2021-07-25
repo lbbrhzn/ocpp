@@ -88,15 +88,6 @@ async def test_cms_responses(hass):
                     cp.send_start_transaction(),
                     cp.send_meter_data(),
                     cp.send_stop_transaction(),
-                    cs.charge_points["test_cpid"].start_transaction(),
-                    cs.charge_points["test_cpid"].reset(),
-                    cs.charge_points["test_cpid"].set_charge_rate(),
-                    cs.charge_points["test_cpid"].clear_profile(),
-                    cs.charge_points["test_cpid"].update_firmware(
-                        "http://www.charger.com/file.bin"
-                    ),
-                    cs.charge_points["test_cpid"].unlock(),
-                    test_switches(hass),
                 ),
                 timeout=7,
             )
@@ -106,6 +97,26 @@ async def test_cms_responses(hass):
         1305570 / 1000
     )
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+
+    cp = ChargePoint("CP_1_test", ws)
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                cp.start(),
+                cs.charge_points["test_cpid"].start_transaction(),
+                cs.charge_points["test_cpid"].reset(),
+                cs.charge_points["test_cpid"].set_charge_rate(),
+                cs.charge_points["test_cpid"].clear_profile(),
+                cs.charge_points["test_cpid"].update_firmware(
+                    "http://www.charger.com/file.bin"
+                ),
+                cs.charge_points["test_cpid"].unlock(),
+                test_switches(hass),
+            ),
+            timeout=7,
+        )
+    except asyncio.TimeoutError:
+        pass
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
 
