@@ -98,25 +98,29 @@ async def test_cms_responses(hass):
     )
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
-    cp = ChargePoint("CP_1_test", ws)
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(
-                cp.start(),
-                cs.charge_points["test_cpid"].start_transaction(),
-                cs.charge_points["test_cpid"].reset(),
-                cs.charge_points["test_cpid"].set_charge_rate(),
-                cs.charge_points["test_cpid"].clear_profile(),
-                cs.charge_points["test_cpid"].update_firmware(
-                    "http://www.charger.com/file.bin"
+    async with websockets.connect(
+        "ws://localhost:9000/CP_1",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint("CP_1_test", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cs.charge_points["test_cpid"].start_transaction(),
+                    cs.charge_points["test_cpid"].reset(),
+                    cs.charge_points["test_cpid"].set_charge_rate(),
+                    cs.charge_points["test_cpid"].clear_profile(),
+                    cs.charge_points["test_cpid"].update_firmware(
+                        "http://www.charger.com/file.bin"
+                    ),
+                    cs.charge_points["test_cpid"].unlock(),
+                    test_switches(hass),
                 ),
-                cs.charge_points["test_cpid"].unlock(),
-                test_switches(hass),
-            ),
-            timeout=7,
-        )
-    except asyncio.TimeoutError:
-        pass
+                timeout=7,
+            )
+        except asyncio.TimeoutError:
+            pass
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
 
