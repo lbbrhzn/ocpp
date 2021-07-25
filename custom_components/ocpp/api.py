@@ -163,7 +163,7 @@ class CentralSystem:
         except Exception as e:
             _LOGGER.info(f"Exception occurred:\n{e}")
         finally:
-            self.charge_points[cp_id].status = STATE_UNAVAILABLE
+            self.charge_points[self.cp_id].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
