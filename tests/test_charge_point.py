@@ -477,7 +477,7 @@ class ChargePoint(cpclass):
                             "unit": "kWh",
                         },
                         {
-                            "value": "398.900",
+                            "value": "1305570.000",
                         },
                     ],
                 }
