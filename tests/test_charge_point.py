@@ -98,7 +98,7 @@ async def test_cms_responses(hass):
                     cs.charge_points["test_cpid"].unlock(),
                     test_switches(hass),
                 ),
-                timeout=5,
+                timeout=7,
             )
         except asyncio.TimeoutError:
             pass
@@ -286,6 +286,16 @@ class ChargePoint(cpclass):
             connector_id=1,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.suspended_ev,
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            info="Test info",
+            vendor_id="The Mobility House",
+            vendor_error_code="Test error",
+        )
+        resp = await self.call(request)
+        request = call.StatusNotificationPayload(
+            connector_id=1,
+            error_code=ChargePointErrorCode.no_error,
+            status=ChargePointStatus.charging,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
