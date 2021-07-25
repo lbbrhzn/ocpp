@@ -6,7 +6,7 @@ import time
 from typing import Dict
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import TIME_MINUTES
+from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import voluptuous as vol
@@ -163,6 +163,7 @@ class CentralSystem:
         except Exception as e:
             _LOGGER.info(f"Exception occurred:\n{e}")
         finally:
+            self.charge_points[cp_id].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
@@ -182,6 +183,12 @@ class CentralSystem:
         if cp_id in self.charge_points:
             return self.charge_points[cp_id].get_extra_attr(measurand)
         return None
+
+    def get_available(self, cp_id: str):
+        """Return whether the charger is available."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].status == STATE_OK
+        return False
 
     async def set_charger_state(
         self, cp_id: str, service_name: str, state: bool = True
@@ -349,6 +356,7 @@ class ChargePoint(cp):
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
                 )
+            self.status = STATE_OK
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 

@@ -68,6 +68,11 @@ class ChargePointMetric(Entity):
         return self.central_system.get_metric(self.cp_id, self.metric)
 
     @property
+    def available(self) -> bool:
+        """Return if switch is available."""
+        return self.central_system.get_available(self.cp_id)
+
+    @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""
         return self.central_system.get_unit(self.cp_id, self.metric)
