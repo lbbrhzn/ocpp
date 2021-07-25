@@ -3,39 +3,8 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 
-from ocpp.v16.enums import ChargePointStatus
-
 from .api import CentralSystem
-from .const import CONF_CPID, DOMAIN, ICON
-from .enums import HAChargerServices, HAChargerStatuses
-
-# At a minimum define switch name and on service call, pulse used to call a service once such as reset
-# metric and condition combination can be used to drive switch state, use default to set initial state to True
-SWITCH_CHARGE = {
-    "name": "Charge_Control",
-    "on": HAChargerServices.service_charge_start.name,
-    "off": HAChargerServices.service_charge_stop.name,
-    "metric": HAChargerStatuses.status.value,
-    "condition": ChargePointStatus.charging.value,
-}
-SWITCH_AVAILABILITY = {
-    "name": "Availability",
-    "on": HAChargerServices.service_availability.name,
-    "off": HAChargerServices.service_availability.name,
-    "default": True,
-    "metric": HAChargerStatuses.status.value,
-    "condition": ChargePointStatus.available.value,
-}
-SWITCH_RESET = {
-    "name": "Reset",
-    "on": HAChargerServices.service_reset.name,
-    "pulse": True,
-}
-SWITCH_UNLOCK = {
-    "name": "Unlock",
-    "on": HAChargerServices.service_unlock.name,
-    "pulse": True,
-}
+from .const import CONF_CPID, DOMAIN, ICON, SWITCHES
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -45,7 +14,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     entities = []
 
-    for ent in [SWITCH_CHARGE, SWITCH_AVAILABILITY, SWITCH_RESET, SWITCH_UNLOCK]:
+    for ent in SWITCHES:
         entities.append(ChargePointSwitch(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
