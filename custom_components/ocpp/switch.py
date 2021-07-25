@@ -45,7 +45,7 @@ class ChargePointSwitch(SwitchEntity):
     @property
     def available(self) -> bool:
         """Return if switch is available."""
-        return True  # type: ignore [no-any-return]
+        return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     @property
     def is_on(self) -> bool:
