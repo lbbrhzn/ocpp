@@ -719,31 +719,31 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
+        m = om.measurand.value
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
             processed_keys = []
             for idx, sv in enumerate(bucket[om.sampled_value.name]):
-                if om.measurand.value in sv and om.phase.value not in sv:
-                    self._metrics[sv[om.measurand.value]] = round(
-                        float(sv[om.value.value]), 1
-                    )
+                if m in sv and om.phase.value not in sv:
+                    self._metrics[sv[m]] = round(float(sv[om.value.value]), 1)
                     if om.unit.value in sv:
                         if sv[om.unit.value] == DEFAULT_POWER_UNIT:
-                            self._metrics[sv[om.measurand.value]] = (
-                                float(sv[om.value.value]) / 1000
-                            )
-                            self._units[sv[om.measurand.value]] = HA_POWER_UNIT
+                            self._metrics[sv[m]] = float(sv[om.value.value]) / 1000
+                            self._units[sv[m]] = HA_POWER_UNIT
                         if sv[om.unit.value] == DEFAULT_ENERGY_UNIT:
-                            self._metrics[sv[om.measurand.value]] = (
-                                float(sv[om.value.value]) / 1000
-                            )
-                            self._units[sv[om.measurand.value]] = HA_ENERGY_UNIT
+                            self._metrics[sv[m]] = float(sv[om.value.value]) / 1000
+                            self._units[sv[m]] = HA_ENERGY_UNIT
                     processed_keys.append(idx)
                 if len(sv.keys()) == 1:  # for backwards compatibility
                     self._metrics[DEFAULT_MEASURAND] = float(sv[om.value.value]) / 1000
                     self._units[DEFAULT_MEASURAND] = HA_ENERGY_UNIT
                     processed_keys.append(idx)
-                self._extra_attr[sv[om.location.value]] = sv.get(om.location.value)
+                if m in sv and om.location.value in sv:
+                    if self._extra_attr.get(sv[m]) is None:
+                        self._extra_attr[sv[m]] = {}
+                    self._extra_attr[sv[m]][om.location.value] = sv.get(
+                        om.location.value
+                    )
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
             # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
