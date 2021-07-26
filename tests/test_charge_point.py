@@ -40,7 +40,7 @@ async def test_cms_responses(hass):
         """Test switch operations."""
         for switch in SWITCHES:
             result = await hass.services.async_call(
-                DOMAIN,
+                SWITCH,
                 SERVICE_TURN_ON,
                 service_data={
                     ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
