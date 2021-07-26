@@ -71,7 +71,7 @@ async def test_cms_responses(hass):
                 data = {"ocpp_key": "WebSocketPingInterval"}
             result = await hass.services.async_call(
                 DOMAIN,
-                service.name,
+                service.value,
                 service_data=data,
                 blocking=True,
             )
