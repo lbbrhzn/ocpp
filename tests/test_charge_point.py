@@ -9,7 +9,7 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
-from custom_components.ocpp.enums import ConfigurationKey
+from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -38,10 +38,9 @@ async def test_cms_responses(hass):
 
     async def test_switches(hass):
         """Test switch operations."""
-
         for switch in SWITCHES:
             result = await hass.services.async_call(
-                SWITCH,
+                DOMAIN,
                 SERVICE_TURN_ON,
                 service_data={
                     ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
@@ -60,6 +59,24 @@ async def test_cms_responses(hass):
             )
             assert result
 
+    async def test_services(hass):
+        """Test service operations."""
+        for service in HAChargerServices:
+            data = {}
+            if service == HAChargerServices.service_update_firmware:
+                data = {"firmware_url": "http://www.charger.com/firmware.bin"}
+            if service == HAChargerServices.configure:
+                data = {"ocpp_key": "WebSocketPingInterval", "value": 60}
+            if service == HAChargerServices.get_configuration:
+                data = {"ocpp_key": "WebSocketPingInterval"}
+            result = await hass.services.async_call(
+                DOMAIN,
+                service.name,
+                service_data=data,
+                blocking=True,
+            )
+            assert result
+
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
@@ -69,6 +86,7 @@ async def test_cms_responses(hass):
 
     cs = hass.data[DOMAIN][config_entry.entry_id]
 
+    # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://localhost:9000/CP_1",
         subprotocols=["ocpp1.6"],
@@ -98,6 +116,7 @@ async def test_cms_responses(hass):
     )
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
+    # test ocpp messages sent from cms to charger, through HA switches/services
     async with websockets.connect(
         "ws://localhost:9000/CP_1",
         subprotocols=["ocpp1.6"],
@@ -108,15 +127,7 @@ async def test_cms_responses(hass):
                 asyncio.gather(
                     cp.start(),
                     test_switches(hass),
-                    cs.charge_points["test_cpid"].start_transaction(),
-                    cs.charge_points["test_cpid"].reset(),
-                    cs.charge_points["test_cpid"].set_charge_rate(10, 2000),
-                    cs.charge_points["test_cpid"].clear_profile(),
-                    cs.charge_points["test_cpid"].update_firmware(
-                        "http://www.charger.com/file.bin"
-                    ),
-                    cs.charge_points["test_cpid"].unlock(),
-                    cs.charge_points["test_cpid"].stop_transaction(),
+                    test_services(hass),
                 ),
                 timeout=4,
             )

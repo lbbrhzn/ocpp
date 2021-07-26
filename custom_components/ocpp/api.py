@@ -267,10 +267,14 @@ class ChargePoint(cp):
         # Define custom service handles for charge point
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             await self.clear_profile()
 
         async def handle_set_charge_rate(call):
             """Handle the set charge rate service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             lim_A = call.data.get("limit_amps")
             lim_W = call.data.get("limit_watts")
             if lim_A is not None and lim_W is not None:
@@ -284,22 +288,26 @@ class ChargePoint(cp):
 
         async def handle_update_firmware(call):
             """Handle the firmware update service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             url = call.data.get("firmware_url")
             delay = int(call.data.get("delay_hours", 0))
             await self.update_firmware(url, delay)
 
         async def handle_configure(call):
             """Handle the configure service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
             await self.configure(key, value)
-            return
 
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
-            return
 
         try:
             self.status = STATE_OK
