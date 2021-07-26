@@ -5,7 +5,7 @@ from enum import Enum
 class HAChargerServices(str, Enum):
     """Charger status conditions to report in home assistant."""
 
-    """For HA service reference use .name for function to call use .value"""
+    """For HA service reference and for function to call use .value"""
 
     service_charge_start = "start_transaction"
     service_charge_stop = "stop_transaction"
