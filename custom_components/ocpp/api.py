@@ -96,6 +96,11 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("ocpp_key"): str,
     }
 )
+GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_url"): str,
+    }
+)
 
 
 class CentralSystem:
@@ -309,6 +314,13 @@ class ChargePoint(cp):
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
 
+        async def handle_get_diagnostics(call):
+            """Handle the get get diagnostics service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
+            url = call.data.get("upload_url")
+            await self.get_diagnostics(url)
+
         try:
             self.status = STATE_OK
             await self.get_supported_features()
@@ -364,6 +376,12 @@ class ChargePoint(cp):
                     csvcs.service_update_firmware.value,
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_get_diagnostics.value,
+                    handle_get_diagnostics,
+                    GDIAG_SERVICE_DATA_SCHEMA,
                 )
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
@@ -585,6 +603,22 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.debug("Charger does not support ocpp firmware updating")
+            return False
+
+    async def get_diagnostics(self, upload_url: str):
+        """Upload diagnostic data to server from charger."""
+        if om.feature_profile_firmware.value in self._features_supported:
+            schema = vol.Schema(vol.Url())
+            try:
+                url = schema(upload_url)
+            except vol.MultipleInvalid as e:
+                _LOGGER.debug("Failed to parse url: %s", e)
+            req = call.GetDiagnosticsPayload(location=url)
+            resp = await self.call(req)
+            _LOGGER.debug("Response: %s", resp)
+            return True
+        else:
+            _LOGGER.debug("Charger does not support ocpp diagnostics uploading")
             return False
 
     async def get_configuration(self, key: str = ""):
@@ -835,6 +869,12 @@ class ChargePoint(cp):
         self._metrics[cstat.firmware_status.value] = status
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.FirmwareStatusNotificationPayload()
+
+    @on(Action.DiagnosticsStatusNotification)
+    def on_diagnostics_status(self, status, **kwargs):
+        """Handle diagnostics status notification."""
+        _LOGGER.info("Diagnostics upload status: %s", status)
+        return call_result.DiagnosticsStatusNotificationPayload()
 
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):

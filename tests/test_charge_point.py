@@ -22,6 +22,7 @@ from ocpp.v16.enums import (
     ClearChargingProfileStatus,
     ConfigurationStatus,
     DataTransferStatus,
+    DiagnosticsStatus,
     FirmwareStatus,
     RegistrationStatus,
     RemoteStartStopStatus,
@@ -65,6 +66,7 @@ async def test_cms_responses(hass):
             csvcs.service_update_firmware,
             csvcs.service_configure,
             csvcs.service_get_configuration,
+            csvcs.service_get_diagnostics,
             csvcs.service_clear_profile,
             csvcs.service_set_charge_rate,
         ]
@@ -76,6 +78,8 @@ async def test_cms_responses(hass):
                 data = {"ocpp_key": "WebSocketPingInterval", "value": "60"}
             if service == csvcs.service_get_configuration:
                 data = {"ocpp_key": "WebSocketPingInterval"}
+            if service == csvcs.service_get_diagnostics:
+                data = {"upload_url": "https://webhook.site/abc"}
             result = await hass.services.async_call(
                 DOMAIN,
                 service.value,
@@ -264,6 +268,11 @@ class ChargePoint(cpclass):
         """Handle update firmware request."""
         return call_result.UpdateFirmwarePayload()
 
+    @on(Action.GetDiagnostics)
+    def on_get_diagnostics(self, **kwargs):
+        """Handle get diagnostics request."""
+        return call_result.GetDiagnosticsPayload()
+
     async def send_boot_notification(self):
         """Send a boot notification."""
         request = call.BootNotificationPayload(
@@ -288,6 +297,14 @@ class ChargePoint(cpclass):
         """Send a firmware status notification."""
         request = call.FirmwareStatusNotificationPayload(
             status=FirmwareStatus.downloaded
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_diagnostics_status(self):
+        """Send a diagnostics status notification."""
+        request = call.DiagnosticsStatusNotificationPayload(
+            status=DiagnosticsStatus.uploaded
         )
         resp = await self.call(request)
         assert resp is not None
