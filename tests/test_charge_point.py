@@ -9,7 +9,7 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
-from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices
+from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -61,13 +61,20 @@ async def test_cms_responses(hass):
 
     async def test_services(hass):
         """Test service operations."""
-        for service in HAChargerServices:
+        SERVICES = [
+            csvcs.service_update_firmware,
+            csvcs.service_configure,
+            csvcs.service_get_configuration,
+            csvcs.service_clear_profile,
+            csvcs.service_set_charge_rate,
+        ]
+        for service in SERVICES:
             data = {}
-            if service == HAChargerServices.service_update_firmware:
+            if service == csvcs.service_update_firmware:
                 data = {"firmware_url": "http://www.charger.com/firmware.bin"}
-            if service == HAChargerServices.service_configure:
+            if service == csvcs.service_configure:
                 data = {"ocpp_key": "WebSocketPingInterval", "value": 60}
-            if service == HAChargerServices.service_get_configuration:
+            if service == csvcs.service_get_configuration:
                 data = {"ocpp_key": "WebSocketPingInterval"}
             result = await hass.services.async_call(
                 DOMAIN,
