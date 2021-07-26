@@ -2,11 +2,13 @@
 import asyncio
 from datetime import datetime, timezone  # timedelta,
 
+from homeassistant.components.switch import SERVICE_TURN_OFF, SERVICE_TURN_ON
+from homeassistant.const import ATTR_ENTITY_ID
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
-from custom_components.ocpp.const import DOMAIN
+from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
@@ -33,6 +35,31 @@ from .const import MOCK_CONFIG_DATA
 
 async def test_cms_responses(hass):
     """Test central system responses to a charger."""
+
+    async def test_switches(hass):
+        """Test switch operations."""
+
+        for switch in SWITCHES:
+            result = await hass.services.async_call(
+                SWITCH,
+                SERVICE_TURN_ON,
+                service_data={
+                    ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
+                },
+                blocking=True,
+            )
+            assert result
+
+            result = await hass.services.async_call(
+                SWITCH,
+                SERVICE_TURN_OFF,
+                service_data={
+                    ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
+                },
+                blocking=True,
+            )
+            assert result
+
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
@@ -69,8 +96,9 @@ async def test_cms_responses(hass):
                         "http://www.charger.com/file.bin"
                     ),
                     cs.charge_points["test_cpid"].unlock(),
+                    test_switches(hass),
                 ),
-                timeout=7,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
@@ -174,6 +202,11 @@ class ChargePoint(cpclass):
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         return call_result.RemoteStartTransactionPayload(RemoteStartStopStatus.accepted)
+
+    @on(Action.RemoteStopTransaction)
+    def on_remote_stop_transaction(self, **kwargs):
+        """Handle remote stop request."""
+        return call_result.RemoteStopTransactionPayload(RemoteStartStopStatus.accepted)
 
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
