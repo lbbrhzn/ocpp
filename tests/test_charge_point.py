@@ -65,9 +65,9 @@ async def test_cms_responses(hass):
             data = {}
             if service == HAChargerServices.service_update_firmware:
                 data = {"firmware_url": "http://www.charger.com/firmware.bin"}
-            if service == HAChargerServices.configure:
+            if service == HAChargerServices.service_configure:
                 data = {"ocpp_key": "WebSocketPingInterval", "value": 60}
-            if service == HAChargerServices.get_configuration:
+            if service == HAChargerServices.service_get_configuration:
                 data = {"ocpp_key": "WebSocketPingInterval"}
             result = await hass.services.async_call(
                 DOMAIN,
