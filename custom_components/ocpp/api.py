@@ -634,10 +634,18 @@ class ChargePoint(cp):
         else:
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            _LOGGER.debug(
-                "Get Configuration for %s: %s", key, key_value[om.value.value]
-            )
+        if resp.configuration_key is not None:
+            for key_value in resp.configuration_key:
+                _LOGGER.debug(
+                    "Get Configuration for %s: %s", key, key_value[om.value.value]
+                )
+        if resp.unknown_key is not None:
+            for key_value in resp.unknown_key:
+                _LOGGER.debug(
+                    "Get Configuration for %s returned unknown key: %s",
+                    key,
+                    key_value[om.value.value],
+                )
         return resp
 
     async def configure(self, key: str, value: str):
