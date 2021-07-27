@@ -637,11 +637,7 @@ class ChargePoint(cp):
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             return value
         if resp.unknown_key is not None:
-            _LOGGER.warning(
-                "Get Configuration for %s returned unknown key: %s",
-                key,
-                resp.unknown_key[0][om.value.value],
-            )
+            _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             return None
 
     async def configure(self, key: str, value: str):
