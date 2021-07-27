@@ -77,7 +77,7 @@ async def test_cms_responses(hass):
             if service == csvcs.service_configure:
                 data = {"ocpp_key": "WebSocketPingInterval", "value": "60"}
             if service == csvcs.service_get_configuration:
-                data = {"ocpp_key": "WebSocketPingInterval"}
+                data = {"ocpp_key": "UnknownKeyTest"}
             if service == csvcs.service_get_diagnostics:
                 data = {"upload_url": "https://webhook.site/abc"}
             result = await hass.services.async_call(
