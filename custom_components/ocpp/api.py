@@ -348,9 +348,7 @@ class ChargePoint(cp):
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value] = resp.configuration_key[0][
-                om.value.value
-            ]
+            self._metrics[cdet.connectors.value] = resp
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -448,10 +446,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0][om.value.value],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -460,7 +458,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
 
             req = call.SetChargingProfilePayload(
                 connector_id=0,
@@ -510,7 +508,7 @@ class ChargePoint(cp):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.configuration_key[0][om.value.value].lower() == "true":
+        if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         if om.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
@@ -518,10 +516,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0]["value"],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -530,7 +528,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
@@ -628,17 +626,23 @@ class ChargePoint(cp):
             return False
 
     async def get_configuration(self, key: str = ""):
-        """Get Configuration of charger for supported keys."""
+        """Get Configuration of charger for supported keys else return None."""
         if key == "":
             req = call.GetConfigurationPayload()
         else:
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            _LOGGER.debug(
-                "Get Configuration for %s: %s", key, key_value[om.value.value]
+        if resp.configuration_key is not None:
+            value = resp.configuration_key[0][om.value.value]
+            _LOGGER.debug("Get Configuration for %s: %s", key, value)
+            return value
+        if resp.unknown_key is not None:
+            _LOGGER.warning(
+                "Get Configuration for %s returned unknown key: %s",
+                key,
+                resp.unknown_key[0][om.value.value],
             )
-        return resp
+            return None
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
