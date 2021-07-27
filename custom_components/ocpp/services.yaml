@@ -38,8 +38,7 @@ clear_profile:
 
 update_firmware:
   name: Update charger firmware
-  description: Specify server to download firmware and time to delay updating (dependent on charger support), supported transfer protocols can be requested by the configuration key
-SupportedFileTransferProtocol
+  description: Specify server to download firmware and time to delay updating (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocol
   fields:
     firmware_url:
       name: Url of firmware
@@ -85,8 +84,7 @@ get_configuration:
       
 get_diagnostics:
   name: Request diagnostic data from charger
-  description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key
-SupportedFileTransferProtocol
+  description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocol
   fields:
     upload_url:
       name: Url for upload
