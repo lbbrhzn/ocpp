@@ -118,7 +118,7 @@ async def test_cms_responses(hass):
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
                 ),
-                timeout=4,
+                timeout=3,
             )
         except asyncio.TimeoutError:
             pass
@@ -140,7 +140,7 @@ async def test_cms_responses(hass):
                     test_switches(hass),
                     test_services(hass),
                 ),
-                timeout=4,
+                timeout=3,
             )
         except asyncio.TimeoutError:
             pass
