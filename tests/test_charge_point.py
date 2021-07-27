@@ -146,6 +146,7 @@ async def test_cms_responses(hass):
             pass
 
     # test services when charger is unavailable
+    await asyncio.sleep(1)
     await test_services(hass)
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
