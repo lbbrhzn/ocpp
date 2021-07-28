@@ -711,8 +711,8 @@ class ChargePoint(cp):
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
-                Measurand.active_power_import.value,
-                Measurand.active_power_export.value,
+                Measurand.power_active_import.value,
+                Measurand.power_active_export.value,
             ]:
                 """Line currents and powers are summed."""
                 if Phase.l1.value in phase_info:
