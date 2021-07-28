@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
+from math import sqrt
 import time
 from typing import Dict
 
@@ -675,46 +676,53 @@ class ChargePoint(cp):
 
     def process_phases(self, data):
         """Process phase data from meter values payload."""
-        extra_attr = {}
+        measurand_data = {}
         for sv in data:
-            # ordered Dict for each phase eg {"metric":{"unit":"V","L1":"230"...}}
-            if sv.get(om.phase.value) is not None:
-                metric = sv[om.measurand.value]
-                if extra_attr.get(metric) is None:
-                    extra_attr[metric] = {}
-                (extra_attr[metric])[om.unit.value] = sv.get(om.unit.value)
-                if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
-                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
-                        sv[om.value.value]
-                    )
-                if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
-                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
-                        sv[om.value.value]
-                    )
-                if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
-                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
-                        sv[om.value.value]
-                    )
-        for metric, value in extra_attr.items():
-            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
-            if metric in Measurand.voltage.value:
-                sum = (
-                    value[Phase.l1_n.value]
-                    + value[Phase.l2_n.value]
-                    + value[Phase.l3_n.value]
-                )
-                self._metrics[metric] = round(sum / 3, 1)
-            if metric in [
+            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
+            measurand = sv.get(om.measurand.value, None)
+            phase = sv.get(om.phase.value, None)
+            value = sv.get(om.value.value, None)
+            unit = sv.get(om.unit.value, None)
+            if measurand is not None and phase is not None:
+                if measurand not in measurand_data:
+                    measurand_data[measurand] = {}
+                measurand_data[measurand][om.unit.value] = unit
+                measurand_data[measurand][phase] = float(value)
+        # store the measurand data as extra attributes
+        self._extra_attr.update(measurand_data)
+        for metric, phase_info in measurand_data.items():
+            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
+            metric_value = None
+            if metric in [Measurand.voltage.value]:
+                if Phase.l1_n.value in phase_info:
+                    """Line-neutral voltages are averaged."""
+                    metric_value = (
+                        phase_info.get(Phase.l1_n.value, 0)
+                        + phase_info.get(Phase.l2_n.value, 0)
+                        + phase_info.get(Phase.l3_n.value, 0)
+                    ) / 3
+                elif Phase.l1_l2.value in phase_info:
+                    """Line-line voltages are converted to line-neutral and averaged."""
+                    metric_value = (
+                        phase_info.get(Phase.l1_l2.value, 0)
+                        + phase_info.get(Phase.l2_l3.value, 0)
+                        + phase_info.get(Phase.l3_l1.value, 0)
+                    ) / (3 * sqrt(3))
+            elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
+                Measurand.power_active_import.value,
+                Measurand.power_active_export.value,
             ]:
-                sum = (
-                    value[Phase.l1.value]
-                    + value[Phase.l2.value]
-                    + value[Phase.l3.value]
-                )
-                self._metrics[metric] = round(sum, 1)
-            self._extra_attr[metric] = value
+                """Line currents and powers are summed."""
+                if Phase.l1.value in phase_info:
+                    metric_value = (
+                        phase_info.get(Phase.l1.value, 0)
+                        + phase_info.get(Phase.l2.value, 0)
+                        + phase_info.get(Phase.l3.value, 0)
+                    )
+            if metric_value is not None:
+                self._metrics[metric] = round(metric_value, 1)
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
