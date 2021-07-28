@@ -7,7 +7,7 @@ import time
 from typing import Dict
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import TIME_MINUTES
+from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import voluptuous as vol
@@ -164,6 +164,7 @@ class CentralSystem:
         except Exception as e:
             _LOGGER.info(f"Exception occurred:\n{e}")
         finally:
+            self.charge_points[self.cpid].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
@@ -183,6 +184,12 @@ class CentralSystem:
         if cp_id in self.charge_points:
             return self.charge_points[cp_id].get_extra_attr(measurand)
         return None
+
+    def get_available(self, cp_id: str):
+        """Return whether the charger is available."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].status == STATE_OK
+        return False
 
     async def set_charger_state(
         self, cp_id: str, service_name: str, state: bool = True
@@ -261,10 +268,14 @@ class ChargePoint(cp):
         # Define custom service handles for charge point
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             await self.clear_profile()
 
         async def handle_set_charge_rate(call):
             """Handle the set charge rate service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             lim_A = call.data.get("limit_amps")
             lim_W = call.data.get("limit_watts")
             if lim_A is not None and lim_W is not None:
@@ -278,24 +289,29 @@ class ChargePoint(cp):
 
         async def handle_update_firmware(call):
             """Handle the firmware update service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             url = call.data.get("firmware_url")
             delay = int(call.data.get("delay_hours", 0))
             await self.update_firmware(url, delay)
 
         async def handle_configure(call):
             """Handle the configure service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
             await self.configure(key, value)
-            return
 
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
+            if self.status == STATE_UNAVAILABLE:
+                return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
-            return
 
         try:
+            self.status = STATE_OK
             await self.get_supported_features()
             if om.feature_profile_remote.value in self._features_supported:
                 await self.trigger_boot_notification()
@@ -650,7 +666,11 @@ class ChargePoint(cp):
     async def reconnect(self, connection):
         """Reconnect charge point."""
         self._connection = connection
-        await self.start()
+        try:
+            self.status = STATE_OK
+            await super().start()
+        except websockets.exceptions.ConnectionClosed as e:
+            _LOGGER.debug(e)
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""

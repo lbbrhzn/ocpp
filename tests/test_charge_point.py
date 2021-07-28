@@ -9,7 +9,7 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
-from custom_components.ocpp.enums import ConfigurationKey
+from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -38,7 +38,6 @@ async def test_cms_responses(hass):
 
     async def test_switches(hass):
         """Test switch operations."""
-
         for switch in SWITCHES:
             result = await hass.services.async_call(
                 SWITCH,
@@ -60,6 +59,31 @@ async def test_cms_responses(hass):
             )
             assert result
 
+    async def test_services(hass):
+        """Test service operations."""
+        SERVICES = [
+            csvcs.service_update_firmware,
+            csvcs.service_configure,
+            csvcs.service_get_configuration,
+            csvcs.service_clear_profile,
+            csvcs.service_set_charge_rate,
+        ]
+        for service in SERVICES:
+            data = {}
+            if service == csvcs.service_update_firmware:
+                data = {"firmware_url": "http://www.charger.com/firmware.bin"}
+            if service == csvcs.service_configure:
+                data = {"ocpp_key": "WebSocketPingInterval", "value": "60"}
+            if service == csvcs.service_get_configuration:
+                data = {"ocpp_key": "WebSocketPingInterval"}
+            result = await hass.services.async_call(
+                DOMAIN,
+                service.value,
+                service_data=data,
+                blocking=True,
+            )
+            assert result
+
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
@@ -69,6 +93,7 @@ async def test_cms_responses(hass):
 
     cs = hass.data[DOMAIN][config_entry.entry_id]
 
+    # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://localhost:9000/CP_1",
         subprotocols=["ocpp1.6"],
@@ -85,27 +110,36 @@ async def test_cms_responses(hass):
                     cp.send_status_notification(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
-                    cp.send_start_transaction(),
                     cp.send_meter_data(),
+                    cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cs.charge_points["test_cpid"].start_transaction(),
-                    cs.charge_points["test_cpid"].reset(),
-                    cs.charge_points["test_cpid"].set_charge_rate(),
-                    cs.charge_points["test_cpid"].clear_profile(),
-                    cs.charge_points["test_cpid"].update_firmware(
-                        "http://www.charger.com/file.bin"
-                    ),
-                    cs.charge_points["test_cpid"].unlock(),
-                    test_switches(hass),
                 ),
-                timeout=5,
+                timeout=4,
             )
         except asyncio.TimeoutError:
             pass
-        assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
-            1305570 / 1000
-        )
-        assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
+        1305570 / 1000
+    )
+    assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+
+    # test ocpp messages sent from cms to charger, through HA switches/services
+    async with websockets.connect(
+        "ws://localhost:9000/CP_1",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint("CP_1_test", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    test_switches(hass),
+                    test_services(hass),
+                ),
+                timeout=4,
+            )
+        except asyncio.TimeoutError:
+            pass
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
 
@@ -285,6 +319,16 @@ class ChargePoint(cpclass):
         request = call.StatusNotificationPayload(
             connector_id=1,
             error_code=ChargePointErrorCode.no_error,
+            status=ChargePointStatus.suspended_ev,
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            info="Test info",
+            vendor_id="The Mobility House",
+            vendor_error_code="Test error",
+        )
+        resp = await self.call(request)
+        request = call.StatusNotificationPayload(
+            connector_id=1,
+            error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.charging,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             info="Test info",
@@ -352,7 +396,7 @@ class ChargePoint(cpclass):
                             "context": "Sample.Periodic",
                             "measurand": "Power.Active.Import",
                             "location": "Outlet",
-                            "unit": "W",
+                            "unit": "kW",
                         },
                         {
                             "value": "0.000",
@@ -449,6 +493,9 @@ class ChargePoint(cpclass):
                             "value": "0.010",
                             "context": "Transaction.Begin",
                             "unit": "kWh",
+                        },
+                        {
+                            "value": "1305570.000",
                         },
                     ],
                 }
