@@ -69,7 +69,7 @@ class ChargePointMetric(Entity):
 
     @property
     def available(self) -> bool:
-        """Return if switch is available."""
+        """Return if sensor is available."""
         return self.central_system.get_available(self.cp_id)
 
     @property
