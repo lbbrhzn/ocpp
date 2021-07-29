@@ -2,7 +2,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
-from math import sqrt
 import time
 from typing import Dict
 
@@ -95,6 +94,11 @@ CONF_SERVICE_DATA_SCHEMA = vol.Schema(
 GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("ocpp_key"): str,
+    }
+)
+GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_url"): str,
     }
 )
 
@@ -269,12 +273,14 @@ class ChargePoint(cp):
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             await self.clear_profile()
 
         async def handle_set_charge_rate(call):
             """Handle the set charge rate service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             lim_A = call.data.get("limit_amps")
             lim_W = call.data.get("limit_watts")
@@ -290,6 +296,7 @@ class ChargePoint(cp):
         async def handle_update_firmware(call):
             """Handle the firmware update service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             url = call.data.get("firmware_url")
             delay = int(call.data.get("delay_hours", 0))
@@ -298,6 +305,7 @@ class ChargePoint(cp):
         async def handle_configure(call):
             """Handle the configure service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
@@ -306,9 +314,18 @@ class ChargePoint(cp):
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
+
+        async def handle_get_diagnostics(call):
+            """Handle the get get diagnostics service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            url = call.data.get("upload_url")
+            await self.get_diagnostics(url)
 
         try:
             self.status = STATE_OK
@@ -331,9 +348,7 @@ class ChargePoint(cp):
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value] = resp.configuration_key[0][
-                om.value.value
-            ]
+            self._metrics[cdet.connectors.value] = resp
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -365,6 +380,12 @@ class ChargePoint(cp):
                     csvcs.service_update_firmware.value,
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_get_diagnostics.value,
+                    handle_get_diagnostics,
+                    GDIAG_SERVICE_DATA_SCHEMA,
                 )
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
@@ -425,10 +446,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0][om.value.value],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -437,7 +458,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
 
             req = call.SetChargingProfilePayload(
                 connector_id=0,
@@ -487,7 +508,7 @@ class ChargePoint(cp):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.configuration_key[0][om.value.value].lower() == "true":
+        if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         if om.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
@@ -495,10 +516,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0]["value"],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -507,7 +528,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
@@ -588,18 +609,36 @@ class ChargePoint(cp):
             _LOGGER.debug("Charger does not support ocpp firmware updating")
             return False
 
+    async def get_diagnostics(self, upload_url: str):
+        """Upload diagnostic data to server from charger."""
+        if om.feature_profile_firmware.value in self._features_supported:
+            schema = vol.Schema(vol.Url())
+            try:
+                url = schema(upload_url)
+            except vol.MultipleInvalid as e:
+                _LOGGER.debug("Failed to parse url: %s", e)
+            req = call.GetDiagnosticsPayload(location=url)
+            resp = await self.call(req)
+            _LOGGER.debug("Response: %s", resp)
+            return True
+        else:
+            _LOGGER.debug("Charger does not support ocpp diagnostics uploading")
+            return False
+
     async def get_configuration(self, key: str = ""):
-        """Get Configuration of charger for supported keys."""
+        """Get Configuration of charger for supported keys else return None."""
         if key == "":
             req = call.GetConfigurationPayload()
         else:
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            _LOGGER.debug(
-                "Get Configuration for %s: %s", key, key_value[om.value.value]
-            )
-        return resp
+        if resp.configuration_key is not None:
+            value = resp.configuration_key[0][om.value.value]
+            _LOGGER.debug("Get Configuration for %s: %s", key, value)
+            return value
+        if resp.unknown_key is not None:
+            _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
+            return None
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
@@ -696,53 +735,46 @@ class ChargePoint(cp):
 
     def process_phases(self, data):
         """Process phase data from meter values payload."""
-        measurand_data = {}
+        extra_attr = {}
         for sv in data:
-            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
-            measurand = sv.get(om.measurand.value, None)
-            phase = sv.get(om.phase.value, None)
-            value = sv.get(om.value.value, None)
-            unit = sv.get(om.unit.value, None)
-            if measurand is not None and phase is not None:
-                if measurand not in measurand_data:
-                    measurand_data[measurand] = {}
-                measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)
-        # store the measurand data as extra attributes
-        self._extra_attr.update(measurand_data)
-        for metric, phase_info in measurand_data.items():
-            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
-            metric_value = None
-            if metric in [Measurand.voltage.value]:
-                if Phase.l1_n.value in phase_info:
-                    """Line-neutral voltages are averaged."""
-                    metric_value = (
-                        phase_info.get(Phase.l1_n.value, 0)
-                        + phase_info.get(Phase.l2_n.value, 0)
-                        + phase_info.get(Phase.l3_n.value, 0)
-                    ) / 3
-                elif Phase.l1_l2.value in phase_info:
-                    """Line-line voltages are converted to line-neutral and averaged."""
-                    metric_value = (
-                        phase_info.get(Phase.l1_l2.value, 0)
-                        + phase_info.get(Phase.l2_l3.value, 0)
-                        + phase_info.get(Phase.l3_l1.value, 0)
-                    ) / (3 * sqrt(3))
-            elif metric in [
+            # ordered Dict for each phase eg {"metric":{"unit":"V","L1":"230"...}}
+            if sv.get(om.phase.value) is not None:
+                metric = sv[om.measurand.value]
+                if extra_attr.get(metric) is None:
+                    extra_attr[metric] = {}
+                (extra_attr[metric])[om.unit.value] = sv.get(om.unit.value)
+                if sv.get(om.phase.value) in [Phase.l1.value, Phase.l1_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+                if sv.get(om.phase.value) in [Phase.l2.value, Phase.l2_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+                if sv.get(om.phase.value) in [Phase.l3.value, Phase.l3_n.value]:
+                    (extra_attr[metric])[sv.get(om.phase.value)] = float(
+                        sv[om.value.value]
+                    )
+        for metric, value in extra_attr.items():
+            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, value)
+            if metric in Measurand.voltage.value:
+                sum = (
+                    value[Phase.l1_n.value]
+                    + value[Phase.l2_n.value]
+                    + value[Phase.l3_n.value]
+                )
+                self._metrics[metric] = round(sum / 3, 1)
+            if metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
-                Measurand.power_active_import.value,
-                Measurand.power_active_export.value,
             ]:
-                """Line currents and powers are summed."""
-                if Phase.l1.value in phase_info:
-                    metric_value = (
-                        phase_info.get(Phase.l1.value, 0)
-                        + phase_info.get(Phase.l2.value, 0)
-                        + phase_info.get(Phase.l3.value, 0)
-                    )
-            if metric_value is not None:
-                self._metrics[metric] = round(metric_value, 1)
+                sum = (
+                    value[Phase.l1.value]
+                    + value[Phase.l2.value]
+                    + value[Phase.l3.value]
+                )
+                self._metrics[metric] = round(sum, 1)
+            self._extra_attr[metric] = value
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
@@ -843,6 +875,12 @@ class ChargePoint(cp):
         self._metrics[cstat.firmware_status.value] = status
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.FirmwareStatusNotificationPayload()
+
+    @on(Action.DiagnosticsStatusNotification)
+    def on_diagnostics_status(self, status, **kwargs):
+        """Handle diagnostics status notification."""
+        _LOGGER.info("Diagnostics upload status: %s", status)
+        return call_result.DiagnosticsStatusNotificationPayload()
 
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):
