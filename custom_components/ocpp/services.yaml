@@ -38,7 +38,7 @@ clear_profile:
 
 update_firmware:
   name: Update charger firmware
-  description: Specify server to download firmware and time to delay updating (dependent on charger support)
+  description: Specify server to download firmware and time to delay updating (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols
   fields:
     firmware_url:
       name: Url of firmware
@@ -81,3 +81,14 @@ get_configuration:
       required: true
       advanced: true
       example: "WebSocketPingInterval"
+      
+get_diagnostics:
+  name: Request diagnostic data from charger
+  description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols
+  fields:
+    upload_url:
+      name: Url for upload
+      description: Full url to upload to
+      required: true
+      advanced: true
+      example: "https://webhook.site/abc"

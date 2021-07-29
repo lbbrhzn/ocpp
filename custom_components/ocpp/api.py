@@ -97,6 +97,11 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("ocpp_key"): str,
     }
 )
+GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_url"): str,
+    }
+)
 
 
 class CentralSystem:
@@ -269,12 +274,14 @@ class ChargePoint(cp):
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             await self.clear_profile()
 
         async def handle_set_charge_rate(call):
             """Handle the set charge rate service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             lim_A = call.data.get("limit_amps")
             lim_W = call.data.get("limit_watts")
@@ -290,6 +297,7 @@ class ChargePoint(cp):
         async def handle_update_firmware(call):
             """Handle the firmware update service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             url = call.data.get("firmware_url")
             delay = int(call.data.get("delay_hours", 0))
@@ -298,6 +306,7 @@ class ChargePoint(cp):
         async def handle_configure(call):
             """Handle the configure service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             key = call.data.get("ocpp_key")
             value = call.data.get("value")
@@ -306,9 +315,18 @@ class ChargePoint(cp):
         async def handle_get_configuration(call):
             """Handle the get configuration service call."""
             if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
+
+        async def handle_get_diagnostics(call):
+            """Handle the get get diagnostics service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            url = call.data.get("upload_url")
+            await self.get_diagnostics(url)
 
         try:
             self.status = STATE_OK
@@ -331,9 +349,7 @@ class ChargePoint(cp):
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
             resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value] = resp.configuration_key[0][
-                om.value.value
-            ]
+            self._metrics[cdet.connectors.value] = resp
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -365,6 +381,12 @@ class ChargePoint(cp):
                     csvcs.service_update_firmware.value,
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_get_diagnostics.value,
+                    handle_get_diagnostics,
+                    GDIAG_SERVICE_DATA_SCHEMA,
                 )
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
@@ -425,10 +447,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0][om.value.value],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -437,7 +459,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
 
             req = call.SetChargingProfilePayload(
                 connector_id=0,
@@ -487,7 +509,7 @@ class ChargePoint(cp):
         """Start a Transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.configuration_key[0][om.value.value].lower() == "true":
+        if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         if om.feature_profile_smart.value in self._features_supported:
             resp = await self.get_configuration(
@@ -495,10 +517,10 @@ class ChargePoint(cp):
             )
             _LOGGER.debug(
                 "Charger supports setting the following units: %s",
-                resp.configuration_key[0]["value"],
+                resp,
             )
             _LOGGER.debug("If more than one unit supported default unit is Amps")
-            if om.current.value in resp.configuration_key[0][om.value.value]:
+            if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
             else:
@@ -507,7 +529,7 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp.configuration_key[0][om.value.value])
+            stack_level = int(resp)
             req = call.RemoteStartTransactionPayload(
                 connector_id=1,
                 id_tag=self._metrics[cdet.identifier.value],
@@ -588,18 +610,36 @@ class ChargePoint(cp):
             _LOGGER.debug("Charger does not support ocpp firmware updating")
             return False
 
+    async def get_diagnostics(self, upload_url: str):
+        """Upload diagnostic data to server from charger."""
+        if om.feature_profile_firmware.value in self._features_supported:
+            schema = vol.Schema(vol.Url())
+            try:
+                url = schema(upload_url)
+            except vol.MultipleInvalid as e:
+                _LOGGER.debug("Failed to parse url: %s", e)
+            req = call.GetDiagnosticsPayload(location=url)
+            resp = await self.call(req)
+            _LOGGER.debug("Response: %s", resp)
+            return True
+        else:
+            _LOGGER.debug("Charger does not support ocpp diagnostics uploading")
+            return False
+
     async def get_configuration(self, key: str = ""):
-        """Get Configuration of charger for supported keys."""
+        """Get Configuration of charger for supported keys else return None."""
         if key == "":
             req = call.GetConfigurationPayload()
         else:
             req = call.GetConfigurationPayload(key=[key])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            _LOGGER.debug(
-                "Get Configuration for %s: %s", key, key_value[om.value.value]
-            )
-        return resp
+        if resp.configuration_key is not None:
+            value = resp.configuration_key[0][om.value.value]
+            _LOGGER.debug("Get Configuration for %s: %s", key, value)
+            return value
+        if resp.unknown_key is not None:
+            _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
+            return None
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
@@ -843,6 +883,12 @@ class ChargePoint(cp):
         self._metrics[cstat.firmware_status.value] = status
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.FirmwareStatusNotificationPayload()
+
+    @on(Action.DiagnosticsStatusNotification)
+    def on_diagnostics_status(self, status, **kwargs):
+        """Handle diagnostics status notification."""
+        _LOGGER.info("Diagnostics upload status: %s", status)
+        return call_result.DiagnosticsStatusNotificationPayload()
 
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):
