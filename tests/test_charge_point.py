@@ -81,7 +81,7 @@ async def test_cms_responses(hass):
             if service == csvcs.service_get_diagnostics:
                 data = {"upload_url": "https://webhook.site/abc"}
             result = await hass.services.async_call(
-                "test_cpid",
+                DOMAIN,
                 service.value,
                 service_data=data,
                 blocking=True,
