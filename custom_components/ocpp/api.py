@@ -986,7 +986,7 @@ class Metric:
         """Initialize a Metric."""
         self._value = value
         self._unit = unit
-        self.extra_attr = {}
+        self._extra_attr = {}
 
     @property
     def value(self):
@@ -1007,3 +1007,13 @@ class Metric:
     def unit(self, unit: str):
         """Set the unit of the metric."""
         self._unit = unit
+
+    @property
+    def extra_attr(self):
+        """Get the extra attributes of the metric."""
+        return self._extra_attr
+
+    @extra_attr.setter
+    def extra_attr(self, extra_attr: dict):
+        """Set the unit of the metric."""
+        self._extra_attr = extra_attr
