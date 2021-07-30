@@ -188,7 +188,6 @@ class CentralSystem:
 
     def get_extra_attr(self, cp_id: str, measurand: str):
         """Return last known extra attributes for given measurand."""
-        return None
         if (cp_id in self.charge_points) and (
             measurand in self.charge_points[cp_id]._metrics
         ):
