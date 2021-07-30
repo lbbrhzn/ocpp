@@ -1,5 +1,6 @@
 """Representation of a OCCP Entities."""
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
@@ -167,7 +168,8 @@ class CentralSystem:
                 cp = self.charge_points[self.cpid]
                 await self.charge_points[self.cpid].reconnect(websocket)
         except Exception as e:
-            _LOGGER.info(f"Exception occurred:\n{e}")
+            _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
+
         finally:
             self.charge_points[self.cpid].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
@@ -186,7 +188,10 @@ class CentralSystem:
 
     def get_extra_attr(self, cp_id: str, measurand: str):
         """Return last known extra attributes for given measurand."""
-        if cp_id in self.charge_points:
+        return None
+        if (cp_id in self.charge_points) and (
+            measurand in self.charge_points[cp_id]._metrics
+        ):
             return self.charge_points[cp_id]._metrics[measurand].extra_attr
         return None
 
@@ -257,10 +262,10 @@ class ChargePoint(cp):
         # Indicates if the charger requires a reboot to apply new
         # configuration.
         self._requires_reboot = False
-        self._metrics = Dict[str, Metric]
         self._features_supported = {}
         self.preparing = asyncio.Event()
         self._transactionId = 0
+        self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
@@ -746,8 +751,8 @@ class ChargePoint(cp):
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
-                self._metrics[measurand]._extra_attr[om.unit.value] = unit
-                self._metrics[measurand]._extra_attr[phase] = float(value)
+                self._metrics[measurand].extra_attr[om.unit.value] = unit
+                self._metrics[measurand].extra_attr[phase] = float(value)
 
         for metric, phase_info in measurand_data.items():
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
@@ -829,15 +834,20 @@ class ChargePoint(cp):
                 om.transaction_id.name
             )
             self._transactionId = kwargs.get(om.transaction_id.name)
-        self._metrics[csess.session_time.value].value = round(
-            (int(time.time()) - float(self._metrics[csess.transaction_id.value].value))
-            / 60
-        )
-        self._metrics[csess.session_energy.value].value = round(
-            float(self._metrics[DEFAULT_MEASURAND].value)
-            - float(self._metrics[csess.meter_start.value].value),
-            1,
-        )
+        if self._metrics[csess.transaction_id.value].value is not None:
+            self._metrics[csess.session_time.value].value = round(
+                (
+                    int(time.time())
+                    - float(self._metrics[csess.transaction_id.value].value)
+                )
+                / 60
+            )
+        if self._metrics[csess.meter_start.value].value is not None:
+            self._metrics[csess.session_energy.value].value = round(
+                float(self._metrics[DEFAULT_MEASURAND].value or 0)
+                - float(self._metrics[csess.meter_start.value].value),
+                1,
+            )
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
@@ -925,9 +935,10 @@ class ChargePoint(cp):
         """Stop the current transaction."""
         self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
 
-        if csess.meter_start.value in self._metrics:
+        if self._metrics[csess.meter_start.value].value is not None:
             self._metrics[csess.session_energy.value].value = round(
-                int(meter_stop) / 1000 - float(self._metrics[csess.meter_start.value]),
+                int(meter_stop) / 1000
+                - float(self._metrics[csess.meter_start.value].value),
                 1,
             )
         if Measurand.current_import.value in self._metrics:
@@ -971,11 +982,11 @@ class ChargePoint(cp):
 class Metric:
     """Metric class."""
 
-    def __init__(self, name: str, unit: str):
+    def __init__(self, value, unit):
         """Initialize a Metric."""
-        self._value = None
-        self._unit = None
-        self._extra_attr = None
+        self._value = value
+        self._unit = unit
+        self.extra_attr = {}
 
     @property
     def value(self):
@@ -996,13 +1007,3 @@ class Metric:
     def unit(self, unit: str):
         """Set the unit of the metric."""
         self._unit = unit
-
-    @property
-    def extra_attr(self):
-        """Get the extra attributes of the metric."""
-        return self._extra_attr
-
-    @extra_attr.setter
-    def extra_attr(self, extra_attr):
-        """Set the extra attributes of the metric."""
-        self._extra_attr = extra_attr
