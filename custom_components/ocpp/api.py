@@ -188,9 +188,7 @@ class CentralSystem:
 
     def get_extra_attr(self, cp_id: str, measurand: str):
         """Return last known extra attributes for given measurand."""
-        if (cp_id in self.charge_points) and (
-            measurand in self.charge_points[cp_id]._metrics
-        ):
+        if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].extra_attr
         return None
 
@@ -790,35 +788,35 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
-        m = om.measurand.value
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
             processed_keys = []
             for idx, sv in enumerate(bucket[om.sampled_value.name]):
-                if m in sv and om.phase.value not in sv:
-                    self._metrics[sv[m]].value = round(float(sv[om.value.value]), 1)
-                    if om.unit.value in sv:
-                        if sv[om.unit.value] == DEFAULT_POWER_UNIT:
-                            self._metrics[sv[m]].value = (
-                                float(sv[om.value.value]) / 1000
-                            )
-                            self._metrics[sv[m]].unit = HA_POWER_UNIT
-                        if sv[om.unit.value] == DEFAULT_ENERGY_UNIT:
-                            self._metrics[sv[m]].value = (
-                                float(sv[om.value.value]) / 1000
-                            )
-                            self._metrics[sv[m]].unit = HA_ENERGY_UNIT
+                measurand = sv.get(om.measurand.value, None)
+                value = sv.get(om.value.value, None)
+                unit = sv.get(om.unit.value, None)
+                phase = sv.get(om.phase.value, None)
+                location = sv.get(om.location.value, None)
+
+                if len(sv.keys()) == 1:  # Backwars compatibility
+                    measurand = DEFAULT_MEASURAND
+                    unit = DEFAULT_ENERGY_UNIT
+
+                if phase is None:
+                    if unit == DEFAULT_POWER_UNIT:
+                        self._metrics[measurand].value = float(value) / 1000
+                        self._metrics[measurand].unit = HA_POWER_UNIT
+                    elif unit == DEFAULT_ENERGY_UNIT:
+                        self._metrics[measurand].value = float(value) / 1000
+                        self._metrics[measurand].unit = HA_ENERGY_UNIT
+                    else:
+                        self._metrics[measurand].value = round(float(value), 1)
+                        self._metrics[measurand].unit = unit
+                    if location is not None:
+                        self._metrics[measurand].extra_attr[
+                            om.location.value
+                        ] = location
                     processed_keys.append(idx)
-                if len(sv.keys()) == 1:  # for backwards compatibility
-                    self._metrics[DEFAULT_MEASURAND].value = (
-                        float(sv[om.value.value]) / 1000
-                    )
-                    self._metrics[DEFAULT_MEASURAND].unit = HA_ENERGY_UNIT
-                    processed_keys.append(idx)
-                if m in sv and om.location.value in sv:
-                    self._metrics[sv[m]].extra_attr[om.location.value] = sv.get(
-                        om.location.value
-                    )
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
             # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
