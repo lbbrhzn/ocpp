@@ -33,14 +33,21 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 
 ![image](https://user-images.githubusercontent.com/8673442/129494804-cdff0dfb-a421-490c-af1e-e939f01455b4.png)
 
-5. ***Configure your charger***
-- Configure your charger to use the OCPP websocket (e.g. ws://homeassistant.local:9000). This is charger specific, so consult your manual. 
+5. ***Add the entities to your dashboard***
+- On the OCPP integration, navigate to your Charge Point device see the device info.
 
-6. ***Add the entities to your dashboard***
-- In Home Assistant, click on the the Charge Point device see the device info.
+![image](https://user-images.githubusercontent.com/8673442/129495402-526a1863-9e9f-4a83-85de-d8add63a64ba.png)
+
 - Add the the entities to a lovelace dashboard using 'Add to Lovelace' at the bottom of the panel
 
 ![image](https://user-images.githubusercontent.com/8673442/129495159-611f4f86-aa90-4320-a69c-ce0870f6ee8c.png)
+
+6. ***Configure your charger***
+- Configure your charger to use the OCPP websocket of the central system (e.g. ws://homeassistant.local:9000). This is charger specific, so consult your manual. 
+
+![image](https://user-images.githubusercontent.com/8673442/129495226-4542d235-c007-4df1-9d90-3264492edd16.png)
+
+- You may need to reboot your charger before the changes become effective.
 
 ## Screenshot
 
