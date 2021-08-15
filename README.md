@@ -34,11 +34,11 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 ![image](https://user-images.githubusercontent.com/8673442/129494804-cdff0dfb-a421-490c-af1e-e939f01455b4.png)
 
 5. ***Add the entities to your dashboard***
-- On the OCPP integration, navigate to your Charge Point device see the device info.
+- On the OCPP integration, click on devices to navigate to your Charge Point device.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495402-526a1863-9e9f-4a83-85de-d8add63a64ba.png)
 
-- Add the the entities to a lovelace dashboard using 'Add to Lovelace' at the bottom of the panel
+- At the bottom of the Entities panel, click on 'Add to Lovelace' to add the entities to your dashboard.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495159-611f4f86-aa90-4320-a69c-ce0870f6ee8c.png)
 
