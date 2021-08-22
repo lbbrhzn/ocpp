@@ -8,7 +8,7 @@ from homeassistant.core import Config, HomeAssistant
 from homeassistant.helpers import device_registry
 
 from .api import CentralSystem
-from .const import CONF_CPID, CONF_CSID, DOMAIN, PLATFORMS
+from .const import CONF_CPID, CONF_CSID, DEFAULT_CPID, DEFAULT_CSID, DOMAIN, PLATFORMS
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
@@ -32,16 +32,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """ Create Central System Device """
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.data[CONF_CSID])},
-        name=entry.data[CONF_CSID],
+        identifiers={(DOMAIN, entry.data.get(CONF_CSID, DEFAULT_CSID))},
+        name=entry.data.get(CONF_CSID, DEFAULT_CSID),
         model="OCPP Central System",
     )
 
     """ Create Charge Point Device """
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.data[CONF_CPID])},
-        name=entry.data[CONF_CPID],
+        identifiers={(DOMAIN, entry.data.get(CONF_CPID, DEFAULT_CPID))},
+        name=entry.data.get(CONF_CPID, DEFAULT_CPID),
         default_model="OCPP Charge Point",
         via_device=((DOMAIN), central_sys.id),
     )
