@@ -83,7 +83,7 @@ class ChargePointMetric(SensorEntity):
         self._state = new_state
         if (
             (self.device_class is DEVICE_CLASS_ENERGY)
-            and new_state.isnumeric()
+            and new_state.is_numeric()
             and old_state.is_numeric()
             and (new_state < old_state)
         ):
