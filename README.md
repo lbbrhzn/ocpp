@@ -49,7 +49,7 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 
 - You may need to reboot your charger before the changes become effective.
 
-### 7. Start the Charging ###
+### 7. Start Charging ###
 - Use the switches to unlock the charger and start the charging process.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495891-91f40bf9-f48e-4ced-b303-bf0fb77898f3.png)
