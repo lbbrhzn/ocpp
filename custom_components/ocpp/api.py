@@ -70,6 +70,7 @@ from .enums import (
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     OcppMisc as om,
+    Profiles as prof,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -259,7 +260,6 @@ class ChargePoint(cp):
         # Indicates if the charger requires a reboot to apply new
         # configuration.
         self._requires_reboot = False
-        self._features_supported = {}
         self.preparing = asyncio.Event()
         self._transactionId = 0
         self._metrics = defaultdict(lambda: Metric(None, None))
@@ -267,6 +267,7 @@ class ChargePoint(cp):
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
+        self._attr_supported_features: int = 0
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -331,7 +332,7 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await self.get_supported_features()
-            if om.feature_profile_remote.value in self._features_supported:
+            if prof.REM in self._attr_supported_features:
                 await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
@@ -365,7 +366,7 @@ class ChargePoint(cp):
                 handle_get_configuration,
                 GCONF_SERVICE_DATA_SCHEMA,
             )
-            if om.feature_profile_smart.value in self._features_supported:
+            if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
                     DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
                 )
@@ -375,7 +376,7 @@ class ChargePoint(cp):
                     handle_set_charge_rate,
                     SCR_SERVICE_DATA_SCHEMA,
                 )
-            if om.feature_profile_firmware.value in self._features_supported:
+            if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(
                     DOMAIN,
                     csvcs.service_update_firmware.value,
@@ -396,9 +397,20 @@ class ChargePoint(cp):
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
         for key_value in resp.configuration_key:
-            self._features_supported = key_value[om.value.value]
-            self._metrics[cdet.features.value].value = self._features_supported
-            _LOGGER.debug("Supported feature profiles: %s", self._features_supported)
+            if om.feature_profile_core.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.CORE
+            if om.feature_profile_firmware.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.FW
+            if om.feature_profile_smart.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.SMART
+            if om.feature_profile_reservation.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.RES
+            if om.feature_profile_remote.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.REM
+            if om.feature_profile_auth.value in key_value[om.value.value]:
+                self._attr_supported_features |= prof.AUTH
+            self._metrics[cdet.features.value].value = self._attr_supported_features
+            _LOGGER.debug("Supported feature profiles: %s", key_value[om.value.value])
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -441,7 +453,7 @@ class ChargePoint(cp):
 
     async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
         """Set a charging profile with defined limit."""
-        if om.feature_profile_smart.value in self._features_supported:
+        if prof.SMART in self._attr_supported_features:
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
             )
@@ -511,7 +523,7 @@ class ChargePoint(cp):
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
         if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
-        if om.feature_profile_smart.value in self._features_supported:
+        if prof.SMART in self._attr_supported_features:
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
             )
@@ -593,7 +605,7 @@ class ChargePoint(cp):
         """Update charger with new firmware if available."""
         """where firmware_url is the http or https url of the new firmware"""
         """and wait_time is hours from now to wait before install"""
-        if om.feature_profile_firmware.value in self._features_supported:
+        if prof.FW in self._attr_supported_features:
             schema = vol.Schema(vol.Url())
             try:
                 url = schema(firmware_url)
@@ -612,7 +624,7 @@ class ChargePoint(cp):
 
     async def get_diagnostics(self, upload_url: str):
         """Upload diagnostic data to server from charger."""
-        if om.feature_profile_firmware.value in self._features_supported:
+        if prof.FW in self._attr_supported_features:
             schema = vol.Schema(vol.Url())
             try:
                 url = schema(upload_url)
@@ -962,6 +974,11 @@ class ChargePoint(cp):
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.HeartbeatPayload(current_time=now)
+
+    @property
+    def supported_features(self) -> int:
+        """Flag of Ocpp features that are supported."""
+        return self._attr_supported_features
 
     def get_metric(self, measurand: str):
         """Return last known value for given measurand."""

@@ -1,5 +1,5 @@
 """Additional enumerated values to use in home assistant."""
-from enum import Enum
+from enum import Enum, IntFlag, auto
 
 
 class HAChargerServices(str, Enum):
@@ -49,6 +49,17 @@ class HAChargerSession(str, Enum):
     session_time = "Session.Time"  # in min
     session_energy = "Session.Energy"  # in kWh
     meter_start = "Meter.Start"  # in kWh
+
+
+class Profiles(IntFlag):
+    """Flags to indicate supported feature profiles."""
+
+    CORE = auto()  # Core
+    FW = auto()  # FirmwareManagement
+    SMART = auto()  # SmartCharging
+    RES = auto()  # Reservation
+    REM = auto()  # RemoteTrigger
+    AUTH = auto()  # LocalAuthListManagement
 
 
 class OcppMisc(str, Enum):
