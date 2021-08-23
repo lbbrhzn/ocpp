@@ -69,8 +69,8 @@ from .enums import (
     HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
-    HAProfileFlags as prof,
     OcppMisc as om,
+    Profiles as prof,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)

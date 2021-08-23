@@ -51,7 +51,7 @@ class HAChargerSession(str, Enum):
     meter_start = "Meter.Start"  # in kWh
 
 
-class HAProfileFlags(IntFlag):
+class Profiles(IntFlag):
     """Flags to indicate supported feature profiles."""
 
     CORE = auto()  # Core
