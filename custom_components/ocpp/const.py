@@ -31,8 +31,8 @@ SLEEP_TIME = 60
 BINARY_SENSOR = "binary_sensor"
 SENSOR = "sensor"
 SWITCH = "switch"
-SLIDER = "slider"
-PLATFORMS = [SENSOR, SWITCH, SLIDER]
+INPUT_NUMBER = "input_number"
+PLATFORMS = [SENSOR, SWITCH, INPUT_NUMBER]
 
 # Ocpp supported measurands
 MEASURANDS = [
