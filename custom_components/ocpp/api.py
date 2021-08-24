@@ -76,12 +76,6 @@ from .enums import (
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 
-SCR_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional("limit_amps"): int,
-        vol.Optional("limit_watts"): int,
-    }
-)
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("firmware_url"): str,
@@ -199,6 +193,12 @@ class CentralSystem:
             return self.charge_points[cp_id].status == STATE_OK
         return False
 
+    async def set_max_charge_rate_amps(self, cp_id: str, value: float):
+        """Set the maximum charge rate in amps."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id].set_charge_rate(lim_amps=value)
+        return False
+
     async def set_charger_state(
         self, cp_id: str, service_name: str, state: bool = True
     ):
@@ -279,22 +279,6 @@ class ChargePoint(cp):
                 return
             await self.clear_profile()
 
-        async def handle_set_charge_rate(call):
-            """Handle the set charge rate service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            lim_A = call.data.get("limit_amps")
-            lim_W = call.data.get("limit_watts")
-            if lim_A is not None and lim_W is not None:
-                await self.set_charge_rate(lim_A, lim_W)
-            elif lim_A is not None:
-                await self.set_charge_rate(limit_amps=lim_A)
-            elif lim_W is not None:
-                await self.set_charge_rate(limit_watts=lim_W)
-            else:
-                await self.set_charge_rate()
-
         async def handle_update_firmware(call):
             """Handle the firmware update service call."""
             if self.status == STATE_UNAVAILABLE:
@@ -369,12 +353,6 @@ class ChargePoint(cp):
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
                     DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
-                )
-                self.hass.services.async_register(
-                    DOMAIN,
-                    csvcs.service_set_charge_rate.value,
-                    handle_set_charge_rate,
-                    SCR_SERVICE_DATA_SCHEMA,
                 )
             if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(

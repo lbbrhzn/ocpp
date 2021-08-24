@@ -68,7 +68,6 @@ async def test_cms_responses(hass):
             csvcs.service_get_configuration,
             csvcs.service_get_diagnostics,
             csvcs.service_clear_profile,
-            csvcs.service_set_charge_rate,
         ]
         for service in SERVICES:
             data = {}
