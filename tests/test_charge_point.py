@@ -8,7 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
-from custom_components.ocpp.const import DOMAIN, SWITCH, SWITCHES
+from custom_components.ocpp.const import DOMAIN, NUMBER, NUMBERS, SWITCH, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
@@ -86,14 +86,19 @@ async def test_cms_responses(hass):
                 blocking=True,
             )
             assert result
-        # test setting value of number slider
-        result = await hass.services.async_call(
-            "number",
-            "set_value",
-            service_data={"value": "10"},
-            blocking=True,
-        )
-        assert result
+
+        for number in NUMBERS:
+            # test setting value of number slider
+            result = await hass.services.async_call(
+                NUMBER,
+                "set_value",
+                service_data={
+                    ATTR_ENTITY_ID: f"{NUMBER}.test_cpid_{number['name'].lower()}",
+                    "value": "10",
+                },
+                blocking=True,
+            )
+            assert result
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
