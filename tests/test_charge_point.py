@@ -92,11 +92,9 @@ async def test_cms_responses(hass):
             result = await hass.services.async_call(
                 NUMBER,
                 "set_value",
-                service_data={
-                    ATTR_ENTITY_ID: f"{NUMBER}.test_cpid_{number['name'].lower()}",
-                    "value": "10",
-                },
+                service_data={"value": "10"},
                 blocking=True,
+                target={ATTR_ENTITY_ID: f"{NUMBER}.test_cpid_{number['name'].lower()}"},
             )
             assert result
 
