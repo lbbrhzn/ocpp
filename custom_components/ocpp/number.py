@@ -28,12 +28,18 @@ class Number(InputNumber):
         self.cp_id = cp_id
         self.central_system = central_system
         self.id = ".".join(["number", self.cp_id, config["name"]])
+        self.name = ".".join([self.cp_id, config["name"]])
         self.entity_id = "number." + "_".join([self.cp_id, config["name"]])
 
     @property
     def unique_id(self):
         """Return the unique id of this entity."""
         return self.id
+
+    @property
+    def name(self):
+        """Return the name of this entity."""
+        return self.name
 
     @property
     def available(self) -> bool:
