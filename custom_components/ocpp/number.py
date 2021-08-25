@@ -28,7 +28,7 @@ class Number(InputNumber):
         self.cp_id = cp_id
         self.central_system = central_system
         self.id = ".".join(["number", self.cp_id, config["name"]])
-        self.name = ".".join([self.cp_id, config["name"]])
+        self._name = ".".join([self.cp_id, config["name"]])
         self.entity_id = "number." + "_".join([self.cp_id, config["name"]])
 
     @property
@@ -39,7 +39,7 @@ class Number(InputNumber):
     @property
     def name(self):
         """Return the name of this entity."""
-        return self.name
+        return self._name
 
     @property
     def available(self) -> bool:
