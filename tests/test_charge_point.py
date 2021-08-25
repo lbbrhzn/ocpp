@@ -86,6 +86,14 @@ async def test_cms_responses(hass):
                 blocking=True,
             )
             assert result
+        # test setting value of number slider
+        result = await hass.services.async_call(
+            "number",
+            "set_value",
+            service_data={"value": "10"},
+            blocking=True,
+        )
+        assert result
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
