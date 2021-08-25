@@ -107,7 +107,7 @@ SWITCHES = [SWITCH_CHARGE, SWITCH_RESET, SWITCH_UNLOCK, SWITCH_AVAILABILITY]
 
 # Input number definitions
 NUMBER_MAX_CURRENT = {
-    CONF_NAME: "Maximum.Current",
+    CONF_NAME: "Maximum_Current",
     CONF_ICON: ICON,
     CONF_MIN: 0,
     CONF_MAX: 32,

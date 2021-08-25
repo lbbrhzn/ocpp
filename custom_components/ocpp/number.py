@@ -27,7 +27,7 @@ class Number(InputNumber):
         super().__init__(config)
         self.cp_id = cp_id
         self.central_system = central_system
-        self.id = ".".join("number", [self.cp_id, config["name"]])
+        self.id = ".".join(["number", self.cp_id, config["name"]])
         self.entity_id = "number." + "_".join([self.cp_id, config["name"]])
 
     @property
