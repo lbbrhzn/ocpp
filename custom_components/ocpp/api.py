@@ -196,7 +196,7 @@ class CentralSystem:
     async def set_max_charge_rate_amps(self, cp_id: str, value: float):
         """Set the maximum charge rate in amps."""
         if cp_id in self.charge_points:
-            return self.charge_points[cp_id].set_charge_rate(lim_amps=value)
+            return await self.charge_points[cp_id].set_charge_rate(lim_amps=value)
         return False
 
     async def set_charger_state(
