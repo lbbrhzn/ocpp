@@ -760,6 +760,7 @@ class ChargePoint(cp):
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
+                self._metrics[measurand].unit = unit
                 self._metrics[measurand].extra_attr[om.unit.value] = unit
                 self._metrics[measurand].extra_attr[phase] = float(value)
 
