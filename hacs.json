@@ -2,7 +2,9 @@
   "name": "Open Charge Point Protocol (OCPP)",
   "content_in_root": false,
   "domains": [
-    "sensor"
+    "sensor",
+    "switch",
+    "number"
   ],
   "homeassistant": "2021.6.6",
   "iot_class": "Local Push",
