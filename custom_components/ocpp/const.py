@@ -1,37 +1,47 @@
 """Define constants for OCPP integration."""
+import homeassistant.components.input_number as input_number
 import homeassistant.const as ha
 
 from ocpp.v16.enums import ChargePointStatus, Measurand, UnitOfMeasure
 
 from .enums import HAChargerServices, HAChargerStatuses
 
-DOMAIN = "ocpp"
-CONF_METER_INTERVAL = "meter_interval"
-CONF_USERNAME = ha.CONF_USERNAME
-CONF_PASSWORD = ha.CONF_PASSWORD
-CONF_HOST = ha.CONF_HOST
-CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
-CONF_NAME = ha.CONF_NAME
+CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CSID = "csid"
+CONF_HOST = ha.CONF_HOST
+CONF_ICON = ha.CONF_ICON
+CONF_INITIAL = input_number.CONF_INITIAL
+CONF_MAX = input_number.CONF_MAX
+CONF_MIN = input_number.CONF_MIN
+CONF_METER_INTERVAL = "meter_interval"
+CONF_MODE = ha.CONF_MODE
+CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
+CONF_NAME = ha.CONF_NAME
+CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
+CONF_STEP = input_number.CONF_STEP
 CONF_SUBPROTOCOL = "subprotocol"
-CONF_CPI = "charge_point_identity"
+CONF_UNIT_OF_MEASUREMENT = ha.CONF_UNIT_OF_MEASUREMENT
+CONF_USERNAME = ha.CONF_USERNAME
 DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9000
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
 DEFAULT_METER_INTERVAL = 60
-
+DOMAIN = "ocpp"
 ICON = "mdi:ev-station"
+MODE_SLIDER = input_number.MODE_SLIDER
+MODE_BOX = input_number.MODE_BOX
 SLEEP_TIME = 60
 
 # Platforms
-BINARY_SENSOR = "binary_sensor"
+NUMBER = "number"
 SENSOR = "sensor"
 SWITCH = "switch"
-PLATFORMS = [SENSOR, SWITCH]
+
+PLATFORMS = [SENSOR, SWITCH, NUMBER]
 
 # Ocpp supported measurands
 MEASURANDS = [
@@ -94,3 +104,16 @@ SWITCH_UNLOCK = {
     "pulse": True,
 }
 SWITCHES = [SWITCH_CHARGE, SWITCH_RESET, SWITCH_UNLOCK, SWITCH_AVAILABILITY]
+
+# Input number definitions
+NUMBER_MAX_CURRENT = {
+    CONF_NAME: "Maximum_Current",
+    CONF_ICON: ICON,
+    CONF_MIN: 0,
+    CONF_MAX: 32,
+    CONF_STEP: 1,
+    CONF_INITIAL: 32,
+    CONF_MODE: MODE_SLIDER,
+    CONF_UNIT_OF_MEASUREMENT: "A",
+}
+NUMBERS = [NUMBER_MAX_CURRENT]
