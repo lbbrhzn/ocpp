@@ -45,7 +45,9 @@ class Number(InputNumber):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        if Profiles.SMART not in self.central_system.get_supported_features(self.cp_id):
+        if not (
+            Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
+        ):
             return False
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
