@@ -4,10 +4,11 @@ import voluptuous as vol
 
 from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, NUMBERS
+from .enums import Profiles
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
-    """Configure the sensor platform."""
+    """Configure the number platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
@@ -20,7 +21,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
 
 class Number(InputNumber):
-    """Individual switch for charge point."""
+    """Individual slider for setting charge rate."""
 
     def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
         """Initialize a Number instance."""
@@ -43,7 +44,9 @@ class Number(InputNumber):
 
     @property
     def available(self) -> bool:
-        """Return if switch is available."""
+        """Return if entity is available."""
+        if Profiles.SMART not in self.central_system.get_supported_features(self.cp_id):
+            return False
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     @property
