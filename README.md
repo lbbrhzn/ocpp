@@ -4,8 +4,7 @@
 This is a Home Assistant integration for Electric Vehicle chargers that support the Open Charge Point Protocol.
 
 * based on the [Python OCPP Package](https://github.com/mobilityhouse/ocpp).
-* [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs) repository
-
+* HACS compliant repository [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
 ## Installation
 
