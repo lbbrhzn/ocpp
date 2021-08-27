@@ -379,7 +379,7 @@ class ChargePoint(cpclass):
                     "timestamp": "2021-06-21T16:15:09Z",
                     "sampledValue": [
                         {
-                            "value": "1305570.000",
+                            "value": "1305590.000",
                             "context": "Sample.Periodic",
                             "measurand": "Energy.Active.Import.Register",
                             "location": "Outlet",
