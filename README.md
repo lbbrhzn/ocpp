@@ -66,8 +66,8 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 - [Evnex E Series & X Series Charging Stations](https://www.evnex.com/)
 - [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 
-
 ## Devices with known issues
+
 - [EVBox Elvi](https://evbox.com/en/products/home-chargers/elvi?language=en) appears to require a secure connection, which we do not support (yet).
 
 ## Debugging
@@ -87,6 +87,14 @@ logger:
 After a restart detailed log entries will appear in `/config/home-assistant.log`.
 
 ## Support
+
+If you need help, check out our [forum](https://github.com/lbbrhzn/ocpp/discussions) or submit an [issue](https://github.com/lbbrhzn/ocpp/issues).
+
+## Development
+
+It is recommended to use Visual Studio Code, and run home assistant in a devcontainer.
+See https://hacs.xyz/docs/developer/devcontainer
+
 **💡 Tip:** If you like this project consider buying me a cocktail 🍹:
 
 <a href="https://www.buymeacoffee.com/lbbrhzn" target="_blank">
