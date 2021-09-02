@@ -1,10 +1,16 @@
 """Number platform for ocpp."""
+import homeassistant.components.input_number as input_number
 from homeassistant.components.number import Number as Num
 import voluptuous as vol
 
 from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, NUMBERS
 from .enums import Profiles
+
+CONF_INITIAL = input_number.CONF_INITIAL
+CONF_MAX = input_number.CONF_MAX
+CONF_MIN = input_number.CONF_MIN
+CONF_STEP = input_number.CONF_STEP
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -25,12 +31,16 @@ class Number(Num):
 
     def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
         """Initialize a Number instance."""
-        super().__init__(config)
+        # super().__init__(config)
         self.cp_id = cp_id
         self.central_system = central_system
         self.id = ".".join(["number", self.cp_id, config["name"]])
         self._name = ".".join([self.cp_id, config["name"]])
         self.entity_id = "number." + "_".join([self.cp_id, config["name"]])
+        self._attr_max_value: float = config[CONF_MAX]
+        self._attr_min_value: float = config[CONF_MIN]
+        self._attr_step: float = config[CONF_STEP]
+        self._attr_value: float = config[CONF_INITIAL]
 
     @property
     def unique_id(self):
