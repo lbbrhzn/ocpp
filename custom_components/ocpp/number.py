@@ -73,12 +73,12 @@ class Number(NumberEntity):
         """Set new value."""
         num_value = float(value)
 
-        if num_value < self._minimum or num_value > self._maximum:
+        if num_value < self._attr_min_value or num_value > self._attr_max_value:
             raise vol.Invalid(
-                f"Invalid value for {self.entity_id}: {value} (range {self._minimum} - {self._maximum})"
+                f"Invalid value for {self.entity_id}: {value} (range {self._attr_min_value} - {self._attr_max_value})"
             )
 
         resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
         if resp:
-            self._current_value = num_value
+            self._attr_value = num_value
             self.async_write_ha_state()
