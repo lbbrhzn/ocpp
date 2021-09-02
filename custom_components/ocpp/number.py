@@ -1,5 +1,5 @@
 """Number platform for ocpp."""
-from homeassistant.components.input_number import InputNumber
+from homeassistant.components.number import Number as Num
 import voluptuous as vol
 
 from .api import CentralSystem
@@ -20,7 +20,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class Number(InputNumber):
+class Number(Num):
     """Individual slider for setting charge rate."""
 
     def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
