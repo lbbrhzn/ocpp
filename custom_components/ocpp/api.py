@@ -702,6 +702,7 @@ class ChargePoint(cp):
     async def reconnect(self, connection):
         """Reconnect charge point."""
         self._connection = connection
+        self._metrics[cstat.reconnects.value].value += 1
         try:
             self.status = STATE_OK
             await super().start()
