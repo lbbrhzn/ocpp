@@ -28,6 +28,7 @@ class HAChargerStatuses(str, Enum):
     error_code = "Error.Code"
     stop_reason = "Stop.Reason"
     firmware_status = "FW.Status"
+    reconnects = "Reconnects"
 
 
 class HAChargerDetails(str, Enum):
