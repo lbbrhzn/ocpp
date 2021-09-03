@@ -274,6 +274,7 @@ class ChargePoint(cp):
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
         self._attr_supported_features: int = 0
+        self._metrics[cstat.reconnects.value].value: int = 0
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -702,6 +703,7 @@ class ChargePoint(cp):
     async def reconnect(self, connection):
         """Reconnect charge point."""
         self._connection = connection
+        self._metrics[cstat.reconnects.value].value += 1
         try:
             self.status = STATE_OK
             await super().start()
