@@ -567,7 +567,7 @@ class ChargePoint(cp):
             return False
 
     async def reset(self, typ: str = ResetType.hard):
-        """Soft reset charger unless hard reset requested."""
+        """Hard reset charger unless soft reset requested."""
         self._metrics[cstat.reconnects.value].value = 0
         req = call.ResetPayload(typ)
         resp = await self.call(req)
