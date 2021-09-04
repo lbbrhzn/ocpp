@@ -572,7 +572,6 @@ class ChargePoint(cp):
         req = call.ResetPayload(typ)
         resp = await self.call(req)
         if resp.status == ResetStatus.accepted:
-            await self.post_connect()
             return True
         else:
             _LOGGER.debug("Failed with response: %s", resp.status)
@@ -869,8 +868,9 @@ class ChargePoint(cp):
             om.charge_point_serial_number.name, None
         )
 
-        asyncio.create_task(self.async_update_device_info(kwargs))
+        self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.post_connect())
         return call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
