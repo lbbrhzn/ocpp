@@ -324,7 +324,6 @@ class ChargePoint(cp):
             self.status = STATE_OK
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
-                await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration(ckey.heartbeat_interval.value)
