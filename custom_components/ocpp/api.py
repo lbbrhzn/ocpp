@@ -98,6 +98,13 @@ GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("upload_url"): str,
     }
 )
+TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("vendor_id"): str,
+        vol.Optional("message_id"): str,
+        vol.Optional("data"): str,
+    }
+)
 
 
 class CentralSystem:
@@ -320,6 +327,16 @@ class ChargePoint(cp):
             url = call.data.get("upload_url")
             await self.get_diagnostics(url)
 
+        async def handle_data_transfer(call):
+            """Handle the data transfer service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            vendor = call.data.get("vendor_id")
+            message = call.data.get("message_id", "")
+            data = call.data.get("data", "")
+            await self.data_transfer(vendor, message, data)
+
         try:
             self.status = STATE_OK
             await self.get_supported_features()
@@ -356,6 +373,12 @@ class ChargePoint(cp):
                 csvcs.service_get_configuration.value,
                 handle_get_configuration,
                 GCONF_SERVICE_DATA_SCHEMA,
+            )
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_data_transfer.value,
+                handle_data_transfer,
+                TRANS_SERVICE_DATA_SCHEMA,
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
@@ -621,6 +644,24 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.debug("Charger does not support ocpp diagnostics uploading")
+            return False
+
+    async def data_transfer(self, vendor_id: str, message_id: str = "", data: str = ""):
+        """Request vendor specific data transfer from charger."""
+        req = call.DataTransferPayload(
+            vendor_id=vendor_id, message_id=message_id, data=data
+        )
+        resp = await self.call(req)
+        if resp == DataTransferStatus.accepted:
+            _LOGGER.debug(
+                "Data transferred - vendorId %s, messageId %s: %s",
+                vendor_id,
+                message_id,
+                resp,
+            )
+            return True
+        else:
+            _LOGGER.debug("Failed with response: %s", resp.status)
             return False
 
     async def get_configuration(self, key: str = ""):
