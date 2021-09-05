@@ -124,7 +124,11 @@ class CentralSystem:
         self = CentralSystem(hass, entry)
 
         server = await websockets.serve(
-            self.on_connect, self.host, self.port, subprotocols=self.subprotocol
+            self.on_connect,
+            self.host,
+            self.port,
+            subprotocols=self.subprotocol,
+            ping_timeout=None,
         )
         self._server = server
         return self
