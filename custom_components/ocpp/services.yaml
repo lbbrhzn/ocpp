@@ -106,12 +106,12 @@ data_transfer:
     message_id:
       name: messageId
       description: Defined by charger manufacturer
-      required: true
+      required: false
       advanced: true
       example: "ABC"
     data:
       name: data
       description: Defined by charger manufacturer
-      required: true
+      required: false
       advanced: true
       example: "ABC"
