@@ -79,6 +79,8 @@ async def test_cms_responses(hass):
                 data = {"ocpp_key": "UnknownKeyTest"}
             if service == csvcs.service_get_diagnostics:
                 data = {"upload_url": "https://webhook.site/abc"}
+            if service == csvcs.service_data_transfer:
+                data = {"vendor_id": "ABC"}
             result = await hass.services.async_call(
                 DOMAIN,
                 service.value,
@@ -286,6 +288,11 @@ class ChargePoint(cpclass):
     def on_get_diagnostics(self, **kwargs):
         """Handle get diagnostics request."""
         return call_result.GetDiagnosticsPayload()
+
+    @on(Action.DataTransfer)
+    def on_data_transfer(self, **kwargs):
+        """Handle get data transfer request."""
+        return call_result.DataTransferPayload(DataTransferStatus.accepted)
 
     async def send_boot_notification(self):
         """Send a boot notification."""

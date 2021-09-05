@@ -92,3 +92,26 @@ get_diagnostics:
       required: true
       advanced: true
       example: "https://webhook.site/abc"
+      
+data_transfer:
+  name: Request data transfer from charger
+  description: Note this is specific to charger, see manufacturer's documentation
+  fields:
+    vendor_id:
+      name: vendorId
+      description: Defined by charger manufacturer
+      required: true
+      advanced: true
+      example: "ABC"
+    message_id:
+      name: messageId
+      description: Defined by charger manufacturer
+      required: true
+      advanced: true
+      example: "ABC"
+    data:
+      name: data
+      description: Defined by charger manufacturer
+      required: true
+      advanced: true
+      example: "ABC"
