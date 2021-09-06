@@ -75,6 +75,9 @@ from .enums import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+# Uncomment these when Debugging
+# logging.getLogger("asyncio").setLevel(logging.DEBUG)
+# logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
@@ -654,10 +657,11 @@ class ChargePoint(cp):
         resp = await self.call(req)
         if resp.status == DataTransferStatus.accepted:
             _LOGGER.info(
-                "Data transferred - vendorId %s, messageId %s: %s",
+                "Data transfer [vendorId(%s), messageId(%s), data(%s)] response: %s",
                 vendor_id,
                 message_id,
-                resp,
+                data,
+                resp.data,
             )
             return True
         else:
