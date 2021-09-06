@@ -18,6 +18,7 @@ class HAChargerServices(str, Enum):
     service_get_configuration = "get_configuration"
     service_get_diagnostics = "get_diagnostics"
     service_clear_profile = "clear_profile"
+    service_data_transfer = "data_transfer"
 
 
 class HAChargerStatuses(str, Enum):

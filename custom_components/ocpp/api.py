@@ -75,6 +75,9 @@ from .enums import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+# Uncomment these when Debugging
+# logging.getLogger("asyncio").setLevel(logging.DEBUG)
+# logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
@@ -96,6 +99,13 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("upload_url"): str,
+    }
+)
+TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("vendor_id"): str,
+        vol.Optional("message_id"): str,
+        vol.Optional("data"): str,
     }
 )
 
@@ -320,6 +330,16 @@ class ChargePoint(cp):
             url = call.data.get("upload_url")
             await self.get_diagnostics(url)
 
+        async def handle_data_transfer(call):
+            """Handle the data transfer service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            vendor = call.data.get("vendor_id")
+            message = call.data.get("message_id", "")
+            data = call.data.get("data", "")
+            await self.data_transfer(vendor, message, data)
+
         try:
             self.status = STATE_OK
             await self.get_supported_features()
@@ -356,6 +376,12 @@ class ChargePoint(cp):
                 csvcs.service_get_configuration.value,
                 handle_get_configuration,
                 GCONF_SERVICE_DATA_SCHEMA,
+            )
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_data_transfer.value,
+                handle_data_transfer,
+                TRANS_SERVICE_DATA_SCHEMA,
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
@@ -395,7 +421,7 @@ class ChargePoint(cp):
             if om.feature_profile_auth.value in key_value[om.value.value]:
                 self._attr_supported_features |= prof.AUTH
             self._metrics[cdet.features.value].value = self._attr_supported_features
-            _LOGGER.debug("Supported feature profiles: %s", key_value[om.value.value])
+            _LOGGER.info("Supported feature profiles: %s", key_value[om.value.value])
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -406,7 +432,7 @@ class ChargePoint(cp):
         if resp.status == TriggerMessageStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def trigger_status_notification(self):
@@ -418,7 +444,7 @@ class ChargePoint(cp):
         if resp.status == TriggerMessageStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def become_operative(self):
@@ -433,7 +459,7 @@ class ChargePoint(cp):
         if resp.status == ClearChargingProfileStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
@@ -442,11 +468,11 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
             )
-            _LOGGER.debug(
+            _LOGGER.info(
                 "Charger supports setting the following units: %s",
                 resp,
             )
-            _LOGGER.debug("If more than one unit supported default unit is Amps")
+            _LOGGER.info("If more than one unit supported default unit is Amps")
             if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
@@ -474,13 +500,13 @@ class ChargePoint(cp):
                 },
             )
         else:
-            _LOGGER.debug("Smart charging is not supported by this charger")
+            _LOGGER.info("Smart charging is not supported by this charger")
             return False
         resp = await self.call(req)
         if resp.status == ChargingProfileStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def set_availability(self, state: bool = True):
@@ -499,7 +525,7 @@ class ChargePoint(cp):
         if resp.status == AvailabilityStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def start_transaction(self, limit_amps: int = 32, limit_watts: int = 22000):
@@ -512,11 +538,11 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
             )
-            _LOGGER.debug(
+            _LOGGER.info(
                 "Charger supports setting the following units: %s",
                 resp,
             )
-            _LOGGER.debug("If more than one unit supported default unit is Amps")
+            _LOGGER.info("If more than one unit supported default unit is Amps")
             if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
@@ -551,7 +577,7 @@ class ChargePoint(cp):
         if resp.status == RemoteStartStopStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def stop_transaction(self):
@@ -563,7 +589,7 @@ class ChargePoint(cp):
         if resp.status == RemoteStartStopStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def reset(self, typ: str = ResetType.soft):
@@ -573,7 +599,7 @@ class ChargePoint(cp):
         if resp.status == ResetStatus.accepted:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def unlock(self, connector_id: int = 1):
@@ -583,7 +609,7 @@ class ChargePoint(cp):
         if resp.status == UnlockStatus.unlocked:
             return True
         else:
-            _LOGGER.debug("Failed with response: %s", resp.status)
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
@@ -601,10 +627,10 @@ class ChargePoint(cp):
             ).isoformat()
             req = call.UpdateFirmwarePayload(location=url, retrieve_date=update_time)
             resp = await self.call(req)
-            _LOGGER.debug("Response: %s", resp)
+            _LOGGER.info("Response: %s", resp)
             return True
         else:
-            _LOGGER.debug("Charger does not support ocpp firmware updating")
+            _LOGGER.warning("Charger does not support ocpp firmware updating")
             return False
 
     async def get_diagnostics(self, upload_url: str):
@@ -614,13 +640,32 @@ class ChargePoint(cp):
             try:
                 url = schema(upload_url)
             except vol.MultipleInvalid as e:
-                _LOGGER.debug("Failed to parse url: %s", e)
+                _LOGGER.warning("Failed to parse url: %s", e)
             req = call.GetDiagnosticsPayload(location=url)
             resp = await self.call(req)
-            _LOGGER.debug("Response: %s", resp)
+            _LOGGER.info("Response: %s", resp)
             return True
         else:
-            _LOGGER.debug("Charger does not support ocpp diagnostics uploading")
+            _LOGGER.warning("Charger does not support ocpp diagnostics uploading")
+            return False
+
+    async def data_transfer(self, vendor_id: str, message_id: str = "", data: str = ""):
+        """Request vendor specific data transfer from charger."""
+        req = call.DataTransferPayload(
+            vendor_id=vendor_id, message_id=message_id, data=data
+        )
+        resp = await self.call(req)
+        if resp.status == DataTransferStatus.accepted:
+            _LOGGER.info(
+                "Data transfer [vendorId(%s), messageId(%s), data(%s)] response: %s",
+                vendor_id,
+                message_id,
+                data,
+                resp.data,
+            )
+            return True
+        else:
+            _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
     async def get_configuration(self, key: str = ""):
