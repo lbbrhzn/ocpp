@@ -348,7 +348,6 @@ class ChargePoint(cp):
             self.status = STATE_OK
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
-                await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration(ckey.heartbeat_interval.value)
@@ -596,8 +595,9 @@ class ChargePoint(cp):
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
-    async def reset(self, typ: str = ResetType.soft):
-        """Soft reset charger unless hard reset requested."""
+    async def reset(self, typ: str = ResetType.hard):
+        """Hard reset charger unless soft reset requested."""
+        self._metrics[cstat.reconnects.value].value = 0
         req = call.ResetPayload(typ)
         resp = await self.call(req)
         if resp.status == ResetStatus.accepted:
@@ -916,8 +916,9 @@ class ChargePoint(cp):
             om.charge_point_serial_number.name, None
         )
 
-        asyncio.create_task(self.async_update_device_info(kwargs))
+        self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.post_connect())
         return call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=30,
