@@ -26,12 +26,12 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class Number(NumberEntity):
+class Number(input_number.InputNumber, NumberEntity):
     """Individual slider for setting charge rate."""
 
     def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
         """Initialize a Number instance."""
-        # super().__init__(config)
+        super().__init__(config)
         self.cp_id = cp_id
         self.central_system = central_system
         self.id = ".".join(["number", self.cp_id, config["name"]])
@@ -62,6 +62,11 @@ class Number(NumberEntity):
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     @property
+    def state(self):
+        """Return the state of the component."""
+        return self._attr_value
+
+    @property
     def device_info(self):
         """Return device information."""
         return {
@@ -79,6 +84,6 @@ class Number(NumberEntity):
             )
 
         resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
-        if resp:
+        if resp is True:
             self._attr_value = num_value
             self.async_write_ha_state()
