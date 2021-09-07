@@ -139,6 +139,7 @@ class CentralSystem:
             self.port,
             subprotocols=self.subprotocol,
             ping_timeout=None,
+            close_timeout=10,
         )
         self._server = server
         return self
