@@ -1,10 +1,19 @@
 """Number platform for ocpp."""
-import homeassistant.components.input_number as input_number
+from homeassistant.components.input_number import InputNumber
 from homeassistant.components.number import NumberEntity
 import voluptuous as vol
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, NUMBERS
+from .const import (
+    CONF_CPID,
+    CONF_INITIAL,
+    CONF_MAX,
+    CONF_MIN,
+    CONF_STEP,
+    DEFAULT_CPID,
+    DOMAIN,
+    NUMBERS,
+)
 from .enums import Profiles
 
 CONF_INITIAL = input_number.CONF_INITIAL
@@ -26,7 +35,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class Number(NumberEntity):
+class Number(InputNumber, NumberEntity):
     """Individual slider for setting charge rate."""
 
     def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
@@ -62,6 +71,11 @@ class Number(NumberEntity):
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     @property
+    def state(self):
+        """Return the state of the component."""
+        return self._attr_value
+
+    @property
     def device_info(self):
         """Return device information."""
         return {
@@ -79,6 +93,6 @@ class Number(NumberEntity):
             )
 
         resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
-        if resp:
+        if resp is True:
             self._attr_value = num_value
             self.async_write_ha_state()

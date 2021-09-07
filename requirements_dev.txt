@@ -1,3 +1,2 @@
-
 pre-commit
-homeassistant>=2021.6.6
+homeassistant>=2021.8.0

@@ -75,6 +75,9 @@ from .enums import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+# Uncomment these when Debugging
+logging.getLogger("asyncio").setLevel(logging.DEBUG)
+logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
@@ -168,17 +171,13 @@ class CentralSystem:
                 _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
                 cp = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
                 self.charge_points[self.cpid] = cp
-                await self.charge_points[self.cpid].start()
+                await self.charge_points[self.cpid].start(websocket)
             else:
                 _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
                 cp = self.charge_points[self.cpid]
                 await self.charge_points[self.cpid].reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
-
-        finally:
-            self.charge_points[self.cpid].status = STATE_UNAVAILABLE
-            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -345,7 +344,6 @@ class ChargePoint(cp):
             self.status = STATE_OK
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
-                await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration(ckey.heartbeat_interval.value)
@@ -594,7 +592,7 @@ class ChargePoint(cp):
             return False
 
     async def reset(self, typ: str = ResetType.hard):
-        """Soft reset charger unless hard reset requested."""
+        """Hard reset charger unless soft reset requested."""
         self._metrics[cstat.reconnects.value].value = 0
         req = call.ResetPayload(typ)
         resp = await self.call(req)
@@ -659,10 +657,11 @@ class ChargePoint(cp):
         resp = await self.call(req)
         if resp.status == DataTransferStatus.accepted:
             _LOGGER.info(
-                "Data transferred - vendorId %s, messageId %s: %s",
+                "Data transfer [vendorId(%s), messageId(%s), data(%s)] response: %s",
                 vendor_id,
                 message_id,
-                resp,
+                data,
+                resp.data,
             )
             return True
         else:
@@ -739,12 +738,19 @@ class ChargePoint(cp):
             response = msg.create_call_error(e).to_json()
             await self._send(response)
 
-    async def start(self):
+    async def start(self, connection):
         """Start charge point."""
         try:
             await asyncio.gather(super().start(), self.post_connect())
-        except websockets.exceptions.ConnectionClosed as e:
-            _LOGGER.debug(e)
+        except websockets.exceptions.WebSocketException as e:
+            _LOGGER.debug("Exception caught: %s", e)
+        finally:
+            await connection.close()
+            await connection.wait_closed()
+            self.status = STATE_UNAVAILABLE
+            _LOGGER.info(
+                f"Charger {self.id} disconnected from {self.host}:{self.port}."
+            )
 
     async def reconnect(self, connection):
         """Reconnect charge point."""
@@ -753,8 +759,15 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await super().start()
-        except websockets.exceptions.ConnectionClosed as e:
-            _LOGGER.debug(e)
+        except websockets.exceptions.WebSocketException as e:
+            _LOGGER.debug("Exception caught: %s", e)
+        finally:
+            await connection.close()
+            await connection.wait_closed()
+            self.status = STATE_UNAVAILABLE
+            _LOGGER.info(
+                f"Charger {self.id} disconnected from {self.host}:{self.port}."
+            )
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""

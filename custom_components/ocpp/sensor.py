@@ -1,9 +1,11 @@
 """Sensor platform for ocpp."""
 
-import datetime
-
 import homeassistant
-from homeassistant.components.sensor import STATE_CLASS_MEASUREMENT, SensorEntity
+from homeassistant.components.sensor import (
+    STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
+    SensorEntity,
+)
 from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
     DEVICE_CLASS_CURRENT,
@@ -78,16 +80,7 @@ class ChargePointMetric(SensorEntity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        old_state = self._state
-        new_state = self.central_system.get_metric(self.cp_id, self.metric)
-        self._state = new_state
-        if (
-            (self.device_class is DEVICE_CLASS_ENERGY)
-            and (new_state is not None)
-            and (old_state is not None)
-            and (new_state < old_state)
-        ):
-            self._last_reset = datetime.datetime.now()
+        self._state = self.central_system.get_metric(self.cp_id, self.metric)
         return self._state
 
     @property
@@ -129,7 +122,11 @@ class ChargePointMetric(SensorEntity):
     @property
     def state_class(self):
         """Return the state class of the sensor."""
-        return STATE_CLASS_MEASUREMENT
+        if self.device_class is DEVICE_CLASS_ENERGY:
+            state_class = STATE_CLASS_TOTAL_INCREASING
+        else:
+            state_class = STATE_CLASS_MEASUREMENT
+        return state_class
 
     @property
     def device_class(self):
@@ -155,11 +152,6 @@ class ChargePointMetric(SensorEntity):
             return DEVICE_CLASS_VOLTAGE
         else:
             return None
-
-    @property
-    def last_reset(self):
-        """Return the time when a metered value wwas ;ast reset."""
-        return self._last_reset
 
     async def async_update(self):
         """Get the latest data and update the states."""
