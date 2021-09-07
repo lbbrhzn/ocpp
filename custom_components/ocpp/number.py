@@ -16,12 +16,6 @@ from .const import (
 )
 from .enums import Profiles
 
-CONF_INITIAL = input_number.CONF_INITIAL
-CONF_MAX = input_number.CONF_MAX
-CONF_MIN = input_number.CONF_MIN
-CONF_STEP = input_number.CONF_STEP
-
-
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
