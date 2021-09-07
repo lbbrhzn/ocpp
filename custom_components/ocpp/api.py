@@ -538,7 +538,7 @@ class ChargePoint(cp):
         if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         req = call.RemoteStartTransactionPayload(
-            connector_id=1, id_tag=self._metrics[cdet.identifier.value]
+            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value
         )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
