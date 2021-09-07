@@ -749,7 +749,7 @@ class ChargePoint(cp):
             await connection.wait_closed()
             self.status = STATE_UNAVAILABLE
             _LOGGER.info(
-                f"Charger {self.id} disconnected from {self.host}:{self.port}."
+                f"Charger {self.id} disconnected from {connection.local_address}."
             )
 
     async def reconnect(self, connection):
@@ -766,7 +766,7 @@ class ChargePoint(cp):
             await connection.wait_closed()
             self.status = STATE_UNAVAILABLE
             _LOGGER.info(
-                f"Charger {self.id} disconnected from {self.host}:{self.port}."
+                f"Charger {self.id} disconnected from {connection.local_address}."
             )
 
     async def async_update_device_info(self, boot_info: dict):
