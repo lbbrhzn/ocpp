@@ -531,51 +531,15 @@ class ChargePoint(cp):
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
-    async def start_transaction(self, limit_amps: int = 32, limit_watts: int = 22000):
-        """Start a Transaction."""
+    async def start_transaction(self):
+        """Remote start a transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
         if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
-        if prof.SMART in self._attr_supported_features:
-            resp = await self.get_configuration(
-                ckey.charging_schedule_allowed_charging_rate_unit.value
-            )
-            _LOGGER.info(
-                "Charger supports setting the following units: %s",
-                resp,
-            )
-            _LOGGER.info("If more than one unit supported default unit is Amps")
-            if om.current.value in resp:
-                lim = limit_amps
-                units = ChargingRateUnitType.amps.value
-            else:
-                lim = limit_watts
-                units = ChargingRateUnitType.watts.value
-            resp = await self.get_configuration(
-                ckey.charge_profile_max_stack_level.value
-            )
-            stack_level = int(resp)
-            req = call.RemoteStartTransactionPayload(
-                connector_id=1,
-                id_tag=self._metrics[cdet.identifier.value].value,
-                charging_profile={
-                    om.charging_profile_id.value: 1,
-                    om.stack_level.value: stack_level,
-                    om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
-                    om.charging_schedule.value: {
-                        om.charging_rate_unit.value: units,
-                        om.charging_schedule_period.value: [
-                            {om.start_period.value: 0, om.limit.value: lim}
-                        ],
-                    },
-                },
-            )
-        else:
-            req = call.RemoteStartTransactionPayload(
-                connector_id=1, id_tag=self._metrics[cdet.identifier.value]
-            )
+        req = call.RemoteStartTransactionPayload(
+            connector_id=1, id_tag=self._metrics[cdet.identifier.value]
+        )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
