@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import websockets
 
@@ -81,31 +82,31 @@ logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("firmware_url"): str,
-        vol.Optional("delay_hours"): int,
+        vol.Required("firmware_url"): cv.string,
+        vol.Optional("delay_hours"): cv.positive_int,
     }
 )
 CONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("ocpp_key"): str,
-        vol.Required("value"): str,
+        vol.Required("ocpp_key"): cv.string,
+        vol.Required("value"): cv.string,
     }
 )
 GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("ocpp_key"): str,
+        vol.Required("ocpp_key"): cv.string,
     }
 )
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("upload_url"): str,
+        vol.Required("upload_url"): cv.string,
     }
 )
 TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("vendor_id"): str,
-        vol.Optional("message_id"): str,
-        vol.Optional("data"): str,
+        vol.Required("vendor_id"): cv.string,
+        vol.Optional("message_id"): cv.string,
+        vol.Optional("data"): cv.string,
     }
 )
 
