@@ -633,6 +633,7 @@ class ChargePoint(cp):
                 data,
                 resp.data,
             )
+            self._metrics[cdet.data_response.value].value = resp.data
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
@@ -648,6 +649,7 @@ class ChargePoint(cp):
         if resp.configuration_key is not None:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
+            self._metrics[cdet.config_response.value].value = value
             return value
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
