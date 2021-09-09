@@ -182,7 +182,6 @@ class CentralSystem:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
 
         finally:
-            self.charge_points[self.cpid].status = STATE_UNAVAILABLE
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
@@ -712,8 +711,10 @@ class ChargePoint(cp):
         """Start charge point."""
         try:
             await asyncio.gather(super().start(), self.post_connect())
-        except websockets.exceptions.ConnectionClosed as e:
-            _LOGGER.debug(e)
+        except websockets.exceptions.WebSocketException as e:
+            _LOGGER.debug("Websockets exception: %s", e)
+        finally:
+            self.status = STATE_UNAVAILABLE
 
     async def reconnect(self, connection):
         """Reconnect charge point."""
@@ -722,8 +723,10 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await super().start()
-        except websockets.exceptions.ConnectionClosed as e:
-            _LOGGER.debug(e)
+        except websockets.exceptions.WebSocketException as e:
+            _LOGGER.debug("Websockets exception: %s", e)
+        finally:
+            self.status = STATE_UNAVAILABLE
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
