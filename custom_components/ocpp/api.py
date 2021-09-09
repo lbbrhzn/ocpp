@@ -138,7 +138,7 @@ class CentralSystem:
             self.on_connect,
             self.host,
             self.port,
-            subprotocols=self.subprotocol,
+            subprotocols=[self.subprotocol],
             ping_timeout=None,
             close_timeout=10,
         )
