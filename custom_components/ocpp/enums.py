@@ -42,6 +42,8 @@ class HAChargerDetails(str, Enum):
     firmware_version = "FW.Version"
     features = "Features"
     connectors = "Connectors"
+    data_response = "Data.Response"
+    config_response = "Config.Response"
 
 
 class HAChargerSession(str, Enum):
