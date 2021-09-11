@@ -180,7 +180,6 @@ class CentralSystem:
                 await self.charge_points[self.cpid].reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
-
         finally:
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
@@ -876,12 +875,14 @@ class ChargePoint(cp):
     @on(Action.BootNotification)
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
+
+        _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
         resp = call_result.BootNotificationPayload(
             current_time=datetime.now(tz=timezone.utc).isoformat(),
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
-        _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
             om.charge_point_model.name, None
