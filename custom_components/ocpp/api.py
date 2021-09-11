@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import websockets
 
@@ -76,36 +77,36 @@ from .enums import (
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 # Uncomment these when Debugging
-logging.getLogger("asyncio").setLevel(logging.DEBUG)
-logging.getLogger("websockets").setLevel(logging.DEBUG)
+# logging.getLogger("asyncio").setLevel(logging.DEBUG)
+# logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("firmware_url"): str,
-        vol.Optional("delay_hours"): int,
+        vol.Required("firmware_url"): cv.string,
+        vol.Optional("delay_hours"): cv.positive_int,
     }
 )
 CONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("ocpp_key"): str,
-        vol.Required("value"): str,
+        vol.Required("ocpp_key"): cv.string,
+        vol.Required("value"): cv.string,
     }
 )
 GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("ocpp_key"): str,
+        vol.Required("ocpp_key"): cv.string,
     }
 )
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("upload_url"): str,
+        vol.Required("upload_url"): cv.string,
     }
 )
 TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("vendor_id"): str,
-        vol.Optional("message_id"): str,
-        vol.Optional("data"): str,
+        vol.Required("vendor_id"): cv.string,
+        vol.Optional("message_id"): cv.string,
+        vol.Optional("data"): cv.string,
     }
 )
 
@@ -137,8 +138,9 @@ class CentralSystem:
             self.on_connect,
             self.host,
             self.port,
-            subprotocols=self.subprotocol,
+            subprotocols=[self.subprotocol],
             ping_timeout=None,
+            close_timeout=10,
         )
         self._server = server
         return self
@@ -171,13 +173,15 @@ class CentralSystem:
                 _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
                 cp = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
                 self.charge_points[self.cpid] = cp
-                await self.charge_points[self.cpid].start(websocket)
+                await self.charge_points[self.cpid].start()
             else:
                 _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
                 cp = self.charge_points[self.cpid]
                 await self.charge_points[self.cpid].reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
+        finally:
+            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -527,51 +531,15 @@ class ChargePoint(cp):
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
-    async def start_transaction(self, limit_amps: int = 32, limit_watts: int = 22000):
-        """Start a Transaction."""
+    async def start_transaction(self):
+        """Remote start a transaction."""
         """Check if authorisation enabled, if it is disable it before remote start"""
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
         if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
-        if prof.SMART in self._attr_supported_features:
-            resp = await self.get_configuration(
-                ckey.charging_schedule_allowed_charging_rate_unit.value
-            )
-            _LOGGER.info(
-                "Charger supports setting the following units: %s",
-                resp,
-            )
-            _LOGGER.info("If more than one unit supported default unit is Amps")
-            if om.current.value in resp:
-                lim = limit_amps
-                units = ChargingRateUnitType.amps.value
-            else:
-                lim = limit_watts
-                units = ChargingRateUnitType.watts.value
-            resp = await self.get_configuration(
-                ckey.charge_profile_max_stack_level.value
-            )
-            stack_level = int(resp)
-            req = call.RemoteStartTransactionPayload(
-                connector_id=1,
-                id_tag=self._metrics[cdet.identifier.value].value,
-                charging_profile={
-                    om.charging_profile_id.value: 1,
-                    om.stack_level.value: stack_level,
-                    om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
-                    om.charging_schedule.value: {
-                        om.charging_rate_unit.value: units,
-                        om.charging_schedule_period.value: [
-                            {om.start_period.value: 0, om.limit.value: lim}
-                        ],
-                    },
-                },
-            )
-        else:
-            req = call.RemoteStartTransactionPayload(
-                connector_id=1, id_tag=self._metrics[cdet.identifier.value]
-            )
+        req = call.RemoteStartTransactionPayload(
+            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value
+        )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -663,6 +631,10 @@ class ChargePoint(cp):
                 data,
                 resp.data,
             )
+            self._metrics[cdet.data_response.value].value = datetime.now(
+                tz=timezone.utc
+            ).isoformat()
+            self._metrics[cdet.data_response.value].extra_attr = {message_id: resp.data}
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
@@ -678,6 +650,10 @@ class ChargePoint(cp):
         if resp.configuration_key is not None:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
+            self._metrics[cdet.config_response.value].value = datetime.now(
+                tz=timezone.utc
+            ).isoformat()
+            self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
@@ -738,19 +714,14 @@ class ChargePoint(cp):
             response = msg.create_call_error(e).to_json()
             await self._send(response)
 
-    async def start(self, connection):
+    async def start(self):
         """Start charge point."""
         try:
             await asyncio.gather(super().start(), self.post_connect())
         except websockets.exceptions.WebSocketException as e:
-            _LOGGER.debug("Exception caught: %s", e)
+            _LOGGER.debug("Websockets exception: %s", e)
         finally:
-            await connection.close()
-            await connection.wait_closed()
             self.status = STATE_UNAVAILABLE
-            _LOGGER.info(
-                f"Charger {self.id} disconnected from {connection.local_address}."
-            )
 
     async def reconnect(self, connection):
         """Reconnect charge point."""
@@ -760,14 +731,9 @@ class ChargePoint(cp):
             self.status = STATE_OK
             await super().start()
         except websockets.exceptions.WebSocketException as e:
-            _LOGGER.debug("Exception caught: %s", e)
+            _LOGGER.debug("Websockets exception: %s", e)
         finally:
-            await connection.close()
-            await connection.wait_closed()
             self.status = STATE_UNAVAILABLE
-            _LOGGER.info(
-                f"Charger {self.id} disconnected from {connection.local_address}."
-            )
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
@@ -911,6 +877,11 @@ class ChargePoint(cp):
         """Handle a boot notification."""
 
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+        resp = call_result.BootNotificationPayload(
+            current_time=datetime.now(tz=timezone.utc).isoformat(),
+            interval=3600,
+            status=RegistrationStatus.accepted.value,
+        )
 
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
@@ -929,11 +900,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
         self.hass.async_create_task(self.post_connect())
-        return call_result.BootNotificationPayload(
-            current_time=datetime.now(tz=timezone.utc).isoformat(),
-            interval=30,
-            status=RegistrationStatus.accepted.value,
-        )
+        return resp
 
     @on(Action.StatusNotification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):

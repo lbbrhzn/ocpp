@@ -3,6 +3,6 @@ pre-commit==2.15.0
 black==21.8b0
 flake8==3.9.2
 reorder-python-imports==2.6.0
-websockets==9.1
+websockets==10.0
 sqlalchemy==1.4.23
 ocpp>=0.8.3

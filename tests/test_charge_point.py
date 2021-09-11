@@ -68,6 +68,7 @@ async def test_cms_responses(hass):
             csvcs.service_get_configuration,
             csvcs.service_get_diagnostics,
             csvcs.service_clear_profile,
+            csvcs.service_data_transfer,
         ]
         for service in SERVICES:
             data = {}
