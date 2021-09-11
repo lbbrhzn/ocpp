@@ -878,6 +878,11 @@ class ChargePoint(cp):
         """Handle a boot notification."""
 
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+        resp = call_result.BootNotificationPayload(
+            current_time=datetime.now(tz=timezone.utc).isoformat(),
+            interval=3600,
+            status=RegistrationStatus.accepted.value,
+        )
 
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
@@ -896,11 +901,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
         self.hass.async_create_task(self.post_connect())
-        return call_result.BootNotificationPayload(
-            current_time=datetime.now(tz=timezone.utc).isoformat(),
-            interval=30,
-            status=RegistrationStatus.accepted.value,
-        )
+        return resp
 
     @on(Action.StatusNotification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
