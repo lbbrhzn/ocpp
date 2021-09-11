@@ -16,6 +16,7 @@ from .const import (
 )
 from .enums import Profiles
 
+
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
