@@ -347,6 +347,7 @@ class ChargePoint(cp):
 
         try:
             self.status = STATE_OK
+            await asyncio.sleep(2)
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
                 await self.trigger_status_notification()
