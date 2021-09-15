@@ -722,6 +722,7 @@ class ChargePoint(cp):
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
+            await self._connection.close()
             self._connection = None
             self.status = STATE_UNAVAILABLE
 
@@ -735,6 +736,7 @@ class ChargePoint(cp):
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
+            await self._connection.close()
             self._connection = None
             self.status = STATE_UNAVAILABLE
 
