@@ -11,6 +11,6 @@
   ],
   "requirements": [
     "ocpp>=0.8",
-    "websockets>=8.0"
+    "websockets>=10.0"
   ]
 }
