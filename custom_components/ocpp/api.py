@@ -772,6 +772,7 @@ class ChargePoint(cp):
             phase = sv.get(om.phase.value, None)
             value = sv.get(om.value.value, None)
             unit = sv.get(om.unit.value, None)
+            context = sv.get(om.context.value, None)
             if measurand is not None and phase is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
@@ -780,12 +781,13 @@ class ChargePoint(cp):
                 self._metrics[measurand].unit = unit
                 self._metrics[measurand].extra_attr[om.unit.value] = unit
                 self._metrics[measurand].extra_attr[phase] = float(value)
+                self._metrics[measurand].extra_attr[om.context.value] = context
 
         for metric, phase_info in measurand_data.items():
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
             if metric in [Measurand.voltage.value]:
-                if Phase.l1_n.value in phase_info:
+                if Phase.l2_n.value in phase_info:
                     """Line-neutral voltages are averaged."""
                     metric_value = (
                         phase_info.get(Phase.l1_n.value, 0)
@@ -818,6 +820,9 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
+        self._metrics[csess.transaction_id.value].value = kwargs.get(
+            om.transaction_id.name, 0
+        )
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
             processed_keys = []
@@ -827,6 +832,7 @@ class ChargePoint(cp):
                 unit = sv.get(om.unit.value, None)
                 phase = sv.get(om.phase.value, None)
                 location = sv.get(om.location.value, None)
+                context = sv.get(om.context.value, None)
 
                 if len(sv.keys()) == 1:  # Backwars compatibility
                     measurand = DEFAULT_MEASURAND
@@ -846,6 +852,8 @@ class ChargePoint(cp):
                         self._metrics[measurand].extra_attr[
                             om.location.value
                         ] = location
+                    if context is not None:
+                        self._metrics[measurand].extra_attr[om.context.value] = context
                     processed_keys.append(idx)
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
@@ -861,7 +869,9 @@ class ChargePoint(cp):
                 om.transaction_id.name
             )
             self._transactionId = kwargs.get(om.transaction_id.name)
-        if self._metrics[csess.transaction_id.value].value is not None:
+        if self._metrics[csess.transaction_id.value].value == 0:
+            self._metrics[csess.session_time.value].value = 0
+        else:
             self._metrics[csess.session_time.value].value = round(
                 (
                     int(time.time())
@@ -875,6 +885,8 @@ class ChargePoint(cp):
                 - float(self._metrics[csess.meter_start.value].value),
                 1,
             )
+        else:
+            self._metrics[csess.session_energy.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
