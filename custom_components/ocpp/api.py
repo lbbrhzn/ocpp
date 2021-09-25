@@ -873,6 +873,7 @@ class ChargePoint(cp):
             self._transactionId = kwargs.get(om.transaction_id.name)
         if self._metrics[csess.transaction_id.value].value == 0:
             self._metrics[csess.session_time.value].value = 0
+            self._metrics[csess.session_energy.value].value = 0
         else:
             self._metrics[csess.session_time.value].value = round(
                 (
