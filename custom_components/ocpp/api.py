@@ -794,6 +794,8 @@ class ChargePoint(cp):
                         + phase_info.get(Phase.l2_n.value, 0)
                         + phase_info.get(Phase.l3_n.value, 0)
                     ) / 3
+                elif Phase.l1_n.value in phase_info:
+                    metric_value = phase_info.get(Phase.l1_n.value, 0)
                 elif Phase.l1_l2.value in phase_info:
                     """Line-line voltages are converted to line-neutral and averaged."""
                     metric_value = (
