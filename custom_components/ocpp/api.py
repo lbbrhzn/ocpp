@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-import websockets
+import websockets.server
 
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
@@ -134,7 +134,7 @@ class CentralSystem:
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem(hass, entry)
 
-        server = await websockets.serve(
+        server = await websockets.server.serve(
             self.on_connect,
             self.host,
             self.port,
@@ -873,7 +873,7 @@ class ChargePoint(cp):
             self._transactionId = kwargs.get(om.transaction_id.name)
         if self._metrics[csess.transaction_id.value].value == 0:
             self._metrics[csess.session_time.value].value = 0
-            self._metrics[csess.session_energy.value].value = 0
+            self._metrics[csess.meter_start.value].value = None
         else:
             self._metrics[csess.session_time.value].value = round(
                 (
