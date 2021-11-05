@@ -91,7 +91,7 @@ class ChargePointMetric(SensorEntity):
     @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""
-        return self.central_system.get_unit(self.cp_id, self.metric)
+        return self.central_system.get_ha_unit(self.cp_id, self.metric)
 
     @property
     def should_poll(self):

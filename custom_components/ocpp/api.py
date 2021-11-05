@@ -197,6 +197,12 @@ class CentralSystem:
             return self.charge_points[cp_id]._metrics[measurand].unit
         return None
 
+    def get_ha_unit(self, cp_id: str, measurand: str):
+        """Return home assistant unit of given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id]._metrics[measurand].ha_unit
+        return None
+
     def get_extra_attr(self, cp_id: str, measurand: str):
         """Return last known extra attributes for given measurand."""
         if cp_id in self.charge_points:
@@ -1025,6 +1031,10 @@ class ChargePoint(cp):
     def get_unit(self, measurand: str):
         """Return unit of given measurand."""
         return self._metrics[measurand].unit
+
+    def get_ha_unit(self, measurand: str):
+        """Return home assistant unit of given measurand."""
+        return self._metrics[measurand].ha_unit
 
 
 class Metric:
