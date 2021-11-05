@@ -63,6 +63,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    UNITS_OCCP_TO_HA,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -1054,6 +1055,11 @@ class Metric:
     def unit(self, unit: str):
         """Set the unit of the metric."""
         self._unit = unit
+
+    @property
+    def ha_unit(self):
+        """Get the home assistant unit of the metric."""
+        return UNITS_OCCP_TO_HA.get(self._unit, self._unit)
 
     @property
     def extra_attr(self):
