@@ -29,13 +29,13 @@ def skip_notifications_fixture():
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
-    with patch("websockets.serve"):
+    with patch("websockets.serve",return_value=Future()):
         yield
 
 
 # In this fixture, we are forcing calls to async_get_data to raise an Exception. This is useful
 # for exception handling.
-@pytest.fixture(name="error_on_get_data")
+@pytest.fixture(name="error_on_get_data",return_value=Future())
 def error_get_data_fixture():
     """Simulate error when retrieving data from API."""
     with patch(
