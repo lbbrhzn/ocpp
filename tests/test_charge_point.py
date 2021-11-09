@@ -37,7 +37,7 @@ from .const import MOCK_CONFIG_DATA
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
-    async def test_switches(hass):
+    async def test_switches(hass, socket_enabled):
         """Test switch operations."""
         for switch in SWITCHES:
             result = await hass.services.async_call(
@@ -60,7 +60,7 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
-    async def test_services(hass):
+    async def test_services(hass, socket_enabled):
         """Test service operations."""
         SERVICES = [
             csvcs.service_update_firmware,
@@ -131,7 +131,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
@@ -153,7 +153,7 @@ async def test_cms_responses(hass, socket_enabled):
                     test_switches(hass),
                     test_services(hass),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
