@@ -29,8 +29,8 @@ def skip_notifications_fixture():
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
-    # with patch("custom_components.ocpp.ocppApiClient.async_get_data"):
-    yield
+    with patch("custom_components.ocpp.ocppApiClient.async_get_data"):
+        yield
 
 
 # In this fixture, we are forcing calls to async_get_data to raise an Exception. This is useful
