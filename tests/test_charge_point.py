@@ -34,7 +34,7 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA
 
 
-async def test_cms_responses(hass):
+async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
     async def test_switches(hass):
@@ -112,7 +112,7 @@ async def test_cms_responses(hass):
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        "ws://localhost:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -142,7 +142,7 @@ async def test_cms_responses(hass):
 
     # test ocpp messages sent from cms to charger, through HA switches/services
     async with websockets.connect(
-        "ws://localhost:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
     ) as ws:
         cp = ChargePoint("CP_1_test", ws)
