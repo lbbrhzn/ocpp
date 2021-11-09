@@ -180,7 +180,6 @@ class CentralSystem:
                 await self.charge_points[self.cpid].reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
-
         finally:
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
