@@ -29,7 +29,9 @@ def skip_notifications_fixture():
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
-    with patch("websockets.serve",return_value=asyncio.Future().set_result(1)):
+    future = asyncio.Future()
+    future.set_result(1)
+    with patch("websockets.serve",return_value=future):
         yield
 
 
