@@ -139,7 +139,7 @@ async def test_cms_responses(hass, socket_enabled):
         1305570 / 1000
     )
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
-
+    await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
     async with websockets.connect(
@@ -150,6 +150,7 @@ async def test_cms_responses(hass, socket_enabled):
         try:
             await asyncio.wait_for(
                 asyncio.gather(
+                    cp.start(),
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                 ),
