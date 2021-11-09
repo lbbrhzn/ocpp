@@ -42,4 +42,4 @@ def error_get_data_fixture():
        "websockets.serve",
        side_effect=Exception,
     ):
-    yield
+        yield
