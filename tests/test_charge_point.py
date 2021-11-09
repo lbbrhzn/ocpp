@@ -150,8 +150,8 @@ async def test_cms_responses(hass, socket_enabled):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
-                    test_switches(hass),
-                    test_services(hass),
+                    test_switches(hass, socket_enabled),
+                    test_services(hass, socket_enabled),
                 ),
                 timeout=5,
             )
@@ -160,7 +160,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     # test services when charger is unavailable
     await asyncio.sleep(1)
-    await test_services(hass)
+    await test_services(hass, socket_enabled)
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
 
