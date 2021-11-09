@@ -29,7 +29,7 @@ def skip_notifications_fixture():
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
-    with patch("custom_components.ocpp.api.CentralSystem.create"):
+    with patch("websockets.serve"):
         yield
 
 
@@ -38,8 +38,8 @@ def bypass_get_data_fixture():
 @pytest.fixture(name="error_on_get_data")
 def error_get_data_fixture():
     """Simulate error when retrieving data from API."""
-    # with patch(
-    #    "custom_components.ocpp.ocppApiClient.async_get_data",
-    #    side_effect=Exception,
-    # ):
+    with patch(
+       "websockets.serve",
+       side_effect=Exception,
+    ):
     yield
