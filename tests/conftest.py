@@ -1,7 +1,7 @@
 """Global fixtures for ocpp integration."""
 from unittest.mock import patch
 
-import pytest
+import asyncio, pytest
 
 pytest_plugins = "pytest_homeassistant_custom_component"
 
