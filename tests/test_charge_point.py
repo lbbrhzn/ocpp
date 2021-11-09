@@ -131,7 +131,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
                 ),
-                timeout=4,
+                timeout=3,
             )
         except asyncio.TimeoutError:
             pass
@@ -142,10 +142,10 @@ async def test_cms_responses(hass, socket_enabled):
 
     # test ocpp messages sent from cms to charger, through HA switches/services
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_2",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_2_test", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -153,7 +153,7 @@ async def test_cms_responses(hass, socket_enabled):
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                 ),
-                timeout=4,
+                timeout=3,
             )
         except asyncio.TimeoutError:
             pass
