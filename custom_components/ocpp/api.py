@@ -63,6 +63,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    UNITS_OCCP_TO_HA,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -193,6 +194,12 @@ class CentralSystem:
         """Return unit of given measurand."""
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].unit
+        return None
+
+    def get_ha_unit(self, cp_id: str, measurand: str):
+        """Return home assistant unit of given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id]._metrics[measurand].ha_unit
         return None
 
     def get_extra_attr(self, cp_id: str, measurand: str):
@@ -1024,6 +1031,10 @@ class ChargePoint(cp):
         """Return unit of given measurand."""
         return self._metrics[measurand].unit
 
+    def get_ha_unit(self, measurand: str):
+        """Return home assistant unit of given measurand."""
+        return self._metrics[measurand].ha_unit
+
 
 class Metric:
     """Metric class."""
@@ -1053,6 +1064,11 @@ class Metric:
     def unit(self, unit: str):
         """Set the unit of the metric."""
         self._unit = unit
+
+    @property
+    def ha_unit(self):
+        """Get the home assistant unit of the metric."""
+        return UNITS_OCCP_TO_HA.get(self._unit, self._unit)
 
     @property
     def extra_attr(self):
