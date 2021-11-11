@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
 import homeassistant.const as ha
 from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
+    DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_POWER,
@@ -138,17 +139,21 @@ class ChargePointMetric(SensorEntity):
         elif self.unit_of_measurement in [
             ha.POWER_WATT,
             ha.POWER_KILO_WATT,
+            ha.POWER_VOLT_AMPERE,
         ]:
             return DEVICE_CLASS_POWER
         elif self.unit_of_measurement in [
             ha.TEMP_CELSIUS,
             ha.TEMP_FAHRENHEIT,
+            ha.TEMP_KELVIN,
         ]:
             return DEVICE_CLASS_TEMPERATURE
         elif self.unit_of_measurement in [ha.ELECTRIC_CURRENT_AMPERE]:
             return DEVICE_CLASS_CURRENT
         elif self.unit_of_measurement in [ha.ELECTRIC_POTENTIAL_VOLT]:
             return DEVICE_CLASS_VOLTAGE
+        elif self.unit_of_measurement in [ha.PERCENTAGE]:
+            return DEVICE_CLASS_BATTERY
         else:
             return None
 
