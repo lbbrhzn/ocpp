@@ -6,16 +6,16 @@ from homeassistant.components.sensor import (
     STATE_CLASS_TOTAL_INCREASING,
     SensorEntity,
 )
+import homeassistant.const as ha
 from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
+    DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_VOLTAGE,
 )
-
-from ocpp.v16.enums import UnitOfMeasure
 
 from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
@@ -91,7 +91,7 @@ class ChargePointMetric(SensorEntity):
     @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""
-        return self.central_system.get_unit(self.cp_id, self.metric)
+        return self.central_system.get_ha_unit(self.cp_id, self.metric)
 
     @property
     def should_poll(self):
@@ -132,26 +132,40 @@ class ChargePointMetric(SensorEntity):
     def device_class(self):
         """Return the device class of the sensor."""
         if self.unit_of_measurement in [
-            UnitOfMeasure.wh.value,
-            UnitOfMeasure.kwh.value,
+            ha.ENERGY_WATT_HOUR,
+            ha.ENERGY_KILO_WATT_HOUR,
         ]:
             return DEVICE_CLASS_ENERGY
         elif self.unit_of_measurement in [
-            UnitOfMeasure.w.value,
-            UnitOfMeasure.kw.value,
+            ha.POWER_WATT,
+            ha.POWER_KILO_WATT,
+            ha.POWER_VOLT_AMPERE,
         ]:
             return DEVICE_CLASS_POWER
         elif self.unit_of_measurement in [
-            UnitOfMeasure.celsius.value,
-            UnitOfMeasure.fahrenheit.value,
+            ha.TEMP_CELSIUS,
+            ha.TEMP_FAHRENHEIT,
+            ha.TEMP_KELVIN,
         ]:
             return DEVICE_CLASS_TEMPERATURE
-        elif self.unit_of_measurement in [UnitOfMeasure.a.value]:
+        elif self.unit_of_measurement in [ha.ELECTRIC_CURRENT_AMPERE]:
             return DEVICE_CLASS_CURRENT
-        elif self.unit_of_measurement in [UnitOfMeasure.v.value]:
+        elif self.unit_of_measurement in [ha.ELECTRIC_POTENTIAL_VOLT]:
             return DEVICE_CLASS_VOLTAGE
+        elif self.unit_of_measurement in [ha.PERCENTAGE]:
+            return DEVICE_CLASS_BATTERY
         else:
             return None
+
+    @property
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self.central_system.get_metric(self.cp_id, self.metric)
+
+    @property
+    def native_unit_of_measurement(self):
+        """Return the native unit of measurement."""
+        return self.central_system.get_ha_unit(self.cp_id, self.metric)
 
     async def async_update(self):
         """Get the latest data and update the states."""
