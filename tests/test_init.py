@@ -29,17 +29,17 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data, socket_enabl
     # Set up the entry and assert that the values set during setup are where we expect
     # them to be. Because we have patched the ocppDataUpdateCoordinator.async_get_data
     # call, no code from custom_components/ocpp/api.py actually runs.
-    assert await async_setup_entry(hass, config_entry)
+    assert await async_setup_entry(hass, config_entry, socket_enabled)
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
 
     # Reload the entry and assert that the data from above is still there
-    assert await async_reload_entry(hass, config_entry) is None
+    assert await async_reload_entry(hass, config_entry, socket_enabled) is None
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
 
     # Unload the entry and verify that the data has been removed
-    assert await async_unload_entry(hass, config_entry)
+    assert await async_unload_entry(hass, config_entry, socket_enabled)
     assert config_entry.entry_id not in hass.data[DOMAIN]
 
 
