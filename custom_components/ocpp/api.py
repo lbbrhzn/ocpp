@@ -169,7 +169,7 @@ class CentralSystem:
 
         _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
-        cp_id[cp_id.rfind("/") + 1 :]
+        cp_id = cp_id[cp_id.rfind("/") + 1 :]
         try:
             if self.cpid not in self.charge_points:
                 _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
