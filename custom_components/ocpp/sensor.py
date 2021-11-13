@@ -6,7 +6,6 @@ from homeassistant.components.sensor import (
     STATE_CLASS_TOTAL_INCREASING,
     SensorEntity,
 )
-import homeassistant.const as ha
 from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
     DEVICE_CLASS_BATTERY,
@@ -14,6 +13,7 @@ from homeassistant.const import (
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_TEMPERATURE,
+    DEVICE_CLASS_TIMESTAMP,
     DEVICE_CLASS_VOLTAGE,
 )
 
@@ -26,10 +26,15 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
-
     entities = []
-
-    for measurand in entry.data[CONF_MONITORED_VARIABLES].split(","):
+    for measurand in list(
+        set(
+            entry.data[CONF_MONITORED_VARIABLES].split(",")
+            + list(HAChargerDetails)
+            + list(HAChargerSession)
+            + list(HAChargerStatuses)
+        )
+    ):
         entities.append(
             ChargePointMetric(
                 central_system,
@@ -37,15 +42,6 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 measurand,
             )
         )
-    for list in [HAChargerDetails, HAChargerSession, HAChargerStatuses]:
-        for sensor in list:
-            entities.append(
-                ChargePointMetric(
-                    central_system,
-                    cp_id,
-                    sensor.value,
-                )
-            )
 
     async_add_devices(entities, False)
 
@@ -122,40 +118,32 @@ class ChargePointMetric(SensorEntity):
     @property
     def state_class(self):
         """Return the state class of the sensor."""
+        state_class = None
         if self.device_class is DEVICE_CLASS_ENERGY:
             state_class = STATE_CLASS_TOTAL_INCREASING
-        else:
+        elif self.device_class is not None:
             state_class = STATE_CLASS_MEASUREMENT
         return state_class
 
     @property
     def device_class(self):
         """Return the device class of the sensor."""
-        if self.unit_of_measurement in [
-            ha.ENERGY_WATT_HOUR,
-            ha.ENERGY_KILO_WATT_HOUR,
-        ]:
-            return DEVICE_CLASS_ENERGY
-        elif self.unit_of_measurement in [
-            ha.POWER_WATT,
-            ha.POWER_KILO_WATT,
-            ha.POWER_VOLT_AMPERE,
-        ]:
-            return DEVICE_CLASS_POWER
-        elif self.unit_of_measurement in [
-            ha.TEMP_CELSIUS,
-            ha.TEMP_FAHRENHEIT,
-            ha.TEMP_KELVIN,
-        ]:
-            return DEVICE_CLASS_TEMPERATURE
-        elif self.unit_of_measurement in [ha.ELECTRIC_CURRENT_AMPERE]:
-            return DEVICE_CLASS_CURRENT
-        elif self.unit_of_measurement in [ha.ELECTRIC_POTENTIAL_VOLT]:
-            return DEVICE_CLASS_VOLTAGE
-        elif self.unit_of_measurement in [ha.PERCENTAGE]:
-            return DEVICE_CLASS_BATTERY
-        else:
-            return None
+        device_class = None
+        if self.metric.lower().startswith("current"):
+            device_class = DEVICE_CLASS_CURRENT
+        elif self.metric.lower().startswith("voltage"):
+            device_class = DEVICE_CLASS_VOLTAGE
+        elif self.metric.lower().startswith("energy"):
+            device_class = DEVICE_CLASS_ENERGY
+        elif self.metric.lower().startswith("power"):
+            device_class = DEVICE_CLASS_POWER
+        elif self.metric.lower().startswith("temperature"):
+            device_class = DEVICE_CLASS_TEMPERATURE
+        elif self.metric.lower().startswith("soc"):
+            device_class = DEVICE_CLASS_BATTERY
+        elif self.metric.lower().startswith("heartbeat"):
+            device_class = DEVICE_CLASS_TIMESTAMP
+        return device_class
 
     @property
     def native_value(self):

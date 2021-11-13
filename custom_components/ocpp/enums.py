@@ -5,8 +5,7 @@ from enum import Enum, IntFlag, auto
 class HAChargerServices(str, Enum):
     """Charger status conditions to report in home assistant."""
 
-    """For HA service reference and for function to call use .value"""
-
+    # For HA service reference and for function to call use .value
     service_charge_start = "start_transaction"
     service_charge_stop = "stop_transaction"
     service_availability = "availability"
@@ -69,8 +68,7 @@ class Profiles(IntFlag):
 class OcppMisc(str, Enum):
     """Miscellaneous strings used in ocpp v1.6 responses."""
 
-    """For pythonic version use .name (eg with kwargs) for ocpp json use .value"""
-
+    # For pythonic version use .name (eg with kwargs) for ocpp json use .value
     context = "context"
     key = "key"
     limit = "limit"
