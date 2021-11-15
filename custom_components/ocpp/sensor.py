@@ -121,7 +121,12 @@ class ChargePointMetric(SensorEntity):
         state_class = None
         if self.device_class is DEVICE_CLASS_ENERGY:
             state_class = STATE_CLASS_TOTAL_INCREASING
-        elif self.device_class is not None:
+        elif self.device_class in [
+            DEVICE_CLASS_CURRENT,
+            DEVICE_CLASS_POWER,
+            DEVICE_CLASS_TEMPERATURE,
+            DEVICE_CLASS_BATTERY,
+        ]:
             state_class = STATE_CLASS_MEASUREMENT
         return state_class
 
@@ -141,7 +146,11 @@ class ChargePointMetric(SensorEntity):
             device_class = DEVICE_CLASS_TEMPERATURE
         elif self.metric.lower().startswith("soc"):
             device_class = DEVICE_CLASS_BATTERY
-        elif self.metric.lower().startswith("heartbeat"):
+        elif self.metric in [
+            HAChargerDetails.config_response.value,
+            HAChargerDetails.data_response.value,
+            HAChargerStatuses.heartbeat.value,
+        ]:
             device_class = DEVICE_CLASS_TIMESTAMP
         return device_class
 
