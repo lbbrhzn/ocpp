@@ -6,6 +6,7 @@ from homeassistant.components.sensor import (
     STATE_CLASS_TOTAL_INCREASING,
     SensorEntity,
 )
+import homeassistant.const as ha
 from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
     DEVICE_CLASS_BATTERY,
@@ -59,7 +60,6 @@ class ChargePointMetric(SensorEntity):
         self.central_system = central_system
         self.cp_id = cp_id
         self.metric = metric
-        self._state = None
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
 
@@ -74,12 +74,6 @@ class ChargePointMetric(SensorEntity):
         return ".".join([DOMAIN, self.cp_id, self.metric, "sensor"])
 
     @property
-    def state(self):
-        """Return the state of the sensor."""
-        self._state = self.central_system.get_metric(self.cp_id, self.metric)
-        return self._state
-
-    @property
     def available(self) -> bool:
         """Return if sensor is available."""
         return self.central_system.get_available(self.cp_id)
@@ -87,7 +81,22 @@ class ChargePointMetric(SensorEntity):
     @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""
-        return self.central_system.get_ha_unit(self.cp_id, self.metric)
+        unit_of_measurement = None
+        if self.device_class is DEVICE_CLASS_BATTERY:
+            unit_of_measurement = ha.PERCENTAGE
+        elif self.device_class is DEVICE_CLASS_CURRENT:
+            unit_of_measurement = ha.ELECTRIC_CURRENT_AMPERE
+        elif self.device_class is DEVICE_CLASS_ENERGY:
+            unit_of_measurement = ha.ENERGY_KILO_WATT_HOUR
+        elif self.device_class is DEVICE_CLASS_POWER:
+            unit_of_measurement = ha.POWER_KILO_WATT
+        elif self.device_class is DEVICE_CLASS_TEMPERATURE:
+            unit_of_measurement = ha.TEMP_CELSIUS
+        elif self.device_class is DEVICE_CLASS_TIMESTAMP:
+            unit_of_measurement = None
+        elif self.device_class is DEVICE_CLASS_VOLTAGE:
+            unit_of_measurement = ha.ELECTRIC_POTENTIAL_VOLT
+        return unit_of_measurement
 
     @property
     def should_poll(self):
