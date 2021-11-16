@@ -60,7 +60,6 @@ class ChargePointMetric(SensorEntity):
         self.central_system = central_system
         self.cp_id = cp_id
         self.metric = metric
-        self._state = None
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
 
