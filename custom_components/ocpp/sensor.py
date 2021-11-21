@@ -7,7 +7,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
 )
 import homeassistant.const as ha
-from homeassistant.const import (
+from homeassistant.const import (  # DEVICE_CLASS_FREQUENCY,
     CONF_MONITORED_VARIABLES,
     DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_CURRENT,
@@ -19,8 +19,10 @@ from homeassistant.const import (
 )
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
+from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON, Measurand
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
+
+DEVICE_CLASS_FREQUENCY = "DEVICE_CLASS_FREQUENCY"
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -92,7 +94,13 @@ class ChargePointMetric(SensorEntity):
             unit_of_measurement = ha.POWER_KILO_WATT
         elif self.device_class is DEVICE_CLASS_TEMPERATURE:
             unit_of_measurement = ha.TEMP_CELSIUS
+        elif self.device_class is DEVICE_CLASS_FREQUENCY:
+            if self.metric is Measurand.rpm:
+                unit_of_measurement = ha.FREQUENCY_RPM
+            else:
+                unit_of_measurement = ha.FREQUENCY_HZ
         elif self.device_class is DEVICE_CLASS_TIMESTAMP:
+            # Home assistant does not define a unit, must be a Datetime object or timestamp string (ISO 8601).
             unit_of_measurement = None
         elif self.device_class is DEVICE_CLASS_VOLTAGE:
             unit_of_measurement = ha.ELECTRIC_POTENTIAL_VOLT
@@ -143,24 +151,33 @@ class ChargePointMetric(SensorEntity):
     def device_class(self):
         """Return the device class of the sensor."""
         device_class = None
-        if self.metric.lower().startswith("current"):
+        if self.metric.lower().startswith("current."):
             device_class = DEVICE_CLASS_CURRENT
-        elif self.metric.lower().startswith("voltage"):
+        elif self.metric.lower().startswith("voltage."):
             device_class = DEVICE_CLASS_VOLTAGE
-        elif self.metric.lower().startswith("energy"):
+        elif self.metric.lower().startswith("energy."):
             device_class = DEVICE_CLASS_ENERGY
-        elif self.metric.lower().startswith("power"):
+        elif (
+            self.metric
+            in [
+                Measurand.frequency,
+                Measurand.rpm,
+            ]
+            or self.metric.lower().startwith("frequency")
+        ):
+            device_class = DEVICE_CLASS_FREQUENCY
+        elif self.metric.lower().startswith("power."):
             device_class = DEVICE_CLASS_POWER
-        elif self.metric.lower().startswith("temperature"):
+        elif self.metric.lower().startswith("temperature."):
             device_class = DEVICE_CLASS_TEMPERATURE
-        elif self.metric.lower().startswith("soc"):
-            device_class = DEVICE_CLASS_BATTERY
-        elif self.metric in [
+        elif self.metric.lower().startswith("timestamp.") or self.metric in [
             HAChargerDetails.config_response.value,
             HAChargerDetails.data_response.value,
             HAChargerStatuses.heartbeat.value,
         ]:
             device_class = DEVICE_CLASS_TIMESTAMP
+        elif self.metric.lower().startswith("soc"):
+            device_class = DEVICE_CLASS_BATTERY
         return device_class
 
     @property

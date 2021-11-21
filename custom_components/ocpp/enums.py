@@ -38,20 +38,20 @@ class HAChargerDetails(str, Enum):
     model = "Model"
     vendor = "Vendor"
     serial = "Serial"
-    firmware_version = "FW.Version"
+    firmware_version = "Version.Firmware"
     features = "Features"
     connectors = "Connectors"
-    data_response = "Data.Response"
-    config_response = "Config.Response"
+    data_response = "Timestamp.Data.Response"
+    config_response = "Timestamp.Config.Response"
 
 
 class HAChargerSession(str, Enum):
     """Charger session information to report in home assistant."""
 
     transaction_id = "Transaction.Id"
-    session_time = "Session.Time"  # in min
-    session_energy = "Session.Energy"  # in kWh
-    meter_start = "Meter.Start"  # in kWh
+    session_time = "Time.Session"  # in min
+    session_energy = "Energy.Session"  # in kWh
+    meter_start = "Energy.Meter.Start"  # in kWh
 
 
 class Profiles(IntFlag):
