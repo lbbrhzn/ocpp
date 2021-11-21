@@ -7,7 +7,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
 )
 import homeassistant.const as ha
-from homeassistant.const import (  # DEVICE_CLASS_FREQUENCY,
+from homeassistant.const import (
     CONF_MONITORED_VARIABLES,
     DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_CURRENT,
@@ -22,7 +22,10 @@ from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON, Measurand
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
-DEVICE_CLASS_FREQUENCY = "DEVICE_CLASS_FREQUENCY"
+# To be added when home assistant supports it
+DEVICE_CLASS_FREQUENCY = None
+FREQUENCY_RPM = "rpm"
+FREQUENCY_HERTZ = "Hz"
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -96,9 +99,9 @@ class ChargePointMetric(SensorEntity):
             unit_of_measurement = ha.TEMP_CELSIUS
         elif self.device_class is DEVICE_CLASS_FREQUENCY:
             if self.metric is Measurand.rpm:
-                unit_of_measurement = ha.FREQUENCY_RPM
+                unit_of_measurement = FREQUENCY_RPM
             else:
-                unit_of_measurement = ha.FREQUENCY_HZ
+                unit_of_measurement = FREQUENCY_HERTZ
         elif self.device_class is DEVICE_CLASS_TIMESTAMP:
             # Home assistant does not define a unit, must be a Datetime object or timestamp string (ISO 8601).
             unit_of_measurement = None
