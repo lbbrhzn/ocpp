@@ -97,11 +97,6 @@ class ChargePointMetric(SensorEntity):
             unit_of_measurement = ha.POWER_KILO_WATT
         elif self.device_class is DEVICE_CLASS_TEMPERATURE:
             unit_of_measurement = ha.TEMP_CELSIUS
-        elif self.device_class is DEVICE_CLASS_FREQUENCY:
-            if self.metric is Measurand.rpm:
-                unit_of_measurement = FREQUENCY_RPM
-            else:
-                unit_of_measurement = FREQUENCY_HERTZ
         elif self.device_class is DEVICE_CLASS_TIMESTAMP:
             # Home assistant does not define a unit, must be a Datetime object or timestamp string (ISO 8601).
             unit_of_measurement = None
