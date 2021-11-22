@@ -97,16 +97,13 @@ class ChargePointMetric(SensorEntity):
             unit_of_measurement = ha.POWER_KILO_WATT
         elif self.device_class is DEVICE_CLASS_TEMPERATURE:
             unit_of_measurement = ha.TEMP_CELSIUS
-        elif self.device_class is DEVICE_CLASS_FREQUENCY:
-            if self.metric is Measurand.rpm:
-                unit_of_measurement = FREQUENCY_RPM
-            else:
-                unit_of_measurement = FREQUENCY_HERTZ
         elif self.device_class is DEVICE_CLASS_TIMESTAMP:
             # Home assistant does not define a unit, must be a Datetime object or timestamp string (ISO 8601).
             unit_of_measurement = None
         elif self.device_class is DEVICE_CLASS_VOLTAGE:
             unit_of_measurement = ha.ELECTRIC_POTENTIAL_VOLT
+        elif self.metric in [Measurand.rpm, Measurand.frequency]:
+            unit_of_measurement = FREQUENCY_RPM
         return unit_of_measurement
 
     @property
@@ -141,12 +138,17 @@ class ChargePointMetric(SensorEntity):
         state_class = None
         if self.device_class is DEVICE_CLASS_ENERGY:
             state_class = STATE_CLASS_TOTAL_INCREASING
-        elif self.device_class in [
-            DEVICE_CLASS_CURRENT,
-            DEVICE_CLASS_POWER,
-            DEVICE_CLASS_TEMPERATURE,
-            DEVICE_CLASS_BATTERY,
-        ]:
+        elif (
+            self.device_class
+            in [
+                DEVICE_CLASS_CURRENT,
+                DEVICE_CLASS_VOLTAGE,
+                DEVICE_CLASS_POWER,
+                DEVICE_CLASS_TEMPERATURE,
+                DEVICE_CLASS_BATTERY,
+            ]
+            or self.metric in [Measurand.rpm, Measurand.frequency]
+        ):
             state_class = STATE_CLASS_MEASUREMENT
         return state_class
 
@@ -166,7 +168,7 @@ class ChargePointMetric(SensorEntity):
                 Measurand.frequency,
                 Measurand.rpm,
             ]
-            or self.metric.lower().startwith("frequency")
+            or self.metric.lower().startswith("frequency")
         ):
             device_class = DEVICE_CLASS_FREQUENCY
         elif self.metric.lower().startswith("power."):
