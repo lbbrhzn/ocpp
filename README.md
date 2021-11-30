@@ -66,6 +66,7 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 - [EVLink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
 - [Evnex E Series & X Series Charging Stations](https://www.evnex.com/) (Ability to configure a custom OCPP server such as HA is being discontinued)
 - [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
+- [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 
 ## Devices with known issues
 
