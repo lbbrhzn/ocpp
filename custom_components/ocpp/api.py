@@ -818,12 +818,24 @@ class ChargePoint(cp):
                 Measurand.power_active_import.value,
                 Measurand.power_active_export.value,
             ]:
-                """Line currents and powers are summed."""
+                # Currents and powers are always summed.
                 if Phase.l1.value in phase_info:
                     metric_value = (
                         phase_info.get(Phase.l1.value, 0)
                         + phase_info.get(Phase.l2.value, 0)
                         + phase_info.get(Phase.l3.value, 0)
+                    )
+                elif Phase.l1_n.value in phase_info:
+                    metric_value = (
+                        phase_info.get(Phase.l1_n.value, 0)
+                        + phase_info.get(Phase.l2_n.value, 0)
+                        + phase_info.get(Phase.l3_n.value, 0)
+                    )
+                elif Phase.l1_l2.value in phase_info:
+                    metric_value = (
+                        phase_info.get(Phase.l1_l2.value, 0)
+                        + phase_info.get(Phase.l2_l3.value, 0)
+                        + phase_info.get(Phase.l3_l1.value, 0)
                     )
             if metric_value is not None:
                 self._metrics[metric].value = round(metric_value, 1)
