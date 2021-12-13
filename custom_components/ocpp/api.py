@@ -796,17 +796,26 @@ class ChargePoint(cp):
             # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
             if metric in [Measurand.voltage.value]:
-                if Phase.l2_n.value in phase_info:
-                    """Line-neutral voltages are averaged."""
+                if (
+                    (Phase.l1_n.value in phase_info)
+                    and (Phase.l2_n.value in phase_info)
+                    and (Phase.l3_n.value in phase_info)
+                ):
+                    # Multiple line-neutral voltages are averaged.
                     metric_value = (
                         phase_info.get(Phase.l1_n.value, 0)
                         + phase_info.get(Phase.l2_n.value, 0)
                         + phase_info.get(Phase.l3_n.value, 0)
                     ) / 3
                 elif Phase.l1_n.value in phase_info:
+                    # Single line-neutral voltages are copied
                     metric_value = phase_info.get(Phase.l1_n.value, 0)
+                elif Phase.l2_n.value in phase_info:
+                    metric_value = phase_info.get(Phase.l2_n.value, 0)
+                elif Phase.l3_n.value in phase_info:
+                    metric_value = phase_info.get(Phase.l3_n.value, 0)
                 elif Phase.l1_l2.value in phase_info:
-                    """Line-line voltages are converted to line-neutral and averaged."""
+                    # Line-line voltages are converted to line-neutral and averaged.
                     metric_value = (
                         phase_info.get(Phase.l1_l2.value, 0)
                         + phase_info.get(Phase.l2_l3.value, 0)
@@ -819,24 +828,17 @@ class ChargePoint(cp):
                 Measurand.power_active_export.value,
             ]:
                 # Currents and powers are always summed.
-                if Phase.l1.value in phase_info:
-                    metric_value = (
-                        phase_info.get(Phase.l1.value, 0)
-                        + phase_info.get(Phase.l2.value, 0)
-                        + phase_info.get(Phase.l3.value, 0)
-                    )
-                elif Phase.l1_n.value in phase_info:
-                    metric_value = (
-                        phase_info.get(Phase.l1_n.value, 0)
-                        + phase_info.get(Phase.l2_n.value, 0)
-                        + phase_info.get(Phase.l3_n.value, 0)
-                    )
-                elif Phase.l1_l2.value in phase_info:
-                    metric_value = (
-                        phase_info.get(Phase.l1_l2.value, 0)
-                        + phase_info.get(Phase.l2_l3.value, 0)
-                        + phase_info.get(Phase.l3_l1.value, 0)
-                    )
+                metric_value = max(
+                    phase_info.get(Phase.l1.value, 0)
+                    + phase_info.get(Phase.l2.value, 0)
+                    + phase_info.get(Phase.l3.value, 0),
+                    phase_info.get(Phase.l1_n.value, 0)
+                    + phase_info.get(Phase.l2_n.value, 0)
+                    + phase_info.get(Phase.l3_n.value, 0),
+                    phase_info.get(Phase.l1_l2.value, 0)
+                    + phase_info.get(Phase.l2_l3.value, 0)
+                    + phase_info.get(Phase.l3_l1.value, 0),
+                )
             if metric_value is not None:
                 if unit == DEFAULT_POWER_UNIT:
                     self._metrics[measurand].value = float(metric_value) / 1000
