@@ -138,9 +138,7 @@ async def test_cms_responses(hass):
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
-    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(
-        20
-    )
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
     # test ocpp messages sent from cms to charger, through HA switches/services
