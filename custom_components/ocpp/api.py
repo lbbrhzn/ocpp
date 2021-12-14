@@ -966,6 +966,12 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_import.value].value = 0
             if Measurand.power_reactive_import.value in self._metrics:
                 self._metrics[Measurand.power_reactive_import.value].value = 0
+            if Measurand.current_export.value in self._metrics:
+                self._metrics[Measurand.current_export.value].value = 0
+            if Measurand.power_active_export.value in self._metrics:
+                self._metrics[Measurand.power_active_export.value].value = 0
+            if Measurand.power_reactive_export.value in self._metrics:
+                self._metrics[Measurand.power_reactive_export.value].value = 0
         self._metrics[cstat.error_code.value].value = error_code
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
@@ -1020,6 +1026,12 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_import.value].value = 0
         if Measurand.power_reactive_import.value in self._metrics:
             self._metrics[Measurand.power_reactive_import.value].value = 0
+        if Measurand.current_export.value in self._metrics:
+            self._metrics[Measurand.current_export.value].value = 0
+        if Measurand.power_active_export.value in self._metrics:
+            self._metrics[Measurand.power_active_export.value].value = 0
+        if Measurand.power_reactive_export.value in self._metrics:
+            self._metrics[Measurand.power_reactive_export.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
