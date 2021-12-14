@@ -793,7 +793,6 @@ class ChargePoint(cp):
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
         for metric, phase_info in measurand_data.items():
-            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
             if metric in [Measurand.voltage.value]:
                 if (
@@ -839,7 +838,14 @@ class ChargePoint(cp):
                     + phase_info.get(Phase.l2_l3.value, 0)
                     + phase_info.get(Phase.l3_l1.value, 0),
                 )
+
             if metric_value is not None:
+                _LOGGER.debug(
+                    "Metric: %s, phase_info: %s value: %f",
+                    metric,
+                    phase_info,
+                    metric_value,
+                )
                 if unit == DEFAULT_POWER_UNIT:
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_POWER_UNIT

@@ -127,9 +127,9 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_status_notification(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
-                    cp.send_meter_data(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
+                    cp.send_meter_data(),
                 ),
                 timeout=3,
             )
@@ -138,6 +138,7 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
@@ -395,7 +396,7 @@ class ChargePoint(cpclass):
                             "unit": "Wh",
                         },
                         {
-                            "value": "0.000",
+                            "value": "20.000",
                             "context": "Sample.Periodic",
                             "measurand": "Current.Import",
                             "location": "Outlet",
