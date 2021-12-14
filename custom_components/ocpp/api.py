@@ -841,14 +841,14 @@ class ChargePoint(cp):
                 )
             if metric_value is not None:
                 if unit == DEFAULT_POWER_UNIT:
-                    self._metrics[measurand].value = float(metric_value) / 1000
-                    self._metrics[measurand].unit = HA_POWER_UNIT
+                    self._metrics[metric].value = float(metric_value) / 1000
+                    self._metrics[metric].unit = HA_POWER_UNIT
                 elif unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[measurand].value = float(metric_value) / 1000
-                    self._metrics[measurand].unit = HA_ENERGY_UNIT
+                    self._metrics[metric].value = float(metric_value) / 1000
+                    self._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[measurand].value = round(float(metric_value), 1)
-                    self._metrics[measurand].unit = unit
+                    self._metrics[metric].value = round(float(metric_value), 1)
+                    self._metrics[metric].unit = unit
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
