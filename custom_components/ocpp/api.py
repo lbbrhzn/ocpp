@@ -844,10 +844,10 @@ class ChargePoint(cp):
                     phase_info,
                     metric_value,
                 )
-                if unit == DEFAULT_POWER_UNIT:
+                if phase_info.get(om.unit.value) == DEFAULT_POWER_UNIT:
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_POWER_UNIT
-                elif unit == DEFAULT_ENERGY_UNIT:
+                elif phase_info.get(om.unit.value) == DEFAULT_ENERGY_UNIT:
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
