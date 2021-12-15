@@ -833,21 +833,23 @@ class ChargePoint(cp):
                     )
 
             if metric_value is not None:
+                metric_unit = phase_info.get(om.unit.value)
                 _LOGGER.debug(
-                    "Metric: %s, phase_info: %s value: %f",
+                    "process_phases: metric: %s, phase_info: %s value: %f unit :%s",
                     metric,
                     phase_info,
                     metric_value,
+                    metric_unit,
                 )
-                if unit == DEFAULT_POWER_UNIT:
+                if metric_unit == DEFAULT_POWER_UNIT:
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_POWER_UNIT
-                elif unit == DEFAULT_ENERGY_UNIT:
+                elif metric_unit == DEFAULT_ENERGY_UNIT:
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
                     self._metrics[metric].value = round(float(metric_value), 1)
-                    self._metrics[metric].unit = unit
+                    self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
