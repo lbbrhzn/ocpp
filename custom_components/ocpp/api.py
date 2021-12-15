@@ -775,7 +775,7 @@ class ChargePoint(cp):
     def process_phases(self, data):
         """Process phase data from meter values payload."""
 
-        def average_of_nonzero(*values):
+        def average_of_nonzero(values):
             nonzero_values: list = [v for v in values if float(v) != 0.0]
             nof_values: int = len(nonzero_values)
             average = sum(nonzero_values) / nof_values if nof_values > 0 else 0
@@ -809,12 +809,12 @@ class ChargePoint(cp):
                 if (phase_info.keys() & line_to_neutral_phases) is not None:
                     # Line to neutral voltages are averaged
                     metric_value = average_of_nonzero(
-                        phase_info.get(phase, 0) for phase in line_to_neutral_phases
+                        [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
                     )
                 elif (phase_info.keys() & line_to_line_phases) is not None:
                     # Line to line voltages are averaged and converted to line to neutral
                     metric_value = average_of_nonzero(
-                        phase_info.get(phase, 0) for phase in line_to_line_phases
+                        [phase_info.get(phase, 0) for phase in line_to_line_phases]
                     ) / sqrt(3)
             elif metric in [
                 Measurand.current_import.value,
