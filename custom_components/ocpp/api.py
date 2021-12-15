@@ -800,7 +800,7 @@ class ChargePoint(cp):
                     and (Phase.l2_n.value in phase_info)
                     and (Phase.l3_n.value in phase_info)
                 ):
-                    if (phase_info.get(Phase.l2_n.value) == 0):
+                    if phase_info.get(Phase.l2_n.value) == 0:
                         # Single line-neutral voltages are copied
                         metric_value = phase_info.get(Phase.l1_n.value, 0)
                     else:
