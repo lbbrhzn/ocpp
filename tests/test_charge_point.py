@@ -139,6 +139,7 @@ async def test_cms_responses(hass, socket_enabled):
         1305570 / 1000
     )
     assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
+    assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
@@ -485,7 +486,7 @@ class ChargePoint(cpclass):
                             "phase": "L1-N",
                         },
                         {
-                            "value": "227.000",
+                            "value": "228.000",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
                             "location": "Outlet",
@@ -493,7 +494,7 @@ class ChargePoint(cpclass):
                             "phase": "L2-N",
                         },
                         {
-                            "value": "229.300",
+                            "value": "0.000",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
                             "location": "Outlet",
