@@ -800,17 +800,16 @@ class ChargePoint(cp):
                     and (Phase.l2_n.value in phase_info)
                     and (Phase.l3_n.value in phase_info)
                 ):
-                    # Multiple line-neutral voltages are averaged.
-                    metric_value = (
-                        phase_info.get(Phase.l1_n.value, 0)
-                        + phase_info.get(Phase.l2_n.value, 0)
-                        + phase_info.get(Phase.l3_n.value, 0)
-                    ) / 3
-                elif (Phase.l1_n.value in phase_info) and (
-                    phase_info.get(Phase.l2_n.value, 0) == 0
-                ):
-                    # Single line-neutral voltages are copied
-                    metric_value = phase_info.get(Phase.l1_n.value, 0)
+                    if (phase_info.get(Phase.l2_n.value) == 0):
+                        # Single line-neutral voltages are copied
+                        metric_value = phase_info.get(Phase.l1_n.value, 0)
+                    else:
+                        # Multiple line-neutral voltages are averaged.
+                        metric_value = (
+                            phase_info.get(Phase.l1_n.value, 0)
+                            + phase_info.get(Phase.l2_n.value, 0)
+                            + phase_info.get(Phase.l3_n.value, 0)
+                        ) / 3
                 elif Phase.l1_l2.value in phase_info:
                     # Line-line voltages are converted to line-neutral and averaged.
                     metric_value = (
