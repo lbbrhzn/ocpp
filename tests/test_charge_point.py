@@ -34,10 +34,10 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA
 
 
-async def test_cms_responses(hass):
+async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
-    async def test_switches(hass):
+    async def test_switches(hass, socket_enabled):
         """Test switch operations."""
         for switch in SWITCHES:
             result = await hass.services.async_call(
@@ -60,7 +60,7 @@ async def test_cms_responses(hass):
             )
             assert result
 
-    async def test_services(hass):
+    async def test_services(hass, socket_enabled):
         """Test service operations."""
         SERVICES = [
             csvcs.service_update_firmware,
@@ -112,7 +112,7 @@ async def test_cms_responses(hass):
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        "ws://localhost:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -139,11 +139,13 @@ async def test_cms_responses(hass):
         1305570 / 1000
     )
     assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
+    assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
-
+    await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
+    # should reconnect as already started above
     async with websockets.connect(
-        "ws://localhost:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
     ) as ws:
         cp = ChargePoint("CP_1_test", ws)
@@ -151,8 +153,8 @@ async def test_cms_responses(hass):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
-                    test_switches(hass),
-                    test_services(hass),
+                    test_switches(hass, socket_enabled),
+                    test_services(hass, socket_enabled),
                 ),
                 timeout=3,
             )
@@ -161,7 +163,7 @@ async def test_cms_responses(hass):
 
     # test services when charger is unavailable
     await asyncio.sleep(1)
-    await test_services(hass)
+    await test_services(hass, socket_enabled)
     await async_unload_entry(hass, config_entry)
     await hass.async_block_till_done()
 
@@ -395,7 +397,7 @@ class ChargePoint(cpclass):
                             "unit": "Wh",
                         },
                         {
-                            "value": "20",
+                            "value": "20.000",
                             "context": "Sample.Periodic",
                             "measurand": "Current.Import",
                             "location": "Outlet",
@@ -484,7 +486,7 @@ class ChargePoint(cpclass):
                             "phase": "L1-N",
                         },
                         {
-                            "value": "227.000",
+                            "value": "228.000",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
                             "location": "Outlet",
@@ -492,7 +494,7 @@ class ChargePoint(cpclass):
                             "phase": "L2-N",
                         },
                         {
-                            "value": "229.300",
+                            "value": "0.000",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
                             "location": "Outlet",

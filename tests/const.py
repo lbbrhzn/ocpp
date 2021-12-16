@@ -10,7 +10,7 @@ from custom_components.ocpp.const import (
 from ocpp.v16.enums import Measurand
 
 MOCK_CONFIG = {
-    CONF_HOST: "0.0.0.0",
+    CONF_HOST: "127.0.0.1",
     CONF_PORT: 9000,
     CONF_CPID: "test_cpid",
     CONF_CSID: "test_csid",
@@ -41,7 +41,7 @@ MOCK_CONFIG_2 = {
     Measurand.voltage.value: True,
 }
 MOCK_CONFIG_DATA = {
-    CONF_HOST: "0.0.0.0",
+    CONF_HOST: "127.0.0.1",
     CONF_PORT: 9000,
     CONF_CPID: "test_cpid",
     CONF_CSID: "test_csid",
@@ -50,7 +50,7 @@ MOCK_CONFIG_DATA = {
 }
 # separate entry for switch so tests can run concurrently
 MOCK_CONFIG_SWITCH = {
-    CONF_HOST: "0.0.0.0",
+    CONF_HOST: "127.0.0.1",
     CONF_PORT: 9001,
     CONF_CPID: "test_cpid_2",
     CONF_CSID: "test_csid_2",

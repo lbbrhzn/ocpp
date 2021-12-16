@@ -117,3 +117,23 @@ NUMBER_MAX_CURRENT = {
     CONF_UNIT_OF_MEASUREMENT: "A",
 }
 NUMBERS = [NUMBER_MAX_CURRENT]
+
+UNITS_OCCP_TO_HA = {
+    UnitOfMeasure.wh: ha.ENERGY_WATT_HOUR,
+    UnitOfMeasure.kwh: ha.ENERGY_KILO_WATT_HOUR,
+    UnitOfMeasure.varh: None,
+    UnitOfMeasure.kvarh: None,
+    UnitOfMeasure.w: ha.POWER_WATT,
+    UnitOfMeasure.kw: ha.POWER_KILO_WATT,
+    UnitOfMeasure.va: ha.POWER_VOLT_AMPERE,
+    UnitOfMeasure.kva: None,
+    UnitOfMeasure.var: None,
+    UnitOfMeasure.kvar: None,
+    UnitOfMeasure.a: ha.ELECTRIC_CURRENT_AMPERE,
+    UnitOfMeasure.v: ha.ELECTRIC_POTENTIAL_VOLT,
+    UnitOfMeasure.celsius: ha.TEMP_CELSIUS,
+    UnitOfMeasure.fahrenheit: ha.TEMP_FAHRENHEIT,
+    UnitOfMeasure.k: ha.TEMP_KELVIN,
+    UnitOfMeasure.percent: ha.PERCENTAGE,
+    UnitOfMeasure.hertz: ha.FREQUENCY_HERTZ,
+}

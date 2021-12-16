@@ -5,8 +5,7 @@ from enum import Enum, IntFlag, auto
 class HAChargerServices(str, Enum):
     """Charger status conditions to report in home assistant."""
 
-    """For HA service reference and for function to call use .value"""
-
+    # For HA service reference and for function to call use .value
     service_charge_start = "start_transaction"
     service_charge_stop = "stop_transaction"
     service_availability = "availability"
@@ -39,20 +38,20 @@ class HAChargerDetails(str, Enum):
     model = "Model"
     vendor = "Vendor"
     serial = "Serial"
-    firmware_version = "FW.Version"
+    firmware_version = "Version.Firmware"
     features = "Features"
     connectors = "Connectors"
-    data_response = "Data.Response"
-    config_response = "Config.Response"
+    data_response = "Timestamp.Data.Response"
+    config_response = "Timestamp.Config.Response"
 
 
 class HAChargerSession(str, Enum):
     """Charger session information to report in home assistant."""
 
     transaction_id = "Transaction.Id"
-    session_time = "Session.Time"  # in min
-    session_energy = "Session.Energy"  # in kWh
-    meter_start = "Meter.Start"  # in kWh
+    session_time = "Time.Session"  # in min
+    session_energy = "Energy.Session"  # in kWh
+    meter_start = "Energy.Meter.Start"  # in kWh
 
 
 class Profiles(IntFlag):
@@ -69,8 +68,7 @@ class Profiles(IntFlag):
 class OcppMisc(str, Enum):
     """Miscellaneous strings used in ocpp v1.6 responses."""
 
-    """For pythonic version use .name (eg with kwargs) for ocpp json use .value"""
-
+    # For pythonic version use .name (eg with kwargs) for ocpp json use .value
     context = "context"
     key = "key"
     limit = "limit"

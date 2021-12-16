@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-import websockets
+import websockets.server
 
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
@@ -63,6 +63,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    UNITS_OCCP_TO_HA,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -134,7 +135,7 @@ class CentralSystem:
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem(hass, entry)
 
-        server = await websockets.serve(
+        server = await websockets.server.serve(
             self.on_connect,
             self.host,
             self.port,
@@ -168,19 +169,21 @@ class CentralSystem:
 
         _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
+        cp_id = cp_id[cp_id.rfind("/") + 1 :]
         try:
             if self.cpid not in self.charge_points:
                 _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
-                cp = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
-                self.charge_points[self.cpid] = cp
-                await self.charge_points[self.cpid].start()
+                charge_point = ChargePoint(
+                    cp_id, websocket, self.hass, self.entry, self
+                )
+                self.charge_points[self.cpid] = charge_point
+                await charge_point.start()
             else:
                 _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-                cp = self.charge_points[self.cpid]
-                await self.charge_points[self.cpid].reconnect(websocket)
+                charge_point: ChargePoint = self.charge_points[self.cpid]
+                await charge_point.reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
-
         finally:
             _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
@@ -194,6 +197,12 @@ class CentralSystem:
         """Return unit of given measurand."""
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].unit
+        return None
+
+    def get_ha_unit(self, cp_id: str, measurand: str):
+        """Return home assistant unit of given measurand."""
+        if cp_id in self.charge_points:
+            return self.charge_points[cp_id]._metrics[measurand].ha_unit
         return None
 
     def get_extra_attr(self, cp_id: str, measurand: str):
@@ -347,6 +356,7 @@ class ChargePoint(cp):
 
         try:
             self.status = STATE_OK
+            await asyncio.sleep(2)
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
                 await self.trigger_status_notification()
@@ -723,7 +733,7 @@ class ChargePoint(cp):
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
             await self._connection.close()
-            self._connection=None
+            self._connection = None
             self.status = STATE_UNAVAILABLE
 
     async def reconnect(self, connection):
@@ -737,7 +747,7 @@ class ChargePoint(cp):
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
             await self._connection.close()
-            self._connection=None
+            self._connection = None
             self.status = STATE_UNAVAILABLE
 
     async def async_update_device_info(self, boot_info: dict):
@@ -764,6 +774,13 @@ class ChargePoint(cp):
 
     def process_phases(self, data):
         """Process phase data from meter values payload."""
+
+        def average_of_nonzero(values):
+            nonzero_values: list = [v for v in values if float(v) != 0.0]
+            nof_values: int = len(nonzero_values)
+            average = sum(nonzero_values) / nof_values if nof_values > 0 else 0
+            return average
+
         measurand_data = {}
         for sv in data:
             # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
@@ -771,6 +788,7 @@ class ChargePoint(cp):
             phase = sv.get(om.phase.value, None)
             value = sv.get(om.value.value, None)
             unit = sv.get(om.unit.value, None)
+            context = sv.get(om.context.value, None)
             if measurand is not None and phase is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
@@ -779,44 +797,66 @@ class ChargePoint(cp):
                 self._metrics[measurand].unit = unit
                 self._metrics[measurand].extra_attr[om.unit.value] = unit
                 self._metrics[measurand].extra_attr[phase] = float(value)
+                self._metrics[measurand].extra_attr[om.context.value] = context
+
+        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
+        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l2_n.value]
+        line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
         for metric, phase_info in measurand_data.items():
-            # _LOGGER.debug("Metric: %s, extra attributes: %s", metric, phase_info)
             metric_value = None
             if metric in [Measurand.voltage.value]:
-                if Phase.l1_n.value in phase_info:
-                    """Line-neutral voltages are averaged."""
-                    metric_value = (
-                        phase_info.get(Phase.l1_n.value, 0)
-                        + phase_info.get(Phase.l2_n.value, 0)
-                        + phase_info.get(Phase.l3_n.value, 0)
-                    ) / 3
-                elif Phase.l1_l2.value in phase_info:
-                    """Line-line voltages are converted to line-neutral and averaged."""
-                    metric_value = (
-                        phase_info.get(Phase.l1_l2.value, 0)
-                        + phase_info.get(Phase.l2_l3.value, 0)
-                        + phase_info.get(Phase.l3_l1.value, 0)
-                    ) / (3 * sqrt(3))
+                if (phase_info.keys() & line_to_neutral_phases) is not None:
+                    # Line to neutral voltages are averaged
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
+                    )
+                elif (phase_info.keys() & line_to_line_phases) is not None:
+                    # Line to line voltages are averaged and converted to line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_to_line_phases]
+                    ) / sqrt(3)
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
                 Measurand.power_active_import.value,
                 Measurand.power_active_export.value,
             ]:
-                """Line currents and powers are summed."""
-                if Phase.l1.value in phase_info:
-                    metric_value = (
-                        phase_info.get(Phase.l1.value, 0)
-                        + phase_info.get(Phase.l2.value, 0)
-                        + phase_info.get(Phase.l3.value, 0)
+                if (phase_info.keys() & line_phases) is not None:
+                    metric_value = sum(
+                        phase_info.get(phase, 0) for phase in line_phases
                     )
+                elif (phase_info.keys() & line_to_neutral_phases) is not None:
+                    # Workaround for some chargers that erroneously use line to neutral for current
+                    metric_value = sum(
+                        phase_info.get(phase, 0) for phase in line_to_neutral_phases
+                    )
+
             if metric_value is not None:
-                self._metrics[metric].value = round(metric_value, 1)
+                metric_unit = phase_info.get(om.unit.value)
+                _LOGGER.debug(
+                    "process_phases: metric: %s, phase_info: %s value: %f unit :%s",
+                    metric,
+                    phase_info,
+                    metric_value,
+                    metric_unit,
+                )
+                if metric_unit == DEFAULT_POWER_UNIT:
+                    self._metrics[metric].value = float(metric_value) / 1000
+                    self._metrics[metric].unit = HA_POWER_UNIT
+                elif metric_unit == DEFAULT_ENERGY_UNIT:
+                    self._metrics[metric].value = float(metric_value) / 1000
+                    self._metrics[metric].unit = HA_ENERGY_UNIT
+                else:
+                    self._metrics[metric].value = round(float(metric_value), 1)
+                    self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
         """Request handler for MeterValues Calls."""
+        self._metrics[csess.transaction_id.value].value = kwargs.get(
+            om.transaction_id.name, 0
+        )
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
             processed_keys = []
@@ -826,6 +866,7 @@ class ChargePoint(cp):
                 unit = sv.get(om.unit.value, None)
                 phase = sv.get(om.phase.value, None)
                 location = sv.get(om.location.value, None)
+                context = sv.get(om.context.value, None)
 
                 if len(sv.keys()) == 1:  # Backwars compatibility
                     measurand = DEFAULT_MEASURAND
@@ -845,6 +886,8 @@ class ChargePoint(cp):
                         self._metrics[measurand].extra_attr[
                             om.location.value
                         ] = location
+                    if context is not None:
+                        self._metrics[measurand].extra_attr[om.context.value] = context
                     processed_keys.append(idx)
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
@@ -860,7 +903,10 @@ class ChargePoint(cp):
                 om.transaction_id.name
             )
             self._transactionId = kwargs.get(om.transaction_id.name)
-        if self._metrics[csess.transaction_id.value].value is not None:
+        if self._metrics[csess.transaction_id.value].value == 0:
+            self._metrics[csess.session_time.value].value = 0
+            self._metrics[csess.meter_start.value].value = None
+        else:
             self._metrics[csess.session_time.value].value = round(
                 (
                     int(time.time())
@@ -874,6 +920,8 @@ class ChargePoint(cp):
                 - float(self._metrics[csess.meter_start.value].value),
                 1,
             )
+        else:
+            self._metrics[csess.session_energy.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
@@ -919,6 +967,12 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_import.value].value = 0
             if Measurand.power_reactive_import.value in self._metrics:
                 self._metrics[Measurand.power_reactive_import.value].value = 0
+            if Measurand.current_export.value in self._metrics:
+                self._metrics[Measurand.current_export.value].value = 0
+            if Measurand.power_active_export.value in self._metrics:
+                self._metrics[Measurand.power_active_export.value].value = 0
+            if Measurand.power_reactive_export.value in self._metrics:
+                self._metrics[Measurand.power_reactive_export.value].value = 0
         self._metrics[cstat.error_code.value].value = error_code
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
@@ -973,6 +1027,12 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_import.value].value = 0
         if Measurand.power_reactive_import.value in self._metrics:
             self._metrics[Measurand.power_reactive_import.value].value = 0
+        if Measurand.current_export.value in self._metrics:
+            self._metrics[Measurand.current_export.value].value = 0
+        if Measurand.power_active_export.value in self._metrics:
+            self._metrics[Measurand.power_active_export.value].value = 0
+        if Measurand.power_reactive_export.value in self._metrics:
+            self._metrics[Measurand.power_reactive_export.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
@@ -1009,6 +1069,10 @@ class ChargePoint(cp):
         """Return unit of given measurand."""
         return self._metrics[measurand].unit
 
+    def get_ha_unit(self, measurand: str):
+        """Return home assistant unit of given measurand."""
+        return self._metrics[measurand].ha_unit
+
 
 class Metric:
     """Metric class."""
@@ -1038,6 +1102,11 @@ class Metric:
     def unit(self, unit: str):
         """Set the unit of the metric."""
         self._unit = unit
+
+    @property
+    def ha_unit(self):
+        """Get the home assistant unit of the metric."""
+        return UNITS_OCCP_TO_HA.get(self._unit, self._unit)
 
     @property
     def extra_attr(self):
