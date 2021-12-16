@@ -2,13 +2,20 @@
 import asyncio
 from datetime import datetime, timezone  # timedelta,
 
-from homeassistant.components.switch import SERVICE_TURN_OFF, SERVICE_TURN_ON
+from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
+from homeassistant.components.button.const import SERVICE_PRESS
+from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
+from homeassistant.components.switch import (
+    DOMAIN as SWITCH_DOMAIN,
+    SERVICE_TURN_OFF,
+    SERVICE_TURN_ON,
+)
 from homeassistant.const import ATTR_ENTITY_ID
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
-from custom_components.ocpp.const import DOMAIN, NUMBER, NUMBERS, SWITCH, SWITCHES
+from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, NUMBERS, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
@@ -41,24 +48,42 @@ async def test_cms_responses(hass, socket_enabled):
         """Test switch operations."""
         for switch in SWITCHES:
             result = await hass.services.async_call(
-                SWITCH,
+                SWITCH_DOMAIN,
                 SERVICE_TURN_ON,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
                 },
                 blocking=True,
             )
             assert result
 
             result = await hass.services.async_call(
-                SWITCH,
+                SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
                 },
                 blocking=True,
             )
             assert result
+
+    async def test_buttons(hass, socket_enabled):
+        """Test button operations."""
+        result = await hass.services.async_call(
+            BUTTON_DOMAIN,
+            SERVICE_PRESS,
+            {ATTR_ENTITY_ID: "button.test_cpid_reset"},
+            blocking=True,
+        )
+        assert result
+
+        result = await hass.services.async_call(
+            BUTTON_DOMAIN,
+            SERVICE_PRESS,
+            {ATTR_ENTITY_ID: "button.test_cpid_unlock"},
+            blocking=True,
+        )
+        assert result
 
     async def test_services(hass, socket_enabled):
         """Test service operations."""
@@ -83,7 +108,7 @@ async def test_cms_responses(hass, socket_enabled):
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
             result = await hass.services.async_call(
-                DOMAIN,
+                OCPP_DOMAIN,
                 service.value,
                 service_data=data,
                 blocking=True,
@@ -93,22 +118,24 @@ async def test_cms_responses(hass, socket_enabled):
         for number in NUMBERS:
             # test setting value of number slider
             result = await hass.services.async_call(
-                NUMBER,
+                NUMBER_DOMAIN,
                 "set_value",
                 service_data={"value": "10"},
                 blocking=True,
-                target={ATTR_ENTITY_ID: f"{NUMBER}.test_cpid_{number['name'].lower()}"},
+                target={
+                    ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.test_cpid_{number['name'].lower()}"
+                },
             )
             assert result
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
+        domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
     )
     assert await async_setup_entry(hass, config_entry)
     await hass.async_block_till_done()
 
-    cs = hass.data[DOMAIN][config_entry.entry_id]
+    cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(

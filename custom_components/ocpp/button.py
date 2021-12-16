@@ -71,15 +71,18 @@ class ChargePointButton(ButtonEntity):
         """Instantiate instance of a ChargePointButton."""
         self.cp_id = cp_id
         self.central_system = central_system
+        self.entity_description = description
         self._attr_unique_id = ".".join(
-            ["switch", DOMAIN, self.cp_id, self.description["name"]]
+            ["button", DOMAIN, self.cp_id, self.entity_description["name"]]
         )
-        self._attr_name = ".".join([self.cp_id, self.description["name"]])
+        self._attr_name = ".".join([self.cp_id, self.entity_description["name"]])
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),
         )
-        self.entity_id = "button." + "_".join([self.cp_id, self.description["name"]])
+        self.entity_id = "button." + "_".join(
+            [self.cp_id, self.entity_description["name"]]
+        )
 
     @property
     def available(self) -> bool:
