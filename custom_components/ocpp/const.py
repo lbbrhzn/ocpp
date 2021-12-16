@@ -40,8 +40,9 @@ SLEEP_TIME = 60
 NUMBER = "number"
 SENSOR = "sensor"
 SWITCH = "switch"
+BUTTON = "button"
 
-PLATFORMS = [SENSOR, SWITCH, NUMBER]
+PLATFORMS = [SENSOR, SWITCH, NUMBER, BUTTON]
 
 # Ocpp supported measurands
 MEASURANDS = [
@@ -76,7 +77,7 @@ HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
 
 # Switch configuration definitions
-# At a minimum define switch name and on service call, pulse used to call a service once such as reset
+# At a minimum define switch name and on service call,
 # metric and condition combination can be used to drive switch state, use default to set initial state to True
 SWITCH_CHARGE = {
     "name": "Charge_Control",
@@ -93,17 +94,8 @@ SWITCH_AVAILABILITY = {
     "metric": HAChargerStatuses.status.value,
     "condition": ChargePointStatus.available.value,
 }
-SWITCH_RESET = {
-    "name": "Reset",
-    "on": HAChargerServices.service_reset.name,
-    "pulse": True,
-}
-SWITCH_UNLOCK = {
-    "name": "Unlock",
-    "on": HAChargerServices.service_unlock.name,
-    "pulse": True,
-}
-SWITCHES = [SWITCH_CHARGE, SWITCH_RESET, SWITCH_UNLOCK, SWITCH_AVAILABILITY]
+
+SWITCHES = [SWITCH_CHARGE, SWITCH_AVAILABILITY]
 
 # Input number definitions
 NUMBER_MAX_CURRENT = {
