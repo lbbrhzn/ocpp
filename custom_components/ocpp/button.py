@@ -46,7 +46,7 @@ BUTTONS: Final = [
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
-    """Configure the sensor platform."""
+    """Configure the Button platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
@@ -87,11 +87,11 @@ class ChargePointButton(ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return if switch is available."""
+        """Return charger availability."""
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     async def async_press(self) -> None:
-        """Triggers the OTA update service."""
+        """Triggers the charger press action service."""
         await self.central_system.set_charger_state(
             self.cp_id, self.entity_description.press_action
         )
