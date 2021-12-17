@@ -16,15 +16,10 @@ from .enums import HAChargerServices
 
 
 @dataclass
-class OcppButtonDescriptionMixin:
-    """Mixin to describe a Button entity."""
+class OcppButtonDescription(ButtonEntityDescription):
+    """Class to describe a Button entity."""
 
     press_action: str
-
-
-@dataclass
-class OcppButtonDescription(ButtonEntityDescription, OcppButtonDescriptionMixin):
-    """Class to describe a Button entity."""
 
 
 BUTTONS: Final = [
