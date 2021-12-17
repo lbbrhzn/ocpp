@@ -19,7 +19,7 @@ from .enums import HAChargerServices
 class OcppButtonDescription(ButtonEntityDescription):
     """Class to describe a Button entity."""
 
-    press_action: str | None = None
+    press_action: str = ""
 
 
 BUTTONS: Final = [
