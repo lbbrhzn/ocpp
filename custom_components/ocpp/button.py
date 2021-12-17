@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from homeassistant.components.button import (
+    DOMAIN as BUTTON_DOMAIN,
     ButtonDeviceClass,
     ButtonEntity,
     ButtonEntityDescription,
@@ -73,15 +74,15 @@ class ChargePointButton(ButtonEntity):
         self.central_system = central_system
         self.entity_description = description
         self._attr_unique_id = ".".join(
-            ["button", DOMAIN, self.cp_id, self.entity_description.name]
+            [BUTTON_DOMAIN, DOMAIN, self.cp_id, self.entity_description.key]
         )
         self._attr_name = ".".join([self.cp_id, self.entity_description.name])
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),
         )
-        self.entity_id = "button." + "_".join(
-            [self.cp_id, self.entity_description.name]
+        self.entity_id = (
+            BUTTON_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
         )
 
     @property

@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
+from custom_components.ocpp.button import BUTTONS
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, NUMBERS, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
@@ -69,21 +70,14 @@ async def test_cms_responses(hass, socket_enabled):
 
     async def test_buttons(hass, socket_enabled):
         """Test button operations."""
-        result = await hass.services.async_call(
-            BUTTON_DOMAIN,
-            SERVICE_PRESS,
-            {ATTR_ENTITY_ID: "button.test_cpid_reset"},
-            blocking=True,
-        )
-        assert result
-
-        result = await hass.services.async_call(
-            BUTTON_DOMAIN,
-            SERVICE_PRESS,
-            {ATTR_ENTITY_ID: "button.test_cpid_unlock"},
-            blocking=True,
-        )
-        assert result
+        for button in BUTTONS:
+            result = await hass.services.async_call(
+                BUTTON_DOMAIN,
+                SERVICE_PRESS,
+                {ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{button.key}"},
+                blocking=True,
+            )
+            assert result
 
     async def test_services(hass, socket_enabled):
         """Test service operations."""
