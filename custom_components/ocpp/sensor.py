@@ -43,7 +43,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
             OcppSensorDescription(
                 key=metric.lower(),
                 name=metric,
-                entity_category=EntityCategory.diagnostic,
+                entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
         entities.append(
@@ -59,6 +59,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
 class ChargePointMetric(SensorEntity):
     """Individual sensor for charge point metrics."""
+
+    entity_description: OcppSensorDescription
 
     def __init__(
         self,
@@ -108,17 +110,17 @@ class ChargePointMetric(SensorEntity):
     def state_class(self):
         """Return the state class of the sensor."""
         state_class = None
-        if self.device_class is SensorDeviceClass.energy:
-            state_class = SensorStateClass.total_increasing
+        if self.device_class is SensorDeviceClass.ENERGY:
+            state_class = SensorStateClass.TOTAL_INCREASING
         elif self.device_class in [
-            SensorDeviceClass.current,
-            SensorDeviceClass.voltage,
-            SensorDeviceClass.power,
-            SensorDeviceClass.temperature,
-            SensorDeviceClass.battery,
-            SensorDeviceClass.frequency,
+            SensorDeviceClass.CURRENT,
+            SensorDeviceClass.VOLTAGE,
+            SensorDeviceClass.POWER,
+            SensorDeviceClass.TEMPERATURE,
+            SensorDeviceClass.BATTERY,
+            SensorDeviceClass.FREQUENCY,
         ]:
-            state_class = SensorStateClass.measurement
+            state_class = SensorStateClass.MEASUREMENT
         return state_class
 
     @property
@@ -126,11 +128,11 @@ class ChargePointMetric(SensorEntity):
         """Return the device class of the sensor."""
         device_class = None
         if self.metric.lower().startswith("current."):
-            device_class = SensorDeviceClass.current
+            device_class = SensorDeviceClass.CURRENT
         elif self.metric.lower().startswith("voltage."):
-            device_class = SensorDeviceClass.voltage
+            device_class = SensorDeviceClass.VOLTAGE
         elif self.metric.lower().startswith("energy."):
-            device_class = SensorDeviceClass.energy
+            device_class = SensorDeviceClass.ENERGY
         elif (
             self.metric
             in [
@@ -139,19 +141,19 @@ class ChargePointMetric(SensorEntity):
             ]
             or self.metric.lower().startswith("frequency")
         ):
-            device_class = SensorDeviceClass.frequency
+            device_class = SensorDeviceClass.FREQUENCY
         elif self.metric.lower().startswith("power."):
-            device_class = SensorDeviceClass.power
+            device_class = SensorDeviceClass.POWER
         elif self.metric.lower().startswith("temperature."):
-            device_class = SensorDeviceClass.temperature
+            device_class = SensorDeviceClass.TEMPERATURE
         elif self.metric.lower().startswith("timestamp.") or self.metric in [
             HAChargerDetails.config_response.value,
             HAChargerDetails.data_response.value,
             HAChargerStatuses.heartbeat.value,
         ]:
-            device_class = SensorDeviceClass.timestamp
+            device_class = SensorDeviceClass.TIMESTAMP
         elif self.metric.lower().startswith("soc"):
-            device_class = SensorDeviceClass.battery
+            device_class = SensorDeviceClass.BATTERY
         return device_class
 
     @property
