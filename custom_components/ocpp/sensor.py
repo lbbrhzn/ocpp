@@ -1,6 +1,5 @@
 """Sensor platform for ocpp."""
 from dataclasses import dataclass
-import numbers
 
 import homeassistant
 from homeassistant.components.sensor import (
@@ -160,7 +159,7 @@ class ChargePointMetric(SensorEntity):
     def native_value(self):
         """Return the state of the sensor, rounding if a number."""
         value = self.central_system.get_metric(self.cp_id, self.metric)
-        if isinstance(value, numbers.NUMBER):
+        if isinstance(value, float):
             value = round(value, self.entity_description.scale)
         return value
 
