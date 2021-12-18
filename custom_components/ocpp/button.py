@@ -23,7 +23,7 @@ class OcppButtonDescription(ButtonEntityDescription):
 
 
 @dataclass
-class OcppButtonDescription(ButtonEntityDescription, OcppButtonDescriptionMixin):
+class OcppButtonDescription(ButtonEntityDescription):
     """Class to describe a Button entity."""
 
 
