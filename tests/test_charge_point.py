@@ -79,6 +79,7 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
+
     async def test_services(hass, socket_enabled):
         """Test service operations."""
         SERVICES = [
