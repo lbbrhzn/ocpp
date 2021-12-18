@@ -1,6 +1,6 @@
 """Button platform for ocpp."""
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.components.button import (
     DOMAIN as BUTTON_DOMAIN,
@@ -19,7 +19,7 @@ from .enums import HAChargerServices
 class OcppButtonDescription(ButtonEntityDescription):
     """Class to describe a Button entity."""
 
-    press_action: str = ""
+    press_action: str | None = None
 
 
 BUTTONS: Final = [
