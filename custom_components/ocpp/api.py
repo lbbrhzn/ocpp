@@ -848,7 +848,7 @@ class ChargePoint(cp):
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[metric].value = round(float(metric_value), 1)
+                    self._metrics[metric].value = float(metric_value)
                     self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
@@ -880,7 +880,7 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
-                        self._metrics[measurand].value = round(float(value), 1)
+                        self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
                     if location is not None:
                         self._metrics[measurand].extra_attr[
@@ -915,11 +915,9 @@ class ChargePoint(cp):
                 / 60
             )
         if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = round(
-                float(self._metrics[DEFAULT_MEASURAND].value or 0)
-                - float(self._metrics[csess.meter_start.value].value),
-                1,
-            )
+            self._metrics[csess.session_energy.value].value = float(
+                self._metrics[DEFAULT_MEASURAND].value or 0
+            ) - float(self._metrics[csess.meter_start.value].value)
         else:
             self._metrics[csess.session_energy.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
@@ -1016,11 +1014,9 @@ class ChargePoint(cp):
         self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
 
         if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = round(
-                int(meter_stop) / 1000
-                - float(self._metrics[csess.meter_start.value].value),
-                1,
-            )
+            self._metrics[csess.session_energy.value].value = int(
+                meter_stop
+            ) / 1000 - float(self._metrics[csess.meter_start.value].value)
         if Measurand.current_import.value in self._metrics:
             self._metrics[Measurand.current_import.value].value = 0
         if Measurand.power_active_import.value in self._metrics:
