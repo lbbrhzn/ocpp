@@ -42,7 +42,7 @@ BUTTONS: Final = [
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
- 
+
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
