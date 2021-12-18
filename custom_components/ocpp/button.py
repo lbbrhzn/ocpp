@@ -22,11 +22,6 @@ class OcppButtonDescription(ButtonEntityDescription):
     press_action: str = ""
 
 
-@dataclass
-class OcppButtonDescription(ButtonEntityDescription):
-    """Class to describe a Button entity."""
-
-
 BUTTONS: Final = [
     OcppButtonDescription(
         key="reset",
