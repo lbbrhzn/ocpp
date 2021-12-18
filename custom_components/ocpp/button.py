@@ -1,6 +1,6 @@
 """Button platform for ocpp."""
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final
 
 from homeassistant.components.button import (
     DOMAIN as BUTTON_DOMAIN,
