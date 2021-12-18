@@ -135,7 +135,7 @@ class ChargePointMetric(SensorEntity):
         device_class = None
         if self.metric.lower().startswith("current."):
             device_class = SensorDeviceClass.CURRENT
-        elif self.metric.lower().startswith("voltage."):
+        elif self.metric.lower().startswith("voltage"):
             device_class = SensorDeviceClass.VOLTAGE
         elif self.metric.lower().startswith("energy."):
             device_class = SensorDeviceClass.ENERGY
