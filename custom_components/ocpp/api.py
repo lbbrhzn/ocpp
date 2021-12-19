@@ -1112,7 +1112,7 @@ class ChargePoint(cp):
         """Notify user via HA web frontend."""
         await self.hass.services.async_call(
             PN_DOMAIN,
-            "persistent_notification.create",
+            "create",
             service_data={
                 "title": title,
                 "message": msg,
