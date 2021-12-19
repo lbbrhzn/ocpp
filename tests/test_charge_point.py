@@ -53,7 +53,7 @@ async def test_cms_responses(hass, socket_enabled):
                 SWITCH_DOMAIN,
                 SERVICE_TURN_ON,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
                 },
                 blocking=True,
             )
@@ -63,7 +63,7 @@ async def test_cms_responses(hass, socket_enabled):
                 SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
                 },
                 blocking=True,
             )
