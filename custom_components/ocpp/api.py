@@ -7,7 +7,7 @@ from math import sqrt
 import time
 from typing import Dict
 
-from homeassistant.component.persistent_notification import DOMAIN as PN_DOMAIN
+from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
