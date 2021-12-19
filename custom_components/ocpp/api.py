@@ -7,6 +7,7 @@ from math import sqrt
 import time
 from typing import Dict
 
+from homeassistant.component.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
@@ -474,6 +475,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Clear profile failed with response {resp.status}"
+            )
             return False
 
     async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
@@ -521,6 +525,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Set charging profile failed with response {resp.status}"
+            )
             return False
 
     async def set_availability(self, state: bool = True):
@@ -540,6 +547,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Set availability failed with response {resp.status}"
+            )
             return False
 
     async def start_transaction(self):
@@ -556,6 +566,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Start transaction failed with response {resp.status}"
+            )
             return False
 
     async def stop_transaction(self):
@@ -568,6 +581,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Stop transaction failed with response {resp.status}"
+            )
             return False
 
     async def reset(self, typ: str = ResetType.hard):
@@ -579,6 +595,7 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(f"Warning: Reset failed with response {resp.status}")
             return False
 
     async def unlock(self, connector_id: int = 1):
@@ -589,6 +606,7 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(f"Warning: Unlock failed with response {resp.status}")
             return False
 
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
@@ -649,6 +667,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Data transfer failed with response {resp.status}"
+            )
             return False
 
     async def get_configuration(self, key: str = ""):
@@ -668,6 +689,7 @@ class ChargePoint(cp):
             return value
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
+            await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
 
     async def configure(self, key: str, value: str):
@@ -692,6 +714,7 @@ class ChargePoint(cp):
 
             if key_value.get(om.readonly.name, False):
                 _LOGGER.warning("%s is a read only setting", key)
+                await self.notify_ha(f"Warning: {key} is read-only")
 
         req = call.ChangeConfigurationPayload(key=key, value=value)
 
@@ -702,9 +725,13 @@ class ChargePoint(cp):
             ConfigurationStatus.not_supported,
         ]:
             _LOGGER.warning("%s while setting %s to %s", resp.status, key, value)
+            await self.notify_ha(
+                f"Warning: charger reported {resp.status} while setting {key}={value}"
+            )
 
         if resp.status == ConfigurationStatus.reboot_required:
             self._requires_reboot = True
+            await self.notify_ha(f"A reboot is required to apply {key}={value}")
 
     async def _get_specific_response(self, unique_id, timeout):
         # The ocpp library silences CallErrors by default. See
@@ -934,6 +961,7 @@ class ChargePoint(cp):
             status=RegistrationStatus.accepted.value,
         )
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+        self.hass.async_create_task(self.notify_ha(f"Charger {self.id} booted"))
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
             om.charge_point_model.name, None
@@ -982,12 +1010,16 @@ class ChargePoint(cp):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
         self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotificationPayload()
 
     @on(Action.DiagnosticsStatusNotification)
     def on_diagnostics_status(self, status, **kwargs):
         """Handle diagnostics status notification."""
         _LOGGER.info("Diagnostics upload status: %s", status)
+        self.hass.async_create_task(
+            self.notify_ha(f"Diagnostics upload status: {status}")
+        )
         return call_result.DiagnosticsStatusNotificationPayload()
 
     @on(Action.Authorize)
@@ -1041,7 +1073,10 @@ class ChargePoint(cp):
     @on(Action.DataTransfer)
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
-        _LOGGER.debug("Datatransfer received from %s: %s", self.id, kwargs)
+        _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
+        self.hass.async_create_task(
+            self.notify_ha(f"Data transfer received from {self.id}, check HA log")
+        )
         return call_result.DataTransferPayload(status=DataTransferStatus.accepted.value)
 
     @on(Action.Heartbeat)
@@ -1072,6 +1107,19 @@ class ChargePoint(cp):
     def get_ha_unit(self, measurand: str):
         """Return home assistant unit of given measurand."""
         return self._metrics[measurand].ha_unit
+
+    async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
+        """Notify user via HA web frontend."""
+        await self.hass.services.async_call(
+            PN_DOMAIN,
+            "persistent_notification.create",
+            service_data={
+                "title": title,
+                "message": msg,
+            },
+            blocking=False,
+        )
+        return True
 
 
 class Metric:
