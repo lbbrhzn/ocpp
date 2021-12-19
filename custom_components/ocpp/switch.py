@@ -82,7 +82,7 @@ class ChargePointSwitch(SwitchEntity):
         self.cp_id = cp_id
         self.central_system = central_system
         self.entity_description = description
-        self._state = self.entity_description.default
+        self._state = self.entity_description.default_state
         self._attr_unique_id = ".".join(
             [SWITCH_DOMAIN, DOMAIN, self.cp_id, self.entity_description.key]
         )
