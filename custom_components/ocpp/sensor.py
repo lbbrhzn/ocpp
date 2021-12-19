@@ -31,11 +31,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     entities = []
     SENSORS = []
     for metric in list(
-        set(
-            entry.data[CONF_MONITORED_VARIABLES].split(",")
-            + list(HAChargerSession)
-            + list(HAChargerStatuses)
-        )
+        set(entry.data[CONF_MONITORED_VARIABLES].split(",") + list(HAChargerSession))
     ):
         SENSORS.append(
             OcppSensorDescription(
@@ -43,12 +39,20 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 name=metric,
             )
         )
-    for metric in list(HAChargerDetails):
+    for metric in list(HAChargerStatuses):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
                 name=metric,
                 entity_category=EntityCategory.DIAGNOSTIC,
+            )
+        )
+    for metric in list(HAChargerDetails):
+        SENSORS.append(
+            OcppSensorDescription(
+                key=metric.lower(),
+                name=metric,
+                entity_category=EntityCategory.SYSTEM,
             )
         )
     for ent in SENSORS:
