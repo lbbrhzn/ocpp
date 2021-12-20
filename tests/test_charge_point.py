@@ -4,7 +4,7 @@ from datetime import datetime, timezone  # timedelta,
 
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button.const import SERVICE_PRESS
-from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
+from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN, NUMBERS
 from homeassistant.components.switch import (
     DOMAIN as SWITCH_DOMAIN,
     SERVICE_TURN_OFF,
@@ -16,7 +16,7 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, NUMBERS, SWITCHES
+from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
@@ -116,9 +116,7 @@ async def test_cms_responses(hass, socket_enabled):
                 "set_value",
                 service_data={"value": "10"},
                 blocking=True,
-                target={
-                    ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.test_cpid_{number['name'].lower()}"
-                },
+                target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.test_cpid_{number.key}"},
             )
             assert result
 

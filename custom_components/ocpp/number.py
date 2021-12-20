@@ -1,20 +1,44 @@
 """Number platform for ocpp."""
-from homeassistant.components.input_number import InputNumber
-from homeassistant.components.number import NumberEntity
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final
+
+from homeassistant.components.number import (
+    DOMAIN as NUMBER_DOMAIN,
+    NumberEntity,
+    NumberEntityDescription,
+)
+from homeassistant.helpers.entity import DeviceInfo
 import voluptuous as vol
 
 from .api import CentralSystem
-from .const import (
-    CONF_CPID,
-    CONF_INITIAL,
-    CONF_MAX,
-    CONF_MIN,
-    CONF_STEP,
-    DEFAULT_CPID,
-    DOMAIN,
-    NUMBERS,
-)
+from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
 from .enums import Profiles
+
+
+@dataclass
+class OcppNumberDescription(NumberEntityDescription):
+    """Class to describe a Number entity."""
+
+    initial_value: float | None = None
+    # can be removed when dev branch released
+    max_value: float | None = None
+    min_value: float | None = None
+    step: float | None = None
+
+
+NUMBERS: Final = [
+    NumberEntityDescription(
+        key="maximum_current",
+        name="Maximum_Current",
+        icon=ICON,
+        initial_value=32,
+        min_value=0,
+        max_value=32,
+        step=1,
+    ),
+]
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -24,37 +48,43 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     entities = []
 
-    for cfg in NUMBERS:
-        entities.append(Number(central_system, cp_id, cfg))
+    for ent in NUMBERS:
+        entities.append(OcppNumber(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
 
-class Number(InputNumber, NumberEntity):
+class OcppNumber(NumberEntity):
     """Individual slider for setting charge rate."""
 
-    def __init__(self, central_system: CentralSystem, cp_id: str, config: dict):
+    entity_description: OcppNumberDescription
+
+    def __init__(
+        self,
+        central_system: CentralSystem,
+        cp_id: str,
+        description: OcppNumberDescription,
+    ):
         """Initialize a Number instance."""
-        super().__init__(config)
         self.cp_id = cp_id
         self.central_system = central_system
-        self.id = ".".join(["number", self.cp_id, config["name"]])
-        self._name = ".".join([self.cp_id, config["name"]])
-        self.entity_id = "number." + "_".join([self.cp_id, config["name"]])
-        self._attr_max_value: float = config[CONF_MAX]
-        self._attr_min_value: float = config[CONF_MIN]
-        self._attr_step: float = config[CONF_STEP]
-        self._attr_value: float = config[CONF_INITIAL]
-
-    @property
-    def unique_id(self):
-        """Return the unique id of this entity."""
-        return self.id
-
-    @property
-    def name(self):
-        """Return the name of this entity."""
-        return self._name
+        self.entity_description = description
+        self._attr_unique_id = ".".join(
+            [NUMBER_DOMAIN, self.cp_id, self.entity_description.key]
+        )
+        self._name = ".".join([self.cp_id, self.entity_description.name])
+        self.entity_id = (
+            NUMBER_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.cp_id)},
+            via_device=(DOMAIN, self.central_system.id),
+        )
+        self._attr_value = self.entity_description.initial_value
+        # can be removed when dev branch released
+        self._attr_max_value = self.entity_description.max_value
+        self._attr_min_value = self.entity_description.min_value
+        self._attr_step = self.entity_description.step
 
     @property
     def available(self) -> bool:
@@ -64,19 +94,6 @@ class Number(InputNumber, NumberEntity):
         ):
             return False
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
-
-    @property
-    def state(self):
-        """Return the state of the component."""
-        return self._attr_value
-
-    @property
-    def device_info(self):
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, self.cp_id)},
-            "via_device": (DOMAIN, self.central_system.id),
-        }
 
     async def async_set_value(self, value):
         """Set new value."""
