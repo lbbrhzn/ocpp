@@ -1,4 +1,6 @@
 """Switch platform for ocpp."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -24,10 +26,10 @@ from .enums import HAChargerServices, HAChargerStatuses
 class OcppSwitchDescription(SwitchEntityDescription):
     """Class to describe a Switch entity."""
 
-    on_action: str = ""
-    off_action: str = ""
-    metric_state: str = ""
-    metric_condition: str = ""
+    on_action: str | None = None
+    off_action: str | None = None
+    metric_state: str | None = None
+    metric_condition: str | None = None
     default_state: bool = False
 
 
@@ -104,7 +106,7 @@ class ChargePointSwitch(SwitchEntity):
     def is_on(self) -> bool:
         """Return true if the switch is on."""
         """Test metric state against condition if present"""
-        if self.entity_description.metric_state != "":
+        if self.entity_description.metric_state is not None:
             resp = self.central_system.get_metric(
                 self.cp_id, self.entity_description.metric_state
             )
@@ -123,7 +125,7 @@ class ChargePointSwitch(SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         """Response is True if successful but State is False"""
-        if self.entity_description.off_action == "":
+        if self.entity_description.off_action is None:
             resp = True
         elif self.entity_description.off_action == self.entity_description.on_action:
             resp = await self.central_system.set_charger_state(
@@ -151,11 +153,3 @@ class ChargePointSwitch(SwitchEntity):
                 value = value * 1000
             return value
         return None
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        return {
-            "unique_id": self.unique_id,
-            "integration": DOMAIN,
-        }
