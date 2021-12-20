@@ -29,7 +29,7 @@ class OcppNumberDescription(NumberEntityDescription):
 
 
 NUMBERS: Final = [
-    NumberEntityDescription(
+    OcppNumberDescription(
         key="maximum_current",
         name="Maximum_Current",
         icon=ICON,
