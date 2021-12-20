@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
 import time
-from typing import Dict
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
@@ -854,7 +853,7 @@ class ChargePoint(cp):
                     self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
-    def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
+    def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
         self._metrics[csess.transaction_id.value].value = kwargs.get(
             om.transaction_id.name, 0
@@ -870,7 +869,7 @@ class ChargePoint(cp):
                 location = sv.get(om.location.value, None)
                 context = sv.get(om.context.value, None)
 
-                if len(sv.keys()) == 1:  # Backwars compatibility
+                if len(sv.keys()) == 1:  # Backwards compatibility
                     measurand = DEFAULT_MEASURAND
                     unit = DEFAULT_ENERGY_UNIT
 
