@@ -74,7 +74,7 @@ async def test_cms_responses(hass, socket_enabled):
             result = await hass.services.async_call(
                 BUTTON_DOMAIN,
                 SERVICE_PRESS,
-                {ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{button.key}"},
+                {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.test_cpid_{button.key}"},
                 blocking=True,
             )
             assert result
