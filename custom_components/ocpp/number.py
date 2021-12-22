@@ -10,6 +10,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
 )
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 import voluptuous as vol
 
 from .api import CentralSystem
