@@ -1,12 +1,14 @@
 """Representation of a OCCP Entities."""
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
 import time
-from typing import Dict
 
+from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
 from homeassistant.core import HomeAssistant
@@ -474,6 +476,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Clear profile failed with response {resp.status}"
+            )
             return False
 
     async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
@@ -521,6 +526,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Set charging profile failed with response {resp.status}"
+            )
             return False
 
     async def set_availability(self, state: bool = True):
@@ -540,6 +548,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Set availability failed with response {resp.status}"
+            )
             return False
 
     async def start_transaction(self):
@@ -556,6 +567,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Start transaction failed with response {resp.status}"
+            )
             return False
 
     async def stop_transaction(self):
@@ -568,6 +582,9 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Stop transaction failed with response {resp.status}"
+            )
             return False
 
     async def reset(self, typ: str = ResetType.hard):
@@ -579,6 +596,7 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(f"Warning: Reset failed with response {resp.status}")
             return False
 
     async def unlock(self, connector_id: int = 1):
@@ -589,6 +607,7 @@ class ChargePoint(cp):
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(f"Warning: Unlock failed with response {resp.status}")
             return False
 
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
@@ -644,11 +663,14 @@ class ChargePoint(cp):
             )
             self._metrics[cdet.data_response.value].value = datetime.now(
                 tz=timezone.utc
-            ).isoformat()
+            )
             self._metrics[cdet.data_response.value].extra_attr = {message_id: resp.data}
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
+            await self.notify_ha(
+                f"Warning: Data transfer failed with response {resp.status}"
+            )
             return False
 
     async def get_configuration(self, key: str = ""):
@@ -663,11 +685,12 @@ class ChargePoint(cp):
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             self._metrics[cdet.config_response.value].value = datetime.now(
                 tz=timezone.utc
-            ).isoformat()
+            )
             self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
+            await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
 
     async def configure(self, key: str, value: str):
@@ -692,6 +715,7 @@ class ChargePoint(cp):
 
             if key_value.get(om.readonly.name, False):
                 _LOGGER.warning("%s is a read only setting", key)
+                await self.notify_ha(f"Warning: {key} is read-only")
 
         req = call.ChangeConfigurationPayload(key=key, value=value)
 
@@ -702,9 +726,13 @@ class ChargePoint(cp):
             ConfigurationStatus.not_supported,
         ]:
             _LOGGER.warning("%s while setting %s to %s", resp.status, key, value)
+            await self.notify_ha(
+                f"Warning: charger reported {resp.status} while setting {key}={value}"
+            )
 
         if resp.status == ConfigurationStatus.reboot_required:
             self._requires_reboot = True
+            await self.notify_ha(f"A reboot is required to apply {key}={value}")
 
     async def _get_specific_response(self, unique_id, timeout):
         # The ocpp library silences CallErrors by default. See
@@ -848,11 +876,11 @@ class ChargePoint(cp):
                     self._metrics[metric].value = float(metric_value) / 1000
                     self._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[metric].value = round(float(metric_value), 1)
+                    self._metrics[metric].value = float(metric_value)
                     self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
-    def on_meter_values(self, connector_id: int, meter_value: Dict, **kwargs):
+    def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
         self._metrics[csess.transaction_id.value].value = kwargs.get(
             om.transaction_id.name, 0
@@ -868,7 +896,7 @@ class ChargePoint(cp):
                 location = sv.get(om.location.value, None)
                 context = sv.get(om.context.value, None)
 
-                if len(sv.keys()) == 1:  # Backwars compatibility
+                if len(sv.keys()) == 1:  # Backwards compatibility
                     measurand = DEFAULT_MEASURAND
                     unit = DEFAULT_ENERGY_UNIT
 
@@ -880,7 +908,7 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
-                        self._metrics[measurand].value = round(float(value), 1)
+                        self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
                     if location is not None:
                         self._metrics[measurand].extra_attr[
@@ -915,11 +943,9 @@ class ChargePoint(cp):
                 / 60
             )
         if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = round(
-                float(self._metrics[DEFAULT_MEASURAND].value or 0)
-                - float(self._metrics[csess.meter_start.value].value),
-                1,
-            )
+            self._metrics[csess.session_energy.value].value = float(
+                self._metrics[DEFAULT_MEASURAND].value or 0
+            ) - float(self._metrics[csess.meter_start.value].value)
         else:
             self._metrics[csess.session_energy.value].value = 0
         self.hass.async_create_task(self.central.update(self.central.cpid))
@@ -934,6 +960,7 @@ class ChargePoint(cp):
             status=RegistrationStatus.accepted.value,
         )
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
+        self.hass.async_create_task(self.notify_ha(f"Charger {self.id} booted"))
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
             om.charge_point_model.name, None
@@ -982,12 +1009,16 @@ class ChargePoint(cp):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
         self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotificationPayload()
 
     @on(Action.DiagnosticsStatusNotification)
     def on_diagnostics_status(self, status, **kwargs):
         """Handle diagnostics status notification."""
         _LOGGER.info("Diagnostics upload status: %s", status)
+        self.hass.async_create_task(
+            self.notify_ha(f"Diagnostics upload status: {status}")
+        )
         return call_result.DiagnosticsStatusNotificationPayload()
 
     @on(Action.Authorize)
@@ -1016,11 +1047,9 @@ class ChargePoint(cp):
         self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
 
         if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = round(
-                int(meter_stop) / 1000
-                - float(self._metrics[csess.meter_start.value].value),
-                1,
-            )
+            self._metrics[csess.session_energy.value].value = int(
+                meter_stop
+            ) / 1000 - float(self._metrics[csess.meter_start.value].value)
         if Measurand.current_import.value in self._metrics:
             self._metrics[Measurand.current_import.value].value = 0
         if Measurand.power_active_import.value in self._metrics:
@@ -1041,16 +1070,19 @@ class ChargePoint(cp):
     @on(Action.DataTransfer)
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
-        _LOGGER.debug("Datatransfer received from %s: %s", self.id, kwargs)
+        _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
+        self.hass.async_create_task(
+            self.notify_ha(f"Data transfer received from {self.id}, check HA log")
+        )
         return call_result.DataTransferPayload(status=DataTransferStatus.accepted.value)
 
     @on(Action.Heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.HeartbeatPayload(current_time=now)
+        return call_result.HeartbeatPayload(current_time=now.isoformat())
 
     @property
     def supported_features(self) -> int:
@@ -1072,6 +1104,19 @@ class ChargePoint(cp):
     def get_ha_unit(self, measurand: str):
         """Return home assistant unit of given measurand."""
         return self._metrics[measurand].ha_unit
+
+    async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
+        """Notify user via HA web frontend."""
+        await self.hass.services.async_call(
+            PN_DOMAIN,
+            "create",
+            service_data={
+                "title": title,
+                "message": msg,
+            },
+            blocking=False,
+        )
+        return True
 
 
 class Metric:

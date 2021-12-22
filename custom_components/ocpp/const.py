@@ -92,17 +92,30 @@ SWITCH_AVAILABILITY = {
 
 SWITCHES = [SWITCH_CHARGE, SWITCH_AVAILABILITY]
 
+NUMBER_MAX_CURRENT = {
+    CONF_NAME: "Maximum_Current",
+    CONF_ICON: ICON,
+    CONF_MIN: 0,
+    CONF_MAX: 32,
+    CONF_STEP: 1,
+    CONF_INITIAL: 32,
+    CONF_MODE: MODE_SLIDER,
+    CONF_UNIT_OF_MEASUREMENT: "A",
+}
+NUMBERS = [NUMBER_MAX_CURRENT]
+
+# Where a HA unit does not exist use Ocpp unit
 UNITS_OCCP_TO_HA = {
     UnitOfMeasure.wh: ha.ENERGY_WATT_HOUR,
     UnitOfMeasure.kwh: ha.ENERGY_KILO_WATT_HOUR,
-    UnitOfMeasure.varh: None,
-    UnitOfMeasure.kvarh: None,
+    UnitOfMeasure.varh: UnitOfMeasure.varh,
+    UnitOfMeasure.kvarh: UnitOfMeasure.kvarh,
     UnitOfMeasure.w: ha.POWER_WATT,
     UnitOfMeasure.kw: ha.POWER_KILO_WATT,
     UnitOfMeasure.va: ha.POWER_VOLT_AMPERE,
-    UnitOfMeasure.kva: None,
-    UnitOfMeasure.var: None,
-    UnitOfMeasure.kvar: None,
+    UnitOfMeasure.kva: UnitOfMeasure.kva,
+    UnitOfMeasure.var: UnitOfMeasure.var,
+    UnitOfMeasure.kvar: UnitOfMeasure.kvar,
     UnitOfMeasure.a: ha.ELECTRIC_CURRENT_AMPERE,
     UnitOfMeasure.v: ha.ELECTRIC_POTENTIAL_VOLT,
     UnitOfMeasure.celsius: ha.TEMP_CELSIUS,

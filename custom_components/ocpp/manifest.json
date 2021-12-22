@@ -6,6 +6,7 @@
   "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
   "version": "0.3.26",
   "config_flow": true,
+  "after_dependencies": ["persistent_notification"],
   "codeowners": [
     "@lbbrhzn"
   ],

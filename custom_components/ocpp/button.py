@@ -1,4 +1,6 @@
 """Button platform for ocpp."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Final
 
@@ -19,7 +21,7 @@ from .enums import HAChargerServices
 class OcppButtonDescription(ButtonEntityDescription):
     """Class to describe a Button entity."""
 
-    press_action: str = ""
+    press_action: str | None = None
 
 
 BUTTONS: Final = [
@@ -42,6 +44,7 @@ BUTTONS: Final = [
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
+
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 

@@ -16,9 +16,10 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, SWITCHES
+from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, NUMERS, SWITCHES
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from custom_components.ocpp.number import NUMBERS
+from custom_components.ocpp.switch import SWITCHES
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -53,7 +54,7 @@ async def test_cms_responses(hass, socket_enabled):
                 SWITCH_DOMAIN,
                 SERVICE_TURN_ON,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
                 },
                 blocking=True,
             )
@@ -63,7 +64,7 @@ async def test_cms_responses(hass, socket_enabled):
                 SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
                 service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch['name'].lower()}"
+                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
                 },
                 blocking=True,
             )
@@ -75,7 +76,7 @@ async def test_cms_responses(hass, socket_enabled):
             result = await hass.services.async_call(
                 BUTTON_DOMAIN,
                 SERVICE_PRESS,
-                {ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{button.key}"},
+                {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.test_cpid_{button.key}"},
                 blocking=True,
             )
             assert result
