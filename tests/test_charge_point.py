@@ -15,8 +15,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
-from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, NUMERS, SWITCHES
+from custom_components.ocpp.button import BUTTONS, NUMBERS, SWITCHES
+from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
