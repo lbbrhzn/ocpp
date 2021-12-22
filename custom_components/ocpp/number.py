@@ -54,7 +54,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class OcppNumber(NumberEntity):
+class OcppNumber(NumberEntity, RestoreEntity):
     """Individual slider for setting charge rate."""
 
     entity_description: OcppNumberDescription
@@ -80,11 +80,17 @@ class OcppNumber(NumberEntity):
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),
         )
-        self._attr_value = self.entity_description.initial_value
+        self._attr_native_value = self.entity_description.initial_value
         # can be removed when dev branch released
         self._attr_max_value = self.entity_description.max_value
         self._attr_min_value = self.entity_description.min_value
         self._attr_step = self.entity_description.step
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        await self.async_base_added_to_hass()
+        if state := await self.async_get_last_state():
+            self._attr_native_value = state.state
 
     @property
     def available(self) -> bool:
@@ -106,5 +112,5 @@ class OcppNumber(NumberEntity):
 
         resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
         if resp is True:
-            self._attr_value = num_value
+            self._attr_native_value = num_value
             self.async_write_ha_state()
