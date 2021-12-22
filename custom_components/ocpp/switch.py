@@ -1,10 +1,59 @@
 """Switch platform for ocpp."""
-from typing import Any
+from __future__ import annotations
 
-from homeassistant.components.switch import SwitchEntity
+from dataclasses import dataclass
+from typing import Any, Final
+
+from homeassistant.components.switch import (
+    DOMAIN as SWITCH_DOMAIN,
+    SwitchEntity,
+    SwitchEntityDescription,
+)
+from homeassistant.const import POWER_KILO_WATT
+from homeassistant.helpers.entity import DeviceInfo
+
+from ocpp.v16.enums import ChargePointStatus, Measurand
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON, SWITCHES
+from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
+from .enums import HAChargerServices, HAChargerStatuses
+
+
+# Switch configuration definitions
+# At a minimum define switch name and on service call,
+# metric and condition combination can be used to drive switch state, use default to set initial state to True
+@dataclass
+class OcppSwitchDescription(SwitchEntityDescription):
+    """Class to describe a Switch entity."""
+
+    on_action: str | None = None
+    off_action: str | None = None
+    metric_state: str | None = None
+    metric_condition: str | None = None
+    default_state: bool = False
+
+
+SWITCHES: Final = [
+    OcppSwitchDescription(
+        key="charge_control",
+        name="Charge_Control",
+        icon=ICON,
+        on_action=HAChargerServices.service_charge_start.name,
+        off_action=HAChargerServices.service_charge_stop.name,
+        metric_state=HAChargerStatuses.status.value,
+        metric_condition=ChargePointStatus.charging.value,
+    ),
+    OcppSwitchDescription(
+        key="availability",
+        name="Availability",
+        icon=ICON,
+        on_action=HAChargerServices.service_availability.name,
+        off_action=HAChargerServices.service_availability.name,
+        metric_state=HAChargerStatuses.status.value,
+        metric_condition=ChargePointStatus.available.value,
+        default_state=True,
+    ),
+]
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -23,24 +72,30 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class ChargePointSwitch(SwitchEntity):
     """Individual switch for charge point."""
 
-    def __init__(self, central_system: CentralSystem, cp_id: str, serv_desc):
+    entity_description: OcppSwitchDescription
+
+    def __init__(
+        self,
+        central_system: CentralSystem,
+        cp_id: str,
+        description: OcppSwitchDescription,
+    ):
         """Instantiate instance of a ChargePointSwitch."""
         self.cp_id = cp_id
-        self._state = False
         self.central_system = central_system
-        self._purpose = serv_desc
-        if self._purpose.get("default") is not None:
-            self._state = bool(self._purpose["default"])
-        else:
-            self._state = False
-        self._id = ".".join(["switch", DOMAIN, self.cp_id, self._purpose["name"]])
-        self._name = ".".join([self.cp_id, self._purpose["name"]])
-        self.entity_id = "switch." + "_".join([self.cp_id, self._purpose["name"]])
-
-    @property
-    def unique_id(self):
-        """Return the unique id of this entity."""
-        return self._id
+        self.entity_description = description
+        self._state = self.entity_description.default_state
+        self._attr_unique_id = ".".join(
+            [SWITCH_DOMAIN, DOMAIN, self.cp_id, self.entity_description.key]
+        )
+        self._attr_name = ".".join([self.cp_id, self.entity_description.name])
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.cp_id)},
+            via_device=(DOMAIN, self.central_system.id),
+        )
+        self.entity_id = (
+            SWITCH_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
+        )
 
     @property
     def available(self) -> bool:
@@ -51,9 +106,11 @@ class ChargePointSwitch(SwitchEntity):
     def is_on(self) -> bool:
         """Return true if the switch is on."""
         """Test metric state against condition if present"""
-        if self._purpose.get("metric") is not None:
-            resp = self.central_system.get_metric(self.cp_id, self._purpose["metric"])
-            if resp == self._purpose["condition"]:
+        if self.entity_description.metric_state is not None:
+            resp = self.central_system.get_metric(
+                self.cp_id, self.entity_description.metric_state
+            )
+            if resp == self.entity_description.metric_condition:
                 self._state = True
             else:
                 self._state = False
@@ -62,55 +119,37 @@ class ChargePointSwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         self._state = await self.central_system.set_charger_state(
-            self.cp_id, self._purpose["on"]
+            self.cp_id, self.entity_description.on_action
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         """Response is True if successful but State is False"""
-        if self._purpose.get("off") is None:
+        if self.entity_description.off_action is None:
             resp = True
-        elif self._purpose["off"] == self._purpose["on"]:
+        elif self.entity_description.off_action == self.entity_description.on_action:
             resp = await self.central_system.set_charger_state(
-                self.cp_id, self._purpose["off"], False
+                self.cp_id, self.entity_description.off_action, False
             )
         else:
             resp = await self.central_system.set_charger_state(
-                self.cp_id, self._purpose["off"]
+                self.cp_id, self.entity_description.off_action
             )
         self._state = not resp
 
     @property
-    def current_power_w(self) -> float:
+    def current_power_w(self) -> Any:
         """Return the current power usage in W."""
-        return self.central_system.get_metric(self.cp_id, "Power.Active.Import")
-
-    @property
-    def name(self):
-        """Return the name of this entity."""
-        return self._name
-
-    @property
-    def icon(self):
-        """Return the icon to use in the frontend, if any."""
-        return ICON
-
-    @property
-    def device_info(self):
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, self.cp_id)},
-            "via_device": (DOMAIN, self.central_system.id),
-        }
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        return {
-            "unique_id": self.unique_id,
-            "integration": DOMAIN,
-        }
-
-    async def async_update(self):
-        """Get the latest data and update the states."""
-        pass
+        if self.entity_description.key == "charge_control":
+            value = self.central_system.get_metric(
+                self.cp_id, Measurand.power_active_import.value
+            )
+            if (
+                self.central_system.get_ha_unit(
+                    self.cp_id, Measurand.power_active_import.value
+                )
+                == POWER_KILO_WATT
+            ):
+                value = value * 1000
+            return value
+        return None
