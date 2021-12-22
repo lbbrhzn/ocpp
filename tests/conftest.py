@@ -22,7 +22,7 @@ def skip_notifications_fixture():
     """Skip notification calls."""
     with patch("homeassistant.components.persistent_notification.async_create"), patch(
         "homeassistant.components.persistent_notification.async_dismiss"
-    ):
+    ), patch("custom_components.ocpp.api.ChargePoint.notify_ha"):
         yield
 
 
