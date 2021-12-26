@@ -73,7 +73,7 @@ class OcppNumber(NumberEntity, RestoreEntity):
         self._attr_unique_id = ".".join(
             [NUMBER_DOMAIN, self.cp_id, self.entity_description.key]
         )
-        self._name = ".".join([self.cp_id, self.entity_description.name])
+        self._attr_name = ".".join([self.cp_id, self.entity_description.name])
         self.entity_id = (
             NUMBER_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
         )
