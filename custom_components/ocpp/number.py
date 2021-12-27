@@ -55,7 +55,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class OcppNumber(NumberEntity, RestoreEntity):
+class OcppNumber(RestoreEntity, NumberEntity):
     """Individual slider for setting charge rate."""
 
     entity_description: OcppNumberDescription
