@@ -2,7 +2,7 @@
   "name": "Open Charge Point Protocol (OCPP)",
   "content_in_root": false,
   "domains": [
-    "button"
+    "button",
     "number",
     "sensor",
     "switch"    
