@@ -41,7 +41,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 name=metric,
             )
         )
-    for metric in list(HAChargerStatuses + HAChargerDetails):
+    for metric in list(HAChargerStatuses) + list(HAChargerDetails):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
