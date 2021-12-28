@@ -41,7 +41,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 name=metric,
             )
         )
-    for metric in list(HAChargerStatuses):
+    for metric in list(HAChargerStatuses + HAChargerDetails):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
@@ -49,14 +49,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
-    for metric in list(HAChargerDetails):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric,
-                entity_category=EntityCategory.SYSTEM,
-            )
-        )
+
     for ent in SENSORS:
         entities.append(
             ChargePointMetric(
