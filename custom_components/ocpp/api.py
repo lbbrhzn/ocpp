@@ -50,6 +50,7 @@ from .const import (
     CONF_CPID,
     CONF_CSID,
     CONF_HOST,
+    CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
@@ -372,6 +373,10 @@ class ChargePoint(cp):
             await self.configure(
                 ckey.meter_value_sample_interval.value,
                 str(self.entry.data[CONF_METER_INTERVAL]),
+            )
+            await self.configure(
+                ckey.clock_aligned_data_interval.value,
+                str(self.entry.data[CONF_IDLE_INTERVAL]),
             )
             #            await self.configure(
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
