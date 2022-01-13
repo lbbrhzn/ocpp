@@ -1,1 +1,1 @@
-homeassistant==2021.12.9
+homeassistant>=2021.12.0
