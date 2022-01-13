@@ -207,7 +207,7 @@ class ChargePoint(cpclass):
                     {
                         "key": key[0],
                         "readonly": False,
-                        "value": "Core,FirmwareManagement,RemoteTrigger,SmartCharging",
+                        "value": ["Core","FirmwareManagement","RemoteTrigger","SmartCharging"],
                     }
                 ]
             )
