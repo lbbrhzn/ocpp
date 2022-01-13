@@ -1,2 +1,1 @@
-pre-commit==2.13.0
 homeassistant==2021.12.9
