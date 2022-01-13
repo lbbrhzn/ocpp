@@ -6,12 +6,14 @@ from .const import (
     CONF_CPID,
     CONF_CSID,
     CONF_HOST,
+    CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_HOST,
+    DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
     DEFAULT_PORT,
@@ -26,6 +28,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
+        vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
     }
 )
 STEP_USER_MEASURANDS_SCHEMA = vol.Schema(

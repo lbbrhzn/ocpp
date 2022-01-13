@@ -2,15 +2,14 @@
 import homeassistant.components.input_number as input_number
 import homeassistant.const as ha
 
-from ocpp.v16.enums import ChargePointStatus, Measurand, UnitOfMeasure
-
-from .enums import HAChargerServices, HAChargerStatuses
+from ocpp.v16.enums import Measurand, UnitOfMeasure
 
 CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CSID = "csid"
 CONF_HOST = ha.CONF_HOST
 CONF_ICON = ha.CONF_ICON
+CONF_IDLE_INTERVAL = "idle_interval"
 CONF_METER_INTERVAL = "meter_interval"
 CONF_MODE = ha.CONF_MODE
 CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
@@ -27,6 +26,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9000
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
 DEFAULT_METER_INTERVAL = 60
+DEFAULT_IDLE_INTERVAL = 900
 DOMAIN = "ocpp"
 ICON = "mdi:ev-station"
 SLEEP_TIME = 60
@@ -70,27 +70,6 @@ DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
 DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
-
-# Switch configuration definitions
-# At a minimum define switch name and on service call,
-# metric and condition combination can be used to drive switch state, use default to set initial state to True
-SWITCH_CHARGE = {
-    "name": "Charge_Control",
-    "on": HAChargerServices.service_charge_start.name,
-    "off": HAChargerServices.service_charge_stop.name,
-    "metric": HAChargerStatuses.status.value,
-    "condition": ChargePointStatus.charging.value,
-}
-SWITCH_AVAILABILITY = {
-    "name": "Availability",
-    "on": HAChargerServices.service_availability.name,
-    "off": HAChargerServices.service_availability.name,
-    "default": True,
-    "metric": HAChargerStatuses.status.value,
-    "condition": ChargePointStatus.available.value,
-}
-
-SWITCHES = [SWITCH_CHARGE, SWITCH_AVAILABILITY]
 
 # Where a HA unit does not exist use Ocpp unit
 UNITS_OCCP_TO_HA = {
