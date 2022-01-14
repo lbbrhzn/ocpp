@@ -1,3 +1,3 @@
 homeassistant>=2021.12.0
-ocpp==0.8.3
-websockets==10.1
+ocpp==0.10.0
+bsockets==10.1
