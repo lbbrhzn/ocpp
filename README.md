@@ -56,7 +56,7 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 ![image](https://user-images.githubusercontent.com/8673442/129495720-2ed9f0d6-b736-409a-8e14-fbd447dea078.png)
 
 ### 7. Start Charging ###
-- Use the charge control to unlock the charger and start the charging process.
+- Use the charge control switch to start the charging process.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495891-91f40bf9-f48e-4ced-b303-bf0fb77898f3.png)
 
