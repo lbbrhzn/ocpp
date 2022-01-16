@@ -47,8 +47,8 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 
 ![image](https://user-images.githubusercontent.com/8673442/129495159-611f4f86-aa90-4320-a69c-ce0870f6ee8c.png)
 
-- Sensor entities will have the value 'Unavailable' until the charger successfully connects.
-- Sensor entities will have the value 'Unknown' until their value is succesfully read from the charger.
+- An entity will have the value 'Unavailable' until the charger successfully connects.
+- An entity will have the value 'Unknown' until its value has been read from the charger.
 
 ### 6. Configure your Charger ###
 
