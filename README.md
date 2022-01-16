@@ -47,13 +47,14 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 ![image](https://user-images.githubusercontent.com/8673442/129495159-611f4f86-aa90-4320-a69c-ce0870f6ee8c.png)
 
 ### 6. Configure your Charger ###
+
 - Configure your charger to use the OCPP websocket of your Central System (e.g. ws://homeassistant.local:9000). This is charger specific, so consult your manual.
 - Some chargers require the protocol section 'ws://' to be removed, or require the url to end with a '/'.
 - Some chargers require the url to be specified as an IP addres, i.e. '192.168.178.1:9000'
+- You may need to reboot your charger before the changes become effective.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495720-2ed9f0d6-b736-409a-8e14-fbd447dea078.png)
 
-- You may need to reboot your charger before the changes become effective.
 
 ### 7. Start Charging ###
 - Use the switches to unlock the charger and start the charging process.
