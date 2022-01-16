@@ -59,7 +59,9 @@ from .const import (
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_HOST,
+    DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
+    DEFAULT_METER_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SUBPROTOCOL,
@@ -122,12 +124,12 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self.hass = hass
         self.entry = entry
-        self.host = entry.data.get(CONF_HOST) or DEFAULT_HOST
-        self.port = entry.data.get(CONF_PORT) or DEFAULT_PORT
-        self.csid = entry.data.get(CONF_CSID) or DEFAULT_CSID
-        self.cpid = entry.data.get(CONF_CPID) or DEFAULT_CPID
+        self.host = entry.data.get(CONF_HOST, DEFAULT_HOST)
+        self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+        self.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
+        self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
-        self.subprotocol = entry.data.get(CONF_SUBPROTOCOL) or DEFAULT_SUBPROTOCOL
+        self.subprotocol = entry.data.get(CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL)
         self._server = None
         self.config = entry.data
         self.id = entry.entry_id
@@ -372,11 +374,11 @@ class ChargePoint(cp):
             )
             await self.configure(
                 ckey.meter_value_sample_interval.value,
-                str(self.entry.data[CONF_METER_INTERVAL]),
+                str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
             )
             await self.configure(
                 ckey.clock_aligned_data_interval.value,
-                str(self.entry.data[CONF_IDLE_INTERVAL]),
+                str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
             )
             #            await self.configure(
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
