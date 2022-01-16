@@ -33,7 +33,8 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 - The default host address '0.0.0.0' will listen to all interfaces on your home assistant server.
 
 ![image](https://user-images.githubusercontent.com/8673442/129494762-08052152-f057-4563-93b5-5aae810dfbfc.png)
-- Select which measurands you would like to become available as sensor entities.
+- Select which measurands you would like to become available as sensor entities.  
+- Most chargers only support a subset of all possible measurands. This depends most on the Feature profiles that are supported by the charger.
 
 ![image](https://user-images.githubusercontent.com/8673442/129494804-cdff0dfb-a421-490c-af1e-e939f01455b4.png)
 
@@ -45,6 +46,9 @@ This is a Home Assistant integration for Electric Vehicle chargers that support 
 - At the bottom of the Entities panel, click on 'Add to Lovelace' to add the entities to your dashboard.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495159-611f4f86-aa90-4320-a69c-ce0870f6ee8c.png)
+
+- Sensor entities will have the value 'Unavailable' until the charger successfully connects.
+- Sensor entities will have the value 'Unknown' until their value is succesfully read from the charger.
 
 ### 6. Configure your Charger ###
 
