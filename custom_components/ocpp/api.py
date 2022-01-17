@@ -370,7 +370,7 @@ class ChargePoint(cp):
             await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
                 ckey.meter_values_sampled_data.value,
-                self.entry.data[CONF_MONITORED_VARIABLES],
+                self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
             )
             await self.configure(
                 ckey.meter_value_sample_interval.value,
