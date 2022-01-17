@@ -13,7 +13,7 @@
     "@lbbrhzn"
   ],
   "requirements": [
-    "ocpp==0.11.0",
+    "ocpp==0.12.1",
     "websockets>=10.0"
   ]
 }
