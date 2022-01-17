@@ -1,11 +1,11 @@
 repos:
   - repo: https://github.com/asottile/pyupgrade
-    rev: v2.19.4
+    rev: v2.31.0
     hooks:
       - id: pyupgrade
         args: [--py37-plus]
   - repo: https://github.com/psf/black
-    rev: 21.6b0
+    rev: 21.12b0
     hooks:
       - id: black
         args:
@@ -22,7 +22,7 @@ repos:
           - --quiet-level=2
         exclude_types: [csv, json]
   - repo: https://gitlab.com/pycqa/flake8
-    rev: 3.9.2
+    rev: 4.0.1
     hooks:
       - id: flake8
         additional_dependencies:
@@ -38,12 +38,12 @@ repos:
           - --format=custom
           - --configfile=bandit.yaml
         files: ^(custom_components|homeassistant|script|tests|)/.+\.py$
-  - repo: https://github.com/pre-commit/mirrors-isort
-    rev: v5.9.1
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.10.1
     hooks:
       - id: isort
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.0.1
+    rev: v4.1.0
     hooks:
       - id: check-executables-have-shebangs
         stages: [manual]
