@@ -9,14 +9,14 @@ from homeassistant.components.number import (
     NumberEntity,
     NumberEntityDescription,
 )
-from homeassistant.core import callback, HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 import voluptuous as vol
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DATA_UPDATED, DOMAIN, ICON
+from .const import CONF_CPID, DATA_UPDATED, DEFAULT_CPID, DOMAIN, ICON
 from .enums import Profiles
 
 
