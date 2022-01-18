@@ -509,7 +509,6 @@ class ChargePoint(cp):
                 ckey.charge_profile_max_stack_level.value
             )
             stack_level = int(resp)
-
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
@@ -532,11 +531,33 @@ class ChargePoint(cp):
         if resp.status == ChargingProfileStatus.accepted:
             return True
         else:
-            _LOGGER.warning("Failed with response: %s", resp.status)
-            await self.notify_ha(
-                f"Warning: Set charging profile failed with response {resp.status}"
+            _LOGGER.debug(
+                "ChargePointMaxProfile is not supported by this charger, trying TxDefaultProfile instead..."
             )
-            return False
+            req = call.SetChargingProfilePayload(
+                connector_id=0,
+                cs_charging_profiles={
+                    om.charging_profile_id.value: 8,
+                    om.stack_level.value: stack_level,
+                    om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
+                    om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
+                    om.charging_schedule.value: {
+                        om.charging_rate_unit.value: units,
+                        om.charging_schedule_period.value: [
+                            {om.start_period.value: 0, om.limit.value: lim}
+                        ],
+                    },
+                },
+            )
+            resp = await self.call(req)
+            if resp.status == ChargingProfileStatus.accepted:
+                return True
+            else:
+                _LOGGER.warning("Failed with response: %s", resp.status)
+                await self.notify_ha(
+                    f"Warning: Set charging profile failed with response {resp.status}"
+                )
+                return False
 
     async def set_availability(self, state: bool = True):
         """Become operative."""
