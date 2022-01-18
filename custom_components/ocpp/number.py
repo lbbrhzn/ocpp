@@ -9,12 +9,14 @@ from homeassistant.components.number import (
     NumberEntity,
     NumberEntityDescription,
 )
+from homeassistant.core import callback, HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 import voluptuous as vol
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
+from .const import CONF_CPID, DEFAULT_CPID, DATA_UPDATED, DOMAIN, ICON
 from .enums import Profiles
 
 
@@ -50,7 +52,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     entities = []
 
     for ent in NUMBERS:
-        entities.append(OcppNumber(central_system, cp_id, ent))
+        entities.append(OcppNumber(hass, central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
@@ -62,12 +64,14 @@ class OcppNumber(RestoreEntity, NumberEntity):
 
     def __init__(
         self,
+        hass: HomeAssistant,
         central_system: CentralSystem,
         cp_id: str,
         description: OcppNumberDescription,
     ):
         """Initialize a Number instance."""
         self.cp_id = cp_id
+        self._hass = hass
         self.central_system = central_system
         self.entity_description = description
         self._attr_unique_id = ".".join(
@@ -92,6 +96,13 @@ class OcppNumber(RestoreEntity, NumberEntity):
         await super().async_added_to_hass()
         if state := await self.async_get_last_state():
             self._attr_value = state.state
+        async_dispatcher_connect(
+            self._hass, DATA_UPDATED, self._schedule_immediate_update
+        )
+
+    @callback
+    def _schedule_immediate_update(self):
+        self.async_schedule_update_ha_state(True)
 
     @property
     def available(self) -> bool:
