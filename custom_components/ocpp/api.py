@@ -516,7 +516,7 @@ class ChargePoint(cp):
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose.value: ChargingProfilePurposeType.charge_point_max_profile.value,
+                    om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
                     om.charging_schedule.value: {
                         om.charging_rate_unit.value: units,
                         om.charging_schedule_period.value: [
