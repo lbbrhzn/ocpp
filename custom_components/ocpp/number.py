@@ -90,16 +90,12 @@ class OcppNumber(RestoreEntity, NumberEntity):
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
         await super().async_added_to_hass()
-        if state := await self.async_get_last_state():
+        if state := await RestoreEntity.async_get_last_state(self):
             self._attr_value = state.state
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        if not (
-            Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
-        ):
-            return False
         return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     async def async_set_value(self, value):
@@ -109,6 +105,13 @@ class OcppNumber(RestoreEntity, NumberEntity):
         if num_value < self._attr_min_value or num_value > self._attr_max_value:
             raise vol.Invalid(
                 f"Invalid value for {self.entity_id}: {value} (range {self._attr_min_value} - {self._attr_max_value})"
+            )
+
+        if not (
+            Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
+        ):
+            raise vol.Invalid(
+                f"Charger does not support smart charging profile {self.cpi_id}"
             )
 
         resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
