@@ -785,7 +785,7 @@ class ChargePoint(cp):
                 pong_waiter = await self._connection.ping()
                 await pong_waiter
                 t1 = time.perf_counter()
-                latency = round(1000*(t1 - t0))
+                latency = round(1000 * (t1 - t0))
                 _LOGGER.info(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': {latency} ms",
                 )
