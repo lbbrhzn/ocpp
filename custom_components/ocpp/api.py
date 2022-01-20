@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
+import websockets.connection
 import websockets.server
 
 from ocpp.exceptions import NotImplementedError
@@ -145,14 +146,16 @@ class CentralSystem:
             self.host,
             self.port,
             subprotocols=[self.subprotocol],
+            ping_interval=None,
             ping_timeout=None,
             close_timeout=10,
         )
         self._server = server
         return self
 
-    async def on_connect(self, websocket, path: str):
+    async def on_connect(self, websocket: websockets.connection, path: str):
         """Request handler executed for every new OCPP connection."""
+
         try:
             requested_protocols = websocket.request_headers["Sec-WebSocket-Protocol"]
         except KeyError:
@@ -279,7 +282,7 @@ class ChargePoint(cp):
     def __init__(
         self,
         id: str,
-        connection,
+        connection: websockets.connection,
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystem,
@@ -774,6 +777,31 @@ class ChargePoint(cp):
 
         return resp
 
+    async def measure_connection_latency(self):
+        """Measure the connection latency."""
+        try:
+            while True:
+                t0 = time.perf_counter()
+                pong_waiter = await self._connection.ping()
+                await pong_waiter
+                t1 = time.perf_counter()
+                latency = round(1000*(t1 - t0))
+                _LOGGER.info(
+                    f"Connection latency from '{self.central.csid}' to '{self.id}': {latency} ms",
+                )
+                self._metrics[cstat.latency.value].value = latency
+                self._metrics[cstat.latency.value].unit = "ms"
+                await asyncio.sleep(20)
+        except websockets.exceptions.ConnectionClosed as connection_closed_exception:
+            _LOGGER.debug(
+                f"Connection closed to '{self.id}': {connection_closed_exception}"
+            )
+        except Exception as other_exception:
+            _LOGGER.error(
+                f"Unexpected exception in connection to '{self.id}': {other_exception}",
+                exc_info=True,
+            )
+
     async def _handle_call(self, msg):
         try:
             await super()._handle_call(msg)
@@ -784,7 +812,9 @@ class ChargePoint(cp):
     async def start(self):
         """Start charge point."""
         try:
-            await asyncio.gather(super().start(), self.post_connect())
+            await asyncio.gather(
+                super().start(), self.measure_connection_latency(), self.post_connect()
+            )
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
@@ -792,13 +822,13 @@ class ChargePoint(cp):
             self._connection = None
             self.status = STATE_UNAVAILABLE
 
-    async def reconnect(self, connection):
+    async def reconnect(self, connection: websockets.connection):
         """Reconnect charge point."""
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
         try:
             self.status = STATE_OK
-            await super().start()
+            await asyncio.gather(super().start(), self.measure_connection_latency())
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
