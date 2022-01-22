@@ -104,14 +104,14 @@ class OcppNumber(RestoreEntity, NumberEntity):
     def _schedule_immediate_update(self):
         self.async_schedule_update_ha_state(True)
 
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        if not (
-            Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
-        ):
-            return False
-        return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
+    # @property
+    # def available(self) -> bool:
+    #    """Return if entity is available."""
+    #    if not (
+    #        Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
+    #    ):
+    #        return False
+    #    return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
 
     async def async_set_value(self, value):
         """Set new value."""
@@ -122,7 +122,12 @@ class OcppNumber(RestoreEntity, NumberEntity):
                 f"Invalid value for {self.entity_id}: {value} (range {self._attr_min_value} - {self._attr_max_value})"
             )
 
-        resp = await self.central_system.set_max_charge_rate_amps(self.cp_id, num_value)
-        if resp is True:
-            self._attr_value = num_value
-            self.async_write_ha_state()
+        if self.central_system.get_available(
+            self.cp_id
+        ) and Profiles.SMART & self.central_system.get_supported_features(self.cp_id):
+            resp = await self.central_system.set_max_charge_rate_amps(
+                self.cp_id, num_value
+            )
+            if resp is True:
+                self._attr_value = num_value
+                self.async_write_ha_state()
