@@ -782,16 +782,22 @@ class ChargePoint(cp):
         try:
             while True:
                 t0 = time.perf_counter()
-                pong_waiter = await self._connection.ping()
-                await pong_waiter
+
+                pong_waiter = await asyncio.wait_for(
+                    self._connection.ping(), timeout=20
+                )
+                await asyncio.wait_for(pong_waiter, timeout=20)
                 t1 = time.perf_counter()
                 latency = round(1000 * (t1 - t0))
-                _LOGGER.info(
+                _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': {latency} ms",
                 )
                 self._metrics[cstat.latency.value].value = latency
                 self._metrics[cstat.latency.value].unit = "ms"
                 await asyncio.sleep(20)
+
+        except asyncio.TimeoutError:
+            _LOGGER.debug(f"Timeout in connection '{self.id}'")
         except websockets.exceptions.ConnectionClosed as connection_closed_exception:
             _LOGGER.debug(
                 f"Connection closed to '{self.id}': {connection_closed_exception}"
@@ -801,6 +807,8 @@ class ChargePoint(cp):
                 f"Unexpected exception in connection to '{self.id}': {other_exception}",
                 exc_info=True,
             )
+        finally:
+            await self._connection.close()
 
     async def _handle_call(self, msg):
         try:
