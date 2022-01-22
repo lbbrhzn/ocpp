@@ -827,7 +827,6 @@ class ChargePoint(cp):
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
             await self._connection.close()
-            self._connection = None
             self.status = STATE_UNAVAILABLE
 
     async def reconnect(self, connection: websockets.connection):
@@ -841,7 +840,6 @@ class ChargePoint(cp):
             _LOGGER.debug("Websockets exception: %s", e)
         finally:
             await self._connection.close()
-            self._connection = None
             self.status = STATE_UNAVAILABLE
 
     async def async_update_device_info(self, boot_info: dict):
