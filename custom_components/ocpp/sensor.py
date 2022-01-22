@@ -117,15 +117,20 @@ class ChargePointMetric(SensorEntity):
         state_class = None
         if self.device_class is SensorDeviceClass.ENERGY:
             state_class = SensorStateClass.TOTAL_INCREASING
-        elif self.device_class in [
-            SensorDeviceClass.CURRENT,
-            SensorDeviceClass.VOLTAGE,
-            SensorDeviceClass.POWER,
-            SensorDeviceClass.TEMPERATURE,
-            SensorDeviceClass.BATTERY,
-            SensorDeviceClass.FREQUENCY,
-        ]:
+        elif (
+            self.device_class
+            in [
+                SensorDeviceClass.CURRENT,
+                SensorDeviceClass.VOLTAGE,
+                SensorDeviceClass.POWER,
+                SensorDeviceClass.TEMPERATURE,
+                SensorDeviceClass.BATTERY,
+                SensorDeviceClass.FREQUENCY,
+            ]
+            or self.metric == HAChargerStatuses.latency
+        ):
             state_class = SensorStateClass.MEASUREMENT
+
         return state_class
 
     @property
