@@ -131,6 +131,31 @@ async def test_cms_responses(hass, socket_enabled):
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1",
+        subprotocols=["unsupported_subprotocol"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_unsupported", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_boot_notification(),
+                    cp.send_authorize(),
+                    cp.send_heartbeat(),
+                    cp.send_status_notification(),
+                    cp.send_firmware_status(),
+                    cp.send_data_transfer(),
+                    cp.send_start_transaction(),
+                    cp.send_stop_transaction(),
+                    cp.send_meter_data(),
+                ),
+                timeout=3,
+            )
+        except websockets.exceptions.ConnectionClosedOK:
+            pass
+
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
