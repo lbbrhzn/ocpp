@@ -779,36 +779,43 @@ class ChargePoint(cp):
 
     async def measure_connection_latency(self):
         """Measure the connection latency."""
-        try:
-            while True:
+        timeout = 20
+        self._metrics[cstat.latency.value].unit = "ms"
+        exitLoop = False
+        while exitLoop is False:
+            try:
+                if self._connection.open is False:
+                    _LOGGER.debug(f"Connection not open '{self.id}'")
+                    await asyncio.sleep(timeout)
+                    continue
                 t0 = time.perf_counter()
-
                 pong_waiter = await asyncio.wait_for(
-                    self._connection.ping(), timeout=20
+                    self._connection.ping(), timeout=timeout
                 )
-                await asyncio.wait_for(pong_waiter, timeout=20)
+                await asyncio.wait_for(pong_waiter, timeout=timeout)
                 t1 = time.perf_counter()
                 latency = round(1000 * (t1 - t0))
                 _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': {latency} ms",
                 )
                 self._metrics[cstat.latency.value].value = latency
-                self._metrics[cstat.latency.value].unit = "ms"
-                await asyncio.sleep(20)
+                await asyncio.sleep(timeout)
 
-        except asyncio.TimeoutError:
-            _LOGGER.debug(f"Timeout in connection '{self.id}'")
-        except websockets.exceptions.ConnectionClosed as connection_closed_exception:
-            _LOGGER.debug(
-                f"Connection closed to '{self.id}': {connection_closed_exception}"
-            )
-        except Exception as other_exception:
-            _LOGGER.error(
-                f"Unexpected exception in connection to '{self.id}': {other_exception}",
-                exc_info=True,
-            )
-        finally:
-            await self._connection.close()
+            except asyncio.TimeoutError:
+                _LOGGER.debug(f"Timeout in connection '{self.id}'")
+                self._metrics[cstat.latency.value].value = timeout * 1000
+                continue
+            except websockets.exceptions.ConnectionClosed as connection_closed_exception:
+                _LOGGER.debug(
+                    f"Connection closed to '{self.id}': {connection_closed_exception}"
+                )
+                exitLoop = True
+            except Exception as other_exception:
+                _LOGGER.error(
+                    f"Unexpected exception in connection to '{self.id}': {other_exception}",
+                    exc_info=True,
+                )
+                continue
 
     async def _handle_call(self, msg):
         try:
