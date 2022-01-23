@@ -199,6 +199,8 @@ async def test_cms_responses(hass, socket_enabled):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    cs.charge_points[cs.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.cpid].trigger_status_notification(),
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
@@ -316,7 +318,7 @@ class ChargePoint(cpclass):
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
-        return call_result.SetChargingProfilePayload(ChargingProfileStatus.accepted)
+        return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
 
     @on(Action.ClearChargingProfile)
     def on_clear_charging_profile(self, **kwargs):
