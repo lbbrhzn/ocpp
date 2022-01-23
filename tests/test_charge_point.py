@@ -318,7 +318,7 @@ class ChargePoint(cpclass):
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
-        return call_result.SetChargingProfilePayload(ChargingProfileStatus.accepted)
+        return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
 
     @on(Action.ClearChargingProfile)
     def on_clear_charging_profile(self, **kwargs):
