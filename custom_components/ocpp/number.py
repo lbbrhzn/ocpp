@@ -132,5 +132,3 @@ class OcppNumber(RestoreEntity, NumberEntity):
             if resp is True:
                 self._attr_value = num_value
                 self.async_write_ha_state()
-        else:
-            self._attr_available = False
