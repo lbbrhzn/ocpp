@@ -90,6 +90,8 @@ class OcppNumber(RestoreEntity, NumberEntity):
         self._attr_max_value = self.entity_description.max_value
         self._attr_min_value = self.entity_description.min_value
         self._attr_step = self.entity_description.step
+        self._attr_should_poll = False
+        self._attr_available = True
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
