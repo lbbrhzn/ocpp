@@ -777,13 +777,14 @@ class ChargePoint(cp):
 
         return resp
 
-    async def measure_connection_latency(self):
-        """Measure the connection latency."""
+    async def monitor_connection(self):
+        """Monitor the connection, by measuring the connection latency."""
         timeout = 20
-        self._metrics[cstat.latency.value].unit = "ms"
-        exitLoop = False
-        while exitLoop is False:
-            try:
+        self._metrics[cstat.latency_ping.value].unit = "ms"
+        self._metrics[cstat.latency_pong.value].unit = "ms"
+
+        try:
+            while True:
                 if self._connection.open is False:
                     _LOGGER.debug(f"Connection not open '{self.id}'")
                     await asyncio.sleep(timeout)
@@ -792,31 +793,30 @@ class ChargePoint(cp):
                 pong_waiter = await asyncio.wait_for(
                     self._connection.ping(), timeout=timeout
                 )
-                await asyncio.wait_for(pong_waiter, timeout=timeout)
                 t1 = time.perf_counter()
-                latency = round(1000 * (t1 - t0))
+                await asyncio.wait_for(pong_waiter, timeout=timeout)
+                t2 = time.perf_counter()
+                latency_ping = round(1000 * (t1 - t0))
+                latency_pong = round(1000 * (t2 - t1))
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': {latency} ms",
+                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
-                self._metrics[cstat.latency.value].value = latency
+                self._metrics[cstat.latency_ping.value].value = latency_ping
+                self._metrics[cstat.latency_pong.value].value = latency_pong
                 await asyncio.sleep(timeout)
 
-            except asyncio.TimeoutError:
-                _LOGGER.debug(f"Timeout in connection '{self.id}'")
-                self._metrics[cstat.latency.value].value = timeout * 1000
-                asyncio.sleep(timeout)
-                continue
-            except websockets.exceptions.ConnectionClosed as connection_closed_exception:
-                _LOGGER.debug(
-                    f"Connection closed to '{self.id}': {connection_closed_exception}"
-                )
-                exitLoop = True
-            except Exception as other_exception:
-                _LOGGER.error(
-                    f"Unexpected exception in connection to '{self.id}': {other_exception}",
-                    exc_info=True,
-                )
-                continue
+        except asyncio.TimeoutError:
+            _LOGGER.debug(f"Timeout in connection '{self.id}'")
+            self._connection.close()
+        except websockets.exceptions.ConnectionClosed as connection_closed_exception:
+            _LOGGER.debug(
+                f"Connection closed to '{self.id}': {connection_closed_exception}"
+            )
+        except Exception as other_exception:
+            _LOGGER.error(
+                f"Unexpected exception in connection to '{self.id}': {other_exception}",
+                exc_info=True,
+            )
 
     async def _handle_call(self, msg):
         try:
@@ -829,7 +829,7 @@ class ChargePoint(cp):
         """Start charge point."""
         try:
             await asyncio.gather(
-                super().start(), self.measure_connection_latency(), self.post_connect()
+                super().start(), self.monitor_connection(), self.post_connect()
             )
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
@@ -843,7 +843,7 @@ class ChargePoint(cp):
         self._metrics[cstat.reconnects.value].value += 1
         try:
             self.status = STATE_OK
-            await asyncio.gather(super().start(), self.measure_connection_latency())
+            await asyncio.gather(super().start(), self.monitor_connection())
         except websockets.exceptions.WebSocketException as e:
             _LOGGER.debug("Websockets exception: %s", e)
         finally:

@@ -127,7 +127,8 @@ class ChargePointMetric(SensorEntity):
                 SensorDeviceClass.BATTERY,
                 SensorDeviceClass.FREQUENCY,
             ]
-            or self.metric == HAChargerStatuses.latency
+            or self.metric == HAChargerStatuses.latency_ping
+            or self.metric == HAChargerStatuses.latency_pong
         ):
             state_class = SensorStateClass.MEASUREMENT
 
