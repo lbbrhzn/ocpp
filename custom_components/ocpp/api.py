@@ -804,6 +804,7 @@ class ChargePoint(cp):
             except asyncio.TimeoutError:
                 _LOGGER.debug(f"Timeout in connection '{self.id}'")
                 self._metrics[cstat.latency.value].value = timeout * 1000
+                asyncio.sleep(timeout)
                 continue
             except websockets.exceptions.ConnectionClosed as connection_closed_exception:
                 _LOGGER.debug(
