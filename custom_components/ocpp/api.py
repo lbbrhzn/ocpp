@@ -839,6 +839,10 @@ class ChargePoint(cp):
 
     async def reconnect(self, connection: websockets.connection):
         """Reconnect charge point."""
+        # close old connection, if needed
+        if self._connection is not None:
+            await self._connection.close()
+        # use the new connection
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
         try:
