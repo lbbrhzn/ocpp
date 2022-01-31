@@ -367,6 +367,7 @@ class ChargePoint(cp):
             await asyncio.sleep(2)
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
+                await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration(ckey.heartbeat_interval.value)
@@ -839,6 +840,10 @@ class ChargePoint(cp):
 
     async def reconnect(self, connection: websockets.connection):
         """Reconnect charge point."""
+        # close old connection, if needed
+        if self._connection is not None:
+            await self._connection.close()
+        # use the new connection
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
         try:

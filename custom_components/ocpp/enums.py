@@ -26,7 +26,7 @@ class HAChargerStatuses(str, Enum):
     status = "Status"
     heartbeat = "Heartbeat"
     latency_ping = "Latency.Ping"
-    latency_pong = "Latency.Ping"
+    latency_pong = "Latency.Pong"
     error_code = "Error.Code"
     stop_reason = "Stop.Reason"
     firmware_status = "Status.Firmware"
