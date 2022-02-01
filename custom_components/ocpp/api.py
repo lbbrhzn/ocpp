@@ -818,7 +818,6 @@ class ChargePoint(cp):
                 await asyncio.sleep(timeout)
 
         except asyncio.TimeoutError as timeout_exception:
-            _LOGGER.debug(f"Timeout in connection '{self.id}'")
             self._metrics[cstat.latency_ping.value].value = latency_ping
             self._metrics[cstat.latency_pong.value].value = latency_pong
             raise timeout_exception
@@ -841,10 +840,15 @@ class ChargePoint(cp):
         self.tasks = [asyncio.ensure_future(task) for task in tasks]
         try:
             await asyncio.gather(*self.tasks)
-        except websockets.exceptions.WebSocketException:
-            pass
-        except Exception as any_exception:
-            _LOGGER.error(f"Unexpected exception: '{any_exception}'", exc_info=1)
+        except asyncio.TimeoutError:
+            _LOGGER.debug(f"Timeout in connection '{self.id}'")
+        except websockets.exceptions.WebSocketException as websocket_exception:
+            _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
+        except Exception as other_exception:
+            _LOGGER.error(
+                f"Unexpected exception in connection to '{self.id}': '{other_exception}'",
+                exc_info=True,
+            )
         finally:
             await self.stop()
 
