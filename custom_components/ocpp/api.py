@@ -153,7 +153,9 @@ class CentralSystem:
         self._server = server
         return self
 
-    async def on_connect(self, websocket, path: str):
+    async def on_connect(
+        self, websocket: websockets.server.WebSocketServerProtocol, path: str
+    ):
         """Request handler executed for every new OCPP connection."""
 
         try:
@@ -180,20 +182,26 @@ class CentralSystem:
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         try:
             if self.cpid not in self.charge_points:
-                _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
+                _LOGGER.info(
+                    f"Charger {cp_id} connected to {self.host}:{self.port} websocket={websocket.id}."
+                )
                 charge_point = ChargePoint(
                     cp_id, websocket, self.hass, self.entry, self
                 )
                 self.charge_points[self.cpid] = charge_point
                 await charge_point.start()
             else:
-                _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
+                _LOGGER.info(
+                    f"Charger {cp_id} reconnected to {self.host}:{self.port} websocket={websocket.id}."
+                )
                 charge_point: ChargePoint = self.charge_points[self.cpid]
                 await charge_point.reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
         finally:
-            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
+            _LOGGER.info(
+                f"Charger {cp_id} disconnected from {self.host}:{self.port} websocket={websocket.id}."
+            )
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -282,7 +290,7 @@ class ChargePoint(cp):
     def __init__(
         self,
         id: str,
-        connection: websockets.connection,
+        connection: websockets.server.WebSocketServerProtocol,
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystem,
@@ -302,6 +310,7 @@ class ChargePoint(cp):
         self._transactionId = 0
         self.triggered_boot_notification = False
         self.received_boot_notification = False
+        self.tasks = None
         self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
@@ -783,12 +792,13 @@ class ChargePoint(cp):
 
         return resp
 
-    async def monitor_connection(self, connection):
+    async def monitor_connection(self):
         """Monitor the connection, by measuring the connection latency."""
         timeout = 20
         self._metrics[cstat.latency_ping.value].unit = "ms"
         self._metrics[cstat.latency_pong.value].unit = "ms"
 
+        connection = self._connection
         try:
             while connection.open:
                 time0 = time.perf_counter()
@@ -807,20 +817,11 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 await asyncio.sleep(timeout)
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as timeout_exception:
             _LOGGER.debug(f"Timeout in connection '{self.id}'")
             self._metrics[cstat.latency_ping.value].value = latency_ping
             self._metrics[cstat.latency_pong.value].value = latency_pong
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        except Exception as other_exception:
-            _LOGGER.error(
-                f"Unexpected exception in connection to '{self.id}': {other_exception}",
-                exc_info=True,
-            )
-        if connection.open:
-            await connection.close()
-        _LOGGER.debug(f"Stopped monitoring connection to '{self.id}'")
+            raise timeout_exception
 
     async def _handle_call(self, msg):
         try:
@@ -831,36 +832,40 @@ class ChargePoint(cp):
 
     async def start(self):
         """Start charge point."""
-        connection = self._connection
-        try:
-            await asyncio.gather(
-                super().start(),
-                self.monitor_connection(connection),
-                self.post_connect(),
-            )
-        except websockets.exceptions.WebSocketException as e:
-            _LOGGER.debug("Websockets exception: %s", e)
-        finally:
-            await connection.close()
-            self.status = STATE_UNAVAILABLE
+        await self.run(
+            [super().start(), self.post_connect(), self.monitor_connection()]
+        )
 
-    async def reconnect(self, connection):
-        """Reconnect charge point."""
-        # close old connection, if needed
+    async def run(self, tasks):
+        """Run a specified list of tasks."""
+        self.tasks = [asyncio.ensure_future(task) for task in tasks]
+        try:
+            await asyncio.gather(*self.tasks)
+        except websockets.exceptions.WebSocketException:
+            pass
+        except Exception as any_exception:
+            _LOGGER.error(f"Unexpected exception: '{any_exception}'", exc_info=1)
+        finally:
+            await self.stop()
+
+    async def stop(self):
+        """Close connection and cancel ongoing tasks."""
+        self.status = STATE_UNAVAILABLE
         if self._connection.open:
+            _LOGGER.debug(f"Closing websocket: '{self._connection.id}'")
             await self._connection.close()
-            await asyncio.sleep(1)
-        # use the new connection
+        for task in self.tasks:
+            task.cancel()
+
+    async def reconnect(self, connection: websockets.server.WebSocketServerProtocol):
+        """Reconnect charge point."""
+        _LOGGER.debug(f"Reconnect {connection.id}")
+
+        await self.stop()
+        self.status = STATE_OK
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
-        try:
-            self.status = STATE_OK
-            await asyncio.gather(super().start(), self.monitor_connection(connection))
-        except websockets.exceptions.WebSocketException as websocket_exception:
-            _LOGGER.debug("Websockets exception: %s", websocket_exception)
-        finally:
-            await connection.close()
-            self.status = STATE_UNAVAILABLE
+        await self.run([super().start(), self.monitor_connection()])
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
