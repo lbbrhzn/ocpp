@@ -56,6 +56,9 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
     CONF_SUBPROTOCOL,
+    CONF_WEBSOCKET_CLOSE_TIMEOUT,
+    CONF_WEBSOCKET_PING_INTERVAL,
+    CONF_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
@@ -66,6 +69,9 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SUBPROTOCOL,
+    DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
+    DEFAULT_WEBSOCKET_PING_INTERVAL,
+    DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
@@ -129,6 +135,15 @@ class CentralSystem:
         self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
         self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
+        self.websocket_close_timeout = entry.data.get(
+            CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
+        )
+        self.websocket_ping_interval = entry.data.get(
+            CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
+        )
+        self.websocket_ping_timeout = entry.data.get(
+            CONF_WEBSOCKET_PING_TIMEOUT, DEFAULT_WEBSOCKET_PING_TIMEOUT
+        )
 
         self.subprotocol = entry.data.get(CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL)
         self._server = None
@@ -146,9 +161,9 @@ class CentralSystem:
             self.host,
             self.port,
             subprotocols=[self.subprotocol],
-            ping_interval=None,
+            ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
-            close_timeout=10,
+            close_timeout=self.websocket_close_timeout,
         )
         self._server = server
         return self
@@ -781,21 +796,23 @@ class ChargePoint(cp):
 
     async def monitor_connection(self):
         """Monitor the connection, by measuring the connection latency."""
-        timeout = 20
         self._metrics[cstat.latency_ping.value].unit = "ms"
         self._metrics[cstat.latency_pong.value].unit = "ms"
-
         connection = self._connection
         try:
             while connection.open:
-                await asyncio.sleep(timeout)
+                await asyncio.sleep(self.central.websocket_ping_interval)
                 time0 = time.perf_counter()
-                latency_ping = timeout * 1000
-                pong_waiter = await asyncio.wait_for(connection.ping(), timeout=timeout)
+                latency_ping = self.central.websocket_ping_timeout * 1000
+                pong_waiter = await asyncio.wait_for(
+                    connection.ping(), timeout=self.central.websocket_ping_timeout
+                )
                 time1 = time.perf_counter()
                 latency_ping = round(time1 - time0, 3) * 1000
-                latency_pong = timeout * 1000
-                await asyncio.wait_for(pong_waiter, timeout=timeout)
+                latency_pong = self.central.websocket_ping_timeout * 1000
+                await asyncio.wait_for(
+                    pong_waiter, timeout=self.central.websocket_ping_timeout
+                )
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
