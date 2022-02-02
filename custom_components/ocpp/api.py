@@ -799,6 +799,7 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_ping.value].unit = "ms"
         self._metrics[cstat.latency_pong.value].unit = "ms"
         connection = self._connection
+        timeout_counter = 0
         try:
             while connection.open:
                 await asyncio.sleep(self.central.websocket_ping_interval)
@@ -813,6 +814,7 @@ class ChargePoint(cp):
                 await asyncio.wait_for(
                     pong_waiter, timeout=self.central.websocket_ping_timeout
                 )
+                timeout_counter = 0
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
@@ -824,7 +826,11 @@ class ChargePoint(cp):
         except asyncio.TimeoutError as timeout_exception:
             self._metrics[cstat.latency_ping.value].value = latency_ping
             self._metrics[cstat.latency_pong.value].value = latency_pong
-            raise timeout_exception
+            timeout_counter += 1
+            if timeout_counter > 2:
+                raise timeout_exception
+            else:
+                continue
 
     async def _handle_call(self, msg):
         try:
