@@ -131,12 +131,38 @@ async def test_cms_responses(hass, socket_enabled):
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
+    # no subprotocol
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
-        subprotocols=["unsupported_subprotocol"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_unsupported", ws)
+        cp = ChargePoint("CP_1_no_subprotocol", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_boot_notification(),
+                    cp.send_authorize(),
+                    cp.send_heartbeat(),
+                    cp.send_status_notification(),
+                    cp.send_firmware_status(),
+                    cp.send_data_transfer(),
+                    cp.send_start_transaction(),
+                    cp.send_stop_transaction(),
+                    cp.send_meter_data(),
+                ),
+                timeout=3,
+            )
+        except websockets.exceptions.ConnectionClosedOK:
+            pass
+
+    # unsupported subprotocol
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1",
+        subprotocols=["ocpp0.0"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -187,6 +213,24 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
     assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+    assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert cs.get_unit("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert cs.get_extra_attr("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert int(cs.get_supported_features("unknown_cpid")) == int(0)
+    assert (
+        await asyncio.wait_for(
+            cs.set_max_charge_rate_amps("unknown_cpid", 0), timeout=1
+        )
+        is False
+    )
+    assert (
+        await asyncio.wait_for(
+            cs.set_charger_state("unknown_cpid", csvcs.service_clear_profile, False),
+            timeout=1,
+        )
+        is False
+    )
+
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
@@ -234,7 +278,7 @@ class ChargePoint(cpclass):
                     {
                         "key": key[0],
                         "readonly": False,
-                        "value": "Core,FirmwareManagement,RemoteTrigger,SmartCharging",
+                        "value": "Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger",
                     }
                 ]
             )
