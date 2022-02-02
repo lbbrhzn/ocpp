@@ -856,14 +856,14 @@ class ChargePoint(cp):
         """Close connection and cancel ongoing tasks."""
         self.status = STATE_UNAVAILABLE
         if self._connection.open:
-            _LOGGER.debug(f"Closing websocket: '{self._connection.id}'")
+            _LOGGER.debug(f"Closing websocket to '{self.id}'")
             await self._connection.close()
         for task in self.tasks:
             task.cancel()
 
     async def reconnect(self, connection: websockets.server.WebSocketServerProtocol):
         """Reconnect charge point."""
-        _LOGGER.debug(f"Reconnect {connection.id}")
+        _LOGGER.debug(f"Reconnect websocket to {self.id}")
 
         await self.stop()
         self.status = STATE_OK
