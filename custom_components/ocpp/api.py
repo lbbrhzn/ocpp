@@ -793,11 +793,11 @@ class ChargePoint(cp):
                 latency_ping = timeout * 1000
                 pong_waiter = await asyncio.wait_for(connection.ping(), timeout=timeout)
                 time1 = time.perf_counter()
-                latency_ping = round(time1 - time0, 3)
+                latency_ping = round(time1 - time0, 3) * 1000
                 latency_pong = timeout * 1000
                 await asyncio.wait_for(pong_waiter, timeout=timeout)
                 time2 = time.perf_counter()
-                latency_pong = round(time2 - time1, 3)
+                latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
