@@ -1082,7 +1082,13 @@ class ChargePoint(cp):
     @on(Action.StatusNotification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         """Handle a status notification."""
-        self._metrics[cstat.status.value].value = status
+
+        if connector_id == 0 or connector_id is None:
+            self._metrics[cstat.status.value].value = status
+            self._metrics[cstat.error_code.value].value = error_code
+        else:
+            self._metrics[cstat.status_connector.value].value = status
+            self._metrics[cstat.error_code_connector.value].value = error_code
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
@@ -1099,7 +1105,6 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_export.value].value = 0
             if Measurand.power_reactive_export.value in self._metrics:
                 self._metrics[Measurand.power_reactive_export.value].value = 0
-        self._metrics[cstat.error_code.value].value = error_code
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotificationPayload()
 
