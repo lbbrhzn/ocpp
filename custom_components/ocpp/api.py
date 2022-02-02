@@ -153,7 +153,9 @@ class CentralSystem:
         self._server = server
         return self
 
-    async def on_connect(self, websocket: websockets.connection, path: str):
+    async def on_connect(
+        self, websocket: websockets.server.WebSocketServerProtocol, path: str
+    ):
         """Request handler executed for every new OCPP connection."""
 
         try:
@@ -180,20 +182,26 @@ class CentralSystem:
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         try:
             if self.cpid not in self.charge_points:
-                _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
+                _LOGGER.info(
+                    f"Charger {cp_id} connected to {self.host}:{self.port} websocket={websocket.id}."
+                )
                 charge_point = ChargePoint(
                     cp_id, websocket, self.hass, self.entry, self
                 )
                 self.charge_points[self.cpid] = charge_point
                 await charge_point.start()
             else:
-                _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
+                _LOGGER.info(
+                    f"Charger {cp_id} reconnected to {self.host}:{self.port} websocket={websocket.id}."
+                )
                 charge_point: ChargePoint = self.charge_points[self.cpid]
                 await charge_point.reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
         finally:
-            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
+            _LOGGER.info(
+                f"Charger {cp_id} disconnected from {self.host}:{self.port} websocket={websocket.id}."
+            )
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -282,7 +290,7 @@ class ChargePoint(cp):
     def __init__(
         self,
         id: str,
-        connection: websockets.connection,
+        connection: websockets.server.WebSocketServerProtocol,
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystem,
@@ -300,6 +308,9 @@ class ChargePoint(cp):
         self._requires_reboot = False
         self.preparing = asyncio.Event()
         self._transactionId = 0
+        self.triggered_boot_notification = False
+        self.received_boot_notification = False
+        self.tasks = None
         self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
@@ -367,7 +378,8 @@ class ChargePoint(cp):
             await asyncio.sleep(2)
             await self.get_supported_features()
             if prof.REM in self._attr_supported_features:
-                await self.trigger_boot_notification()
+                if self.received_boot_notification is False:
+                    await self.trigger_boot_notification()
                 await self.trigger_status_notification()
             await self.become_operative()
             await self.get_configuration(ckey.heartbeat_interval.value)
@@ -457,8 +469,10 @@ class ChargePoint(cp):
         )
         resp = await self.call(req)
         if resp.status == TriggerMessageStatus.accepted:
+            self.triggered_boot_notification = True
             return True
         else:
+            self.triggered_boot_notification = False
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
@@ -784,21 +798,18 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_ping.value].unit = "ms"
         self._metrics[cstat.latency_pong.value].unit = "ms"
 
+        connection = self._connection
         try:
-            while True:
-                if self._connection.open is False:
-                    _LOGGER.debug(f"Connection not open '{self.id}'")
-                    await asyncio.sleep(timeout)
-                    continue
-                t0 = time.perf_counter()
-                pong_waiter = await asyncio.wait_for(
-                    self._connection.ping(), timeout=timeout
-                )
-                t1 = time.perf_counter()
+            while connection.open:
+                time0 = time.perf_counter()
+                latency_ping = timeout * 1000
+                pong_waiter = await asyncio.wait_for(connection.ping(), timeout=timeout)
+                time1 = time.perf_counter()
+                latency_ping = round(time1 - time0, 3)
+                latency_pong = timeout * 1000
                 await asyncio.wait_for(pong_waiter, timeout=timeout)
-                t2 = time.perf_counter()
-                latency_ping = round(1000 * (t1 - t0))
-                latency_pong = round(1000 * (t2 - t1))
+                time2 = time.perf_counter()
+                latency_pong = round(time2 - time1, 3)
                 _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
@@ -806,18 +817,10 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 await asyncio.sleep(timeout)
 
-        except asyncio.TimeoutError:
-            _LOGGER.debug(f"Timeout in connection '{self.id}'")
-            self._connection.close()
-        except websockets.exceptions.ConnectionClosed as connection_closed_exception:
-            _LOGGER.debug(
-                f"Connection closed to '{self.id}': {connection_closed_exception}"
-            )
-        except Exception as other_exception:
-            _LOGGER.error(
-                f"Unexpected exception in connection to '{self.id}': {other_exception}",
-                exc_info=True,
-            )
+        except asyncio.TimeoutError as timeout_exception:
+            self._metrics[cstat.latency_ping.value].value = latency_ping
+            self._metrics[cstat.latency_pong.value].value = latency_pong
+            raise timeout_exception
 
     async def _handle_call(self, msg):
         try:
@@ -828,32 +831,45 @@ class ChargePoint(cp):
 
     async def start(self):
         """Start charge point."""
-        try:
-            await asyncio.gather(
-                super().start(), self.monitor_connection(), self.post_connect()
-            )
-        except websockets.exceptions.WebSocketException as e:
-            _LOGGER.debug("Websockets exception: %s", e)
-        finally:
-            await self._connection.close()
-            self.status = STATE_UNAVAILABLE
+        await self.run(
+            [super().start(), self.post_connect(), self.monitor_connection()]
+        )
 
-    async def reconnect(self, connection: websockets.connection):
-        """Reconnect charge point."""
-        # close old connection, if needed
-        if self._connection is not None:
+    async def run(self, tasks):
+        """Run a specified list of tasks."""
+        self.tasks = [asyncio.ensure_future(task) for task in tasks]
+        try:
+            await asyncio.gather(*self.tasks)
+        except asyncio.TimeoutError:
+            _LOGGER.debug(f"Timeout in connection '{self.id}'")
+        except websockets.exceptions.WebSocketException as websocket_exception:
+            _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
+        except Exception as other_exception:
+            _LOGGER.error(
+                f"Unexpected exception in connection to '{self.id}': '{other_exception}'",
+                exc_info=True,
+            )
+        finally:
+            await self.stop()
+
+    async def stop(self):
+        """Close connection and cancel ongoing tasks."""
+        self.status = STATE_UNAVAILABLE
+        if self._connection.open:
+            _LOGGER.debug(f"Closing websocket: '{self._connection.id}'")
             await self._connection.close()
-        # use the new connection
+        for task in self.tasks:
+            task.cancel()
+
+    async def reconnect(self, connection: websockets.server.WebSocketServerProtocol):
+        """Reconnect charge point."""
+        _LOGGER.debug(f"Reconnect {connection.id}")
+
+        await self.stop()
+        self.status = STATE_OK
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
-        try:
-            self.status = STATE_OK
-            await asyncio.gather(super().start(), self.monitor_connection())
-        except websockets.exceptions.WebSocketException as e:
-            _LOGGER.debug("Websockets exception: %s", e)
-        finally:
-            await self._connection.close()
-            self.status = STATE_UNAVAILABLE
+        await self.run([super().start(), self.monitor_connection()])
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
@@ -887,13 +903,13 @@ class ChargePoint(cp):
             return average
 
         measurand_data = {}
-        for sv in data:
+        for item in data:
             # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
-            measurand = sv.get(om.measurand.value, None)
-            phase = sv.get(om.phase.value, None)
-            value = sv.get(om.value.value, None)
-            unit = sv.get(om.unit.value, None)
-            context = sv.get(om.context.value, None)
+            measurand = item.get(om.measurand.value, None)
+            phase = item.get(om.phase.value, None)
+            value = item.get(om.value.value, None)
+            unit = item.get(om.unit.value, None)
+            context = item.get(om.context.value, None)
             if measurand is not None and phase is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
@@ -1036,8 +1052,8 @@ class ChargePoint(cp):
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
+        self.received_boot_notification = True
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
-        self.hass.async_create_task(self.notify_ha(f"Charger {self.id} booted"))
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
             om.charge_point_model.name, None
@@ -1054,7 +1070,9 @@ class ChargePoint(cp):
 
         self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        self.hass.async_create_task(self.post_connect())
+        if self.triggered_boot_notification is False:
+            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+            self.hass.async_create_task(self.post_connect())
         return resp
 
     @on(Action.StatusNotification)
