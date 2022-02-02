@@ -182,26 +182,20 @@ class CentralSystem:
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         try:
             if self.cpid not in self.charge_points:
-                _LOGGER.info(
-                    f"Charger {cp_id} connected to {self.host}:{self.port} websocket={websocket.id}."
-                )
+                _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
                 charge_point = ChargePoint(
                     cp_id, websocket, self.hass, self.entry, self
                 )
                 self.charge_points[self.cpid] = charge_point
                 await charge_point.start()
             else:
-                _LOGGER.info(
-                    f"Charger {cp_id} reconnected to {self.host}:{self.port} websocket={websocket.id}."
-                )
+                _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
                 charge_point: ChargePoint = self.charge_points[self.cpid]
                 await charge_point.reconnect(websocket)
         except Exception as e:
             _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
         finally:
-            _LOGGER.info(
-                f"Charger {cp_id} disconnected from {self.host}:{self.port} websocket={websocket.id}."
-            )
+            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -856,14 +850,14 @@ class ChargePoint(cp):
         """Close connection and cancel ongoing tasks."""
         self.status = STATE_UNAVAILABLE
         if self._connection.open:
-            _LOGGER.debug(f"Closing websocket: '{self._connection.id}'")
+            _LOGGER.debug(f"Closing websocket to '{self.id}'")
             await self._connection.close()
         for task in self.tasks:
             task.cancel()
 
     async def reconnect(self, connection: websockets.server.WebSocketServerProtocol):
         """Reconnect charge point."""
-        _LOGGER.debug(f"Reconnect {connection.id}")
+        _LOGGER.debug(f"Reconnect websocket to {self.id}")
 
         await self.stop()
         self.status = STATE_OK
