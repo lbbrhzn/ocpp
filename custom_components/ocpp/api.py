@@ -180,22 +180,16 @@ class CentralSystem:
         _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
-        try:
-            if self.cpid not in self.charge_points:
-                _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
-                charge_point = ChargePoint(
-                    cp_id, websocket, self.hass, self.entry, self
-                )
-                self.charge_points[self.cpid] = charge_point
-                await charge_point.start()
-            else:
-                _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-                charge_point: ChargePoint = self.charge_points[self.cpid]
-                await charge_point.reconnect(websocket)
-        except Exception as e:
-            _LOGGER.error(f"Exception occurred:\n{e}", exc_info=True)
-        finally:
-            _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
+        if self.cpid not in self.charge_points:
+            _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
+            charge_point = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
+            self.charge_points[self.cpid] = charge_point
+            await charge_point.start()
+        else:
+            _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
+            charge_point: ChargePoint = self.charge_points[self.cpid]
+            await charge_point.reconnect(websocket)
+        _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
@@ -243,6 +237,7 @@ class CentralSystem:
         self, cp_id: str, service_name: str, state: bool = True
     ):
         """Carry out requested service/state change on connected charger."""
+        resp = False
         if cp_id in self.charge_points:
             if service_name == csvcs.service_availability.name:
                 resp = await self.charge_points[cp_id].set_availability(state)
@@ -254,8 +249,6 @@ class CentralSystem:
                 resp = await self.charge_points[cp_id].reset()
             if service_name == csvcs.service_unlock.name:
                 resp = await self.charge_points[cp_id].unlock()
-        else:
-            resp = False
         return resp
 
     async def update(self, cp_id: str):
