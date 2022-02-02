@@ -3,13 +3,16 @@
         "step": {
             "user": {
                 "title": "OCPP Configuratie",
-                "description": "Voor hulp bij configuratie kijk op: https://github.com/lbbrhzn/ocpp",
+                "description": "Voor hulp bij configuratie zie: https://github.com/lbbrhzn/ocpp",
                 "data": {
                     "host": "Host",
                     "port": "Poort",
                     "csid": "Central system identifier",
                     "cpid": "Charge point identifier",
-                    "meter_interval": "Meetinterval (secondes)"
+                    "meter_interval": "Meetinterval (secondes)",
+                    "websocket_close_timeout": "Websocket close timeout (secondes)",
+                    "websocket_ping_interval": "Websocket ping interval (secondes)",
+                    "websocket_ping_timeout": "Websocket ping timeout (secondes)"
                 }
             },
             "measurands": {
