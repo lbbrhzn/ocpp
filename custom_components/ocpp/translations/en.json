@@ -12,7 +12,7 @@
                     "meter_interval": "Charging sample interval (seconds)",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
-                    "websocket_close_tries": "Websocket successive times to try connection before closing",
+                    "WEBSOCKET_PING_TRIES": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (seconds)",
                     "websocket_ping_timeout": "Websocket ping timeout (seconds)"
                 }
