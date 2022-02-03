@@ -14,7 +14,8 @@
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "WEBSOCKET_PING_TRIES": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (seconds)",
-                    "websocket_ping_timeout": "Websocket ping timeout (seconds)"
+                    "websocket_ping_timeout": "Websocket ping timeout (seconds)",
+                    "skip_schema_validation": "Skip OCPP schema validation"
                 }
             },
             "measurands": {
