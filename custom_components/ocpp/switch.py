@@ -40,7 +40,7 @@ SWITCHES: Final = [
         icon=ICON,
         on_action=HAChargerServices.service_charge_start.name,
         off_action=HAChargerServices.service_charge_stop.name,
-        metric_state=HAChargerStatuses.status.value,
+        metric_state=HAChargerStatuses.status_connector.value,
         metric_condition=ChargePointStatus.charging.value,
     ),
     OcppSwitchDescription(
