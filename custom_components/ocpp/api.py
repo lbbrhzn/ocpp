@@ -302,9 +302,15 @@ class ChargePoint(cp):
         entry: ConfigEntry,
         central: CentralSystem,
         interval_meter_metrics: int = 10,
+        skip_schema_validation: bool = False,
     ):
-        """Instantiate instance of a ChargePoint."""
+        """Instantiate a ChargePoint."""
+
         super().__init__(id, connection)
+
+        for action in self.route_map:
+            self.route_map[action]["_skip_schema_validation"] = skip_schema_validation
+
         self.interval_meter_metrics = interval_meter_metrics
         self.hass = hass
         self.entry = entry
