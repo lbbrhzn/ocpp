@@ -255,7 +255,8 @@ async def test_cms_responses(hass, socket_enabled):
             pass
 
     await asyncio.sleep(1)
-    # test ping timeout
+    # test ping timeout, change cpid to start new connection
+    cs.cpid = "CP_3_test"
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_3",
         subprotocols=["ocpp1.6"],
