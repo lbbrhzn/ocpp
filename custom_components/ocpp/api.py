@@ -57,6 +57,7 @@ from .const import (
     CONF_PORT,
     CONF_SUBPROTOCOL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
+    CONF_WEBSOCKET_CLOSE_TRIES,
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_CPID,
@@ -70,6 +71,7 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_SUBPROTOCOL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
+    DEFAULT_WEBSOCKET_CLOSE_TRIES,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DOMAIN,
@@ -137,6 +139,9 @@ class CentralSystem:
         self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
         self.websocket_close_timeout = entry.data.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
+        )
+        self.websocket_close_tries = entry.data.get(
+            CONF_WEBSOCKET_CLOSE_TRIES, DEFAULT_WEBSOCKET_CLOSE_TRIES
         )
         self.websocket_ping_interval = entry.data.get(
             CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
@@ -827,7 +832,7 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 timeout_counter += 1
-                if timeout_counter > 2:
+                if timeout_counter > self.central.websocket_close_tries:
                     raise timeout_exception
                 else:
                     continue
