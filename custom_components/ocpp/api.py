@@ -59,6 +59,7 @@ from .const import (
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
+    CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
@@ -72,6 +73,7 @@ from .const import (
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
+    DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
@@ -137,6 +139,9 @@ class CentralSystem:
         self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
         self.websocket_close_timeout = entry.data.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
+        )
+        self.WEBSOCKET_PING_TRIES = entry.data.get(
+            CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
         )
         self.websocket_ping_interval = entry.data.get(
             CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
@@ -799,8 +804,9 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_ping.value].unit = "ms"
         self._metrics[cstat.latency_pong.value].unit = "ms"
         connection = self._connection
-        try:
-            while connection.open:
+        timeout_counter = 0
+        while connection.open:
+            try:
                 await asyncio.sleep(self.central.websocket_ping_interval)
                 time0 = time.perf_counter()
                 latency_ping = self.central.websocket_ping_timeout * 1000
@@ -813,6 +819,7 @@ class ChargePoint(cp):
                 await asyncio.wait_for(
                     pong_waiter, timeout=self.central.websocket_ping_timeout
                 )
+                timeout_counter = 0
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
@@ -821,10 +828,14 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
-        except asyncio.TimeoutError as timeout_exception:
-            self._metrics[cstat.latency_ping.value].value = latency_ping
-            self._metrics[cstat.latency_pong.value].value = latency_pong
-            raise timeout_exception
+            except asyncio.TimeoutError as timeout_exception:
+                self._metrics[cstat.latency_ping.value].value = latency_ping
+                self._metrics[cstat.latency_pong.value].value = latency_pong
+                timeout_counter += 1
+                if timeout_counter > self.central.WEBSOCKET_PING_TRIES:
+                    raise timeout_exception
+                else:
+                    continue
 
     async def _handle_call(self, msg):
         try:

@@ -254,6 +254,18 @@ async def test_cms_responses(hass, socket_enabled):
         except asyncio.TimeoutError:
             pass
 
+    await asyncio.sleep(1)
+    # test ping timeout, change cpid to start new connection
+    cs.cpid = "CP_3_test"
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_3",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint("CP_3_test", ws)
+        ws.state = 3  # CLOSED = 3
+        await asyncio.sleep(3)
+        await ws.close()
+
     # test services when charger is unavailable
     await asyncio.sleep(1)
     await test_services(hass, socket_enabled)
