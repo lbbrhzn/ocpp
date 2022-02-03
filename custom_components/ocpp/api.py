@@ -489,21 +489,17 @@ class ChargePoint(cp):
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
 
-    async def trigger_status_notification(self) -> bool:
+    async def trigger_status_notification(self):
         """Trigger a status notification."""
-        for id in [0, 1]:
-            req = call.TriggerMessagePayload(
-                requested_message=MessageTrigger.status_notification,
-                connector_id=id,
-            )
-            resp = await self.call(req)
-
-            if resp.status == TriggerMessageStatus.accepted:
-                continue
-            else:
-                _LOGGER.warning("Failed with response: %s", resp.status)
-                return False
-        return True
+        req = call.TriggerMessagePayload(
+            requested_message=MessageTrigger.status_notification
+        )
+        resp = await self.call(req)
+        if resp.status == TriggerMessageStatus.accepted:
+            return True
+        else:
+            _LOGGER.warning("Failed with response: %s", resp.status)
+            return False
 
     async def become_operative(self):
         """Become operative."""
