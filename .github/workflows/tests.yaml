@@ -79,7 +79,7 @@ jobs:
             --cov=./ \
             --cov-report=xml \
             --cov-report=term \
-            --timeout=12 \
+            --timeout=20 \
             --durations=10 \
             -n auto \
             -p no:sugar \
