@@ -33,6 +33,7 @@ class HAChargerStatuses(str, Enum):
     stop_reason = "Stop.Reason"
     firmware_status = "Status.Firmware"
     reconnects = "Reconnects"
+    id_tag = "id_tag"
 
 
 class HAChargerDetails(str, Enum):

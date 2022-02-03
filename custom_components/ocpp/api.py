@@ -1128,6 +1128,8 @@ class ChargePoint(cp):
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):
         """Handle an Authorization request."""
+        self._metrics[cstat.id_tag.value].value = id_tag
+
         return call_result.AuthorizePayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1135,6 +1137,7 @@ class ChargePoint(cp):
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
+        self._metrics[cstat.id_tag.value].value = id_tag
         self._transactionId = int(time.time())
         self._metrics[cstat.stop_reason.value].value = ""
         self._metrics[csess.transaction_id.value].value = self._transactionId
