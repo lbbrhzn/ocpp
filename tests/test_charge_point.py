@@ -262,6 +262,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         cp = ChargePoint("CP_3_test", ws)
         await asyncio.sleep(3)
+        await ws.close()
 
     # test services when charger is unavailable
     await asyncio.sleep(1)
