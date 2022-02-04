@@ -1,6 +1,10 @@
 ---
 name: Issue
 about: Create a report to help us improve
+title: ''
+labels: ''
+assignees: ''
+
 ---
 
 <!-- Before you open a new issue, search through the existing issues to see if others have had the same problem.
