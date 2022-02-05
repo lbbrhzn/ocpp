@@ -105,8 +105,7 @@ If you need help, check out our [forum](https://github.com/lbbrhzn/ocpp/discussi
 It is recommended to use Visual Studio Code, and run home assistant in a devcontainer.
 See https://hacs.xyz/docs/developer/devcontainer
 
-**💡 Tip:** If you like this project consider buying me a cocktail 🍹:
-
+**💡 Tip:** If you like this project consider buying me a coffee:
 <a href="https://www.buymeacoffee.com/lbbrhzn" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/default-black.png" alt="Buy Me A Coffee" width="150px">
 </a>
