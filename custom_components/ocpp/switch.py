@@ -49,7 +49,7 @@ SWITCHES: Final = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status.value,
+        metric_state=HAChargerStatuses.status_connector.value,
         metric_condition=ChargePointStatus.available.value,
         default_state=True,
     ),
