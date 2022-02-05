@@ -390,6 +390,8 @@ class ChargePoint(cp):
             self.status = STATE_OK
             await asyncio.sleep(2)
             await self.get_supported_features()
+            resp = await self.get_configuration(ckey.number_of_connectors.value)
+            self._metrics[cdet.connectors.value].value = resp
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
@@ -412,8 +414,6 @@ class ChargePoint(cp):
             #            await self.configure(
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
             #            )
-            resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value].value = resp
             #            await self.start_transaction()
 
             # Register custom services with home assistant
@@ -492,10 +492,12 @@ class ChargePoint(cp):
     async def trigger_status_notification(self):
         """Trigger status notifications for all connectors."""
         return_value = True
-        for id in range(0, 1):
+        nof_connectors = int(self._metrics[cdet.connectors.value].value)
+        for id in range(0, nof_connectors + 1):
+            _LOGGER.debug(f"trigger status notification for connector={id}")
             req = call.TriggerMessagePayload(
                 requested_message=MessageTrigger.status_notification,
-                connector_id=id,
+                connector_id=int(id),
             )
             resp = await self.call(req)
             if resp.status != TriggerMessageStatus.accepted:
