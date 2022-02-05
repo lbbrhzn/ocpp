@@ -1108,7 +1108,7 @@ class ChargePoint(cp):
         elif connector_id == 1:
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
-        if connector_id >=1:
+        if connector_id >= 1:
             self._metrics[cstat.status_connector.value].extra_attr[
                 connector_id
             ] = status
