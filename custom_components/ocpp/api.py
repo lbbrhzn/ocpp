@@ -490,16 +490,18 @@ class ChargePoint(cp):
             return False
 
     async def trigger_status_notification(self):
-        """Trigger a status notification."""
-        req = call.TriggerMessagePayload(
-            requested_message=MessageTrigger.status_notification
-        )
-        resp = await self.call(req)
-        if resp.status == TriggerMessageStatus.accepted:
-            return True
-        else:
-            _LOGGER.warning("Failed with response: %s", resp.status)
-            return False
+        """Trigger status notifications for all connectors."""
+        return_value = True
+        for id in range(0, 1):
+            req = call.TriggerMessagePayload(
+                requested_message=MessageTrigger.status_notification,
+                connector_id=id,
+            )
+            resp = await self.call(req)
+            if resp.status != TriggerMessageStatus.accepted:
+                _LOGGER.warning("Failed with response: %s", resp.status)
+                return_value = False
+        return return_value
 
     async def become_operative(self):
         """Become operative."""
@@ -1103,9 +1105,16 @@ class ChargePoint(cp):
         if connector_id == 0 or connector_id is None:
             self._metrics[cstat.status.value].value = status
             self._metrics[cstat.error_code.value].value = error_code
-        else:
+        elif connector_id == 1:
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
+        if connector_id >= 1:
+            self._metrics[cstat.status_connector.value].extra_attr[
+                connector_id
+            ] = status
+            self._metrics[cstat.error_code_connector.value].extra_attr[
+                connector_id
+            ] = error_code
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
