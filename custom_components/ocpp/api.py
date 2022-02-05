@@ -1105,9 +1105,16 @@ class ChargePoint(cp):
         if connector_id == 0 or connector_id is None:
             self._metrics[cstat.status.value].value = status
             self._metrics[cstat.error_code.value].value = error_code
-        else:
+        elif connector_id == 1:
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
+        else:
+            self._metrics[cstat.status_connector.value].extra_attr[
+                connector_id
+            ] = status
+            self._metrics[cstat.error_code_connector.value].extra_attr[
+                connector_id
+            ] = error_code
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
