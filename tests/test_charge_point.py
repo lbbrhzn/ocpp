@@ -464,7 +464,7 @@ class ChargePoint(cpclass):
     async def send_status_notification(self):
         """Send a status notification."""
         request = call.StatusNotificationPayload(
-            connector_id=1,
+            connector_id=0,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.suspended_ev,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
@@ -483,6 +483,17 @@ class ChargePoint(cpclass):
             vendor_error_code="Test error",
         )
         resp = await self.call(request)
+        request = call.StatusNotificationPayload(
+            connector_id=2,
+            error_code=ChargePointErrorCode.no_error,
+            status=ChargePointStatus.available,
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            info="Test info",
+            vendor_id="The Mobility House",
+            vendor_error_code="Available",
+        )
+        resp = await self.call(request)
+
         assert resp is not None
 
     async def send_meter_data(self):
