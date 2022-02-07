@@ -47,6 +47,7 @@ class HAChargerDetails(str, Enum):
     features = "Features"
     connectors = "Connectors"
     data_response = "Timestamp.Data.Response"
+    data_transfer = "Timestamp.Data.Transfer"
     config_response = "Timestamp.Config.Response"
 
 
