@@ -1206,9 +1206,8 @@ class ChargePoint(cp):
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
-        self.hass.async_create_task(
-            self.notify_ha(f"Data transfer received from {self.id}, check HA log")
-        )
+        self._metrics[cdet.data_transfer.value].value = datetime.now(tz=timezone.utc)
+        self._metrics[cdet.data_transfer.value].extra_attr = {vendor_id: kwargs}
         return call_result.DataTransferPayload(status=DataTransferStatus.accepted.value)
 
     @on(Action.Heartbeat)
