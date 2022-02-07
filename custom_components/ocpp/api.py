@@ -854,7 +854,7 @@ class ChargePoint(cp):
                 timeout_counter += 1
                 if timeout_counter > self.central.websocket_ping_tries:
                     _LOGGER.debug(
-                        f"Connection timed out after '{self.central.websocket_ping_tries}' ping tries",
+                        f"Connection to '{self.id}' timed out after '{self.central.websocket_ping_tries}' ping tries",
                     )
                     raise timeout_exception
                 else:
@@ -879,7 +879,6 @@ class ChargePoint(cp):
         try:
             await asyncio.gather(*self.tasks)
         except asyncio.TimeoutError:
-            _LOGGER.debug(f"Timeout in connection '{self.id}'")
         except websockets.exceptions.WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
         except Exception as other_exception:
