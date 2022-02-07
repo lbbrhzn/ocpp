@@ -879,6 +879,7 @@ class ChargePoint(cp):
         try:
             await asyncio.gather(*self.tasks)
         except asyncio.TimeoutError:
+            pass
         except websockets.exceptions.WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
         except Exception as other_exception:
