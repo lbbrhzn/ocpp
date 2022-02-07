@@ -320,7 +320,7 @@ class ChargePoint(cp):
         # configuration.
         self._requires_reboot = False
         self.preparing = asyncio.Event()
-        self._transactionId = 0
+        self.active_transaction_id: int = 0
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.tasks = None
@@ -388,6 +388,7 @@ class ChargePoint(cp):
 
         try:
             self.status = STATE_OK
+            await self.async_update_device_info({})
             await asyncio.sleep(2)
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
@@ -595,11 +596,7 @@ class ChargePoint(cp):
                 return False
 
     async def set_availability(self, state: bool = True):
-        """Become operative."""
-        """there could be an ongoing transaction. Terminate it"""
-        if (state is False) and self._transactionId > 0:
-            await self.stop_transaction()
-        """ change availability """
+        """Change availability."""
         if state is True:
             typ = AvailabilityType.operative.value
         else:
@@ -617,8 +614,11 @@ class ChargePoint(cp):
             return False
 
     async def start_transaction(self):
-        """Remote start a transaction."""
-        """Check if authorisation enabled, if it is disable it before remote start"""
+        """
+        Remote start a transaction.
+
+        Check if authorisation enabled, if it is disable it before remote start
+        """
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
         if resp.lower() == "true":
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
@@ -636,10 +636,17 @@ class ChargePoint(cp):
             return False
 
     async def stop_transaction(self):
-        """Request remote stop of current transaction."""
-        """Leaves charger in finishing state until unplugged"""
-        """Use reset() to make the charger available again for remote start"""
-        req = call.RemoteStopTransactionPayload(transaction_id=self._transactionId)
+        """
+        Request remote stop of current transaction.
+
+        Leaves charger in finishing state until unplugged.
+        Use reset() to make the charger available again for remote start
+        """
+        if self.active_transaction_id == 0:
+            return True
+        req = call.RemoteStopTransactionPayload(
+            transaction_id=self.active_transaction_id
+        )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -900,21 +907,22 @@ class ChargePoint(cp):
         """Update device info asynchronuously."""
 
         _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
-
-        dr = device_registry.async_get(self.hass)
-
+        identifiers = {
+            (DOMAIN, self.central.cpid),
+            (DOMAIN, self.id),
+        }
         serial = boot_info.get(om.charge_point_serial_number.name, None)
-
-        identifiers = {(DOMAIN, self.central.cpid), (DOMAIN, self.id)}
         if serial is not None:
             identifiers.add((DOMAIN, serial))
 
-        dr.async_get_or_create(
+        registry = device_registry.async_get(self.hass)
+        registry.async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers=identifiers,
             name=self.central.cpid,
             manufacturer=boot_info.get(om.charge_point_vendor.name, None),
             model=boot_info.get(om.charge_point_model.name, None),
+            suggested_area="Garage",
             sw_version=boot_info.get(om.firmware_version.name, None),
         )
 
@@ -1000,21 +1008,27 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
-        self._metrics[csess.transaction_id.value].value = kwargs.get(
-            om.transaction_id.name, 0
-        )
+
+        transaction_id: int = kwargs.get(om.transaction_id.name, 0)
+
+        transaction_matches: bool = False
+        if transaction_id == self.active_transaction_id:
+            transaction_matches = True
+        elif transaction_id != 0:
+            _LOGGER.warning("Unknown transaction detected with id=%i", transaction_id)
+
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
             processed_keys = []
-            for idx, sv in enumerate(bucket[om.sampled_value.name]):
-                measurand = sv.get(om.measurand.value, None)
-                value = sv.get(om.value.value, None)
-                unit = sv.get(om.unit.value, None)
-                phase = sv.get(om.phase.value, None)
-                location = sv.get(om.location.value, None)
-                context = sv.get(om.context.value, None)
+            for idx, sampled_value in enumerate(bucket[om.sampled_value.name]):
+                measurand = sampled_value.get(om.measurand.value, None)
+                value = sampled_value.get(om.value.value, None)
+                unit = sampled_value.get(om.unit.value, None)
+                phase = sampled_value.get(om.phase.value, None)
+                location = sampled_value.get(om.location.value, None)
+                context = sampled_value.get(om.context.value, None)
 
-                if len(sv.keys()) == 1:  # Backwards compatibility
+                if len(sampled_value.keys()) == 1:  # Backwards compatibility
                     measurand = DEFAULT_MEASURAND
                     unit = DEFAULT_ENERGY_UNIT
 
@@ -1023,8 +1037,9 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_POWER_UNIT
                     elif unit == DEFAULT_ENERGY_UNIT:
-                        self._metrics[measurand].value = float(value) / 1000
-                        self._metrics[measurand].unit = HA_ENERGY_UNIT
+                        if transaction_matches:
+                            self._metrics[measurand].value = float(value) / 1000
+                            self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
                         self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
@@ -1048,11 +1063,8 @@ class ChargePoint(cp):
             self._metrics[csess.transaction_id.value].value = kwargs.get(
                 om.transaction_id.name
             )
-            self._transactionId = kwargs.get(om.transaction_id.name)
-        if self._metrics[csess.transaction_id.value].value == 0:
-            self._metrics[csess.session_time.value].value = 0
-            self._metrics[csess.meter_start.value].value = None
-        else:
+            self.active_transaction_id = kwargs.get(om.transaction_id.name)
+        if transaction_matches:
             self._metrics[csess.session_time.value].value = round(
                 (
                     int(time.time())
@@ -1060,12 +1072,11 @@ class ChargePoint(cp):
                 )
                 / 60
             )
-        if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = float(
-                self._metrics[DEFAULT_MEASURAND].value or 0
-            ) - float(self._metrics[csess.meter_start.value].value)
-        else:
-            self._metrics[csess.session_energy.value].value = 0
+            self._metrics[csess.session_time.value].unit = "min"
+            if self._metrics[csess.meter_start.value].value is not None:
+                self._metrics[csess.session_energy.value].value = float(
+                    self._metrics[DEFAULT_MEASURAND].value or 0
+                ) - float(self._metrics[csess.meter_start.value].value)
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
@@ -1166,21 +1177,27 @@ class ChargePoint(cp):
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
         self._metrics[cstat.id_tag.value].value = id_tag
-        self._transactionId = int(time.time())
+        self.active_transaction_id = int(time.time())
         self._metrics[cstat.stop_reason.value].value = ""
-        self._metrics[csess.transaction_id.value].value = self._transactionId
+        self._metrics[csess.transaction_id.value].value = self.active_transaction_id
         self._metrics[csess.meter_start.value].value = int(meter_start) / 1000
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StartTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
-            transaction_id=self._transactionId,
+            transaction_id=self.active_transaction_id,
         )
 
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
         """Stop the current transaction."""
-        self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
 
+        if transaction_id != self.active_transaction_id:
+            _LOGGER.error(
+                "Stop transaction received for unknown transaction id=%i",
+                transaction_id,
+            )
+        self.active_transaction_id = 0
+        self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
         if self._metrics[csess.meter_start.value].value is not None:
             self._metrics[csess.session_energy.value].value = int(
                 meter_stop
