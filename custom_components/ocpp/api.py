@@ -1012,11 +1012,10 @@ class ChargePoint(cp):
         transaction_id: int = kwargs.get(om.transaction_id.name, 0)
 
         transaction_matches: bool = False
-        if transaction_id > 0:
-            if transaction_id == self.active_transaction_id:
-                transaction_matches = True
-            else:
-                _LOGGER.warning("Unknown transaction detect with id=%i", transaction_id)
+        if transaction_id == self.active_transaction_id:
+            transaction_matches = True
+        elif transaction_id != 0:
+            _LOGGER.warning("Unknown transaction detected with id=%i", transaction_id)
 
         for bucket in meter_value:
             unprocessed = bucket[om.sampled_value.name]
@@ -1038,7 +1037,7 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_POWER_UNIT
                     elif unit == DEFAULT_ENERGY_UNIT:
-                        if not transaction_matches:
+                        if transaction_matches:
                             self._metrics[measurand].value = float(value) / 1000
                             self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
