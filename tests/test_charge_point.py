@@ -149,7 +149,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
             )
@@ -175,7 +175,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
             )
@@ -201,7 +201,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
             )
@@ -279,7 +279,7 @@ class ChargePoint(cpclass):
     def __init__(self, id, connection, response_timeout=30):
         """Init extra variables for testing."""
         super().__init__(id, connection)
-        self.active_transactionId: int = 1000
+        self.active_transactionId: int = 0
 
     @on(Action.GetConfiguration)
     def on_get_configuration(self, key, **kwargs):
@@ -496,8 +496,10 @@ class ChargePoint(cpclass):
 
         assert resp is not None
 
-    async def send_meter_data(self):
-        """Send meter data notification."""
+    async def send_meter_periodic_data(self):
+        """Send periodic meter data notification."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
         request = call.MeterValuesPayload(
             connector_id=1,
             transaction_id=self.active_transactionId,
@@ -664,6 +666,8 @@ class ChargePoint(cpclass):
 
     async def send_stop_transaction(self):
         """Send a stop transaction notification."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
         request = call.StopTransactionPayload(
             meter_stop=54321,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
