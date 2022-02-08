@@ -279,7 +279,7 @@ class ChargePoint(cpclass):
     def __init__(self, id, connection, response_timeout=30):
         """Init extra variables for testing."""
         super().__init__(id, connection)
-        self._transactionId = 0
+        self.active_transactionId = 0
 
     @on(Action.GetConfiguration)
     def on_get_configuration(self, key, **kwargs):
@@ -458,7 +458,7 @@ class ChargePoint(cpclass):
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
         )
         resp = await self.call(request)
-        self._transactionId = resp.transaction_id
+        self.active_transactionId = resp.transaction_id
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
 
     async def send_status_notification(self):
@@ -500,7 +500,7 @@ class ChargePoint(cpclass):
         """Send meter data notification."""
         request = call.MeterValuesPayload(
             connector_id=1,
-            transaction_id=self._transactionId,
+            transaction_id=self.active_transactionId,
             meter_value=[
                 {
                     "timestamp": "2021-06-21T16:15:09Z",
@@ -667,7 +667,7 @@ class ChargePoint(cpclass):
         request = call.StopTransactionPayload(
             meter_stop=54321,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
-            transaction_id=self._transactionId,
+            transaction_id=self.active_transactionId,
             reason="EVDisconnected",
             id_tag="test_cp",
         )
