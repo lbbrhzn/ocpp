@@ -182,6 +182,38 @@ async def test_cms_responses(hass, socket_enabled):
         except websockets.exceptions.ConnectionClosedOK:
             pass
 
+    # test ocpp rejection messages sent from charger to cms
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_test_reject", ws)
+        cp.accept = False
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_boot_notification(),
+                    cp.send_authorize(),
+                    cp.send_heartbeat(),
+                    cp.send_status_notification(),
+                    cp.send_firmware_status(),
+                    cp.send_data_transfer(),
+                    cp.send_start_transaction(),
+                    cp.send_meter_periodic_data(),
+                    cp.send_stop_transaction(),
+                    cs.charge_points[cs.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.cpid].trigger_status_notification(),
+                    test_switches(hass, socket_enabled),
+                    test_services(hass, socket_enabled),
+                    test_buttons(hass, socket_enabled),
+                ),
+                timeout=3,
+            )
+        except asyncio.TimeoutError:
+            pass
+
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
@@ -202,7 +234,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_start_transaction(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(2),
+                    cp.send_stop_transaction(),
                 ),
                 timeout=3,
             )
@@ -284,6 +316,7 @@ class ChargePoint(cpclass):
         """Init extra variables for testing."""
         super().__init__(id, connection)
         self.active_transactionId: int = 0
+        self.accept: bool = True
 
     @on(Action.GetConfiguration)
     def on_get_configuration(self, key, **kwargs):
@@ -348,49 +381,84 @@ class ChargePoint(cpclass):
     @on(Action.ChangeConfiguration)
     def on_change_configuration(self, **kwargs):
         """Handle a get configuration request."""
-        return call_result.ChangeConfigurationPayload(ConfigurationStatus.accepted)
+        if self.accept is True:
+            return call_result.ChangeConfigurationPayload(ConfigurationStatus.accepted)
+        else:
+            return call_result.ChangeConfigurationPayload(ConfigurationStatus.rejected)
 
     @on(Action.ChangeAvailability)
     def on_change_availability(self, **kwargs):
         """Handle change availability request."""
-        return call_result.ChangeAvailabilityPayload(AvailabilityStatus.accepted)
+        if self.accept is True:
+            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.accepted)
+        else:
+            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.rejected)
 
     @on(Action.UnlockConnector)
     def on_unlock_connector(self, **kwargs):
         """Handle unlock request."""
-        return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
+        if self.accept is True:
+            return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
+        else:
+            return call_result.UnlockConnectorPayload(UnlockStatus.rejected)
 
     @on(Action.Reset)
     def on_reset(self, **kwargs):
         """Handle change availability request."""
-        return call_result.ResetPayload(ResetStatus.accepted)
+        if self.accept is True:
+            return call_result.ResetPayload(ResetStatus.accepted)
+        else:
+            return call_result.ResetPayload(ResetStatus.rejected)
 
     @on(Action.RemoteStartTransaction)
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
-        return call_result.RemoteStartTransactionPayload(RemoteStartStopStatus.accepted)
+        if self.accept is True:
+            return call_result.RemoteStartTransactionPayload(
+                RemoteStartStopStatus.accepted
+            )
+        else:
+            call_result.RemoteStopTransactionPayload(RemoteStartStopStatus.rejected)
 
     @on(Action.RemoteStopTransaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
-        return call_result.RemoteStopTransactionPayload(RemoteStartStopStatus.accepted)
+        if self.accept is True:
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.accepted
+            )
+        else:
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.rejected
+            )
 
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
-        return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
+        if self.accept is True:
+            return call_result.SetChargingProfilePayload(ChargingProfileStatus.accepted)
+        else:
+            return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
 
     @on(Action.ClearChargingProfile)
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
-        return call_result.ClearChargingProfilePayload(
-            ClearChargingProfileStatus.accepted
-        )
+        if self.accept is True:
+            return call_result.ClearChargingProfilePayload(
+                ClearChargingProfileStatus.accepted
+            )
+        else:
+            return call_result.ClearChargingProfilePayload(
+                ClearChargingProfileStatus.rejected
+            )
 
     @on(Action.TriggerMessage)
     def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
-        return call_result.TriggerMessagePayload(TriggerMessageStatus.accepted)
+        if self.accept is True:
+            return call_result.TriggerMessagePayload(TriggerMessageStatus.accepted)
+        else:
+            return call_result.TriggerMessagePayload(TriggerMessageStatus.rejected)
 
     @on(Action.UpdateFirmware)
     def on_update_firmware(self, **kwargs):
@@ -405,7 +473,10 @@ class ChargePoint(cpclass):
     @on(Action.DataTransfer)
     def on_data_transfer(self, **kwargs):
         """Handle get data transfer request."""
-        return call_result.DataTransferPayload(DataTransferStatus.accepted)
+        if self.accept is True:
+            return call_result.DataTransferPayload(DataTransferStatus.accepted)
+        else:
+            return call_result.DataTransferPayload(DataTransferStatus.rejected)
 
     async def send_boot_notification(self):
         """Send a boot notification."""
