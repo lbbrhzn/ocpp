@@ -184,33 +184,6 @@ async def test_cms_responses(hass, socket_enabled):
 
     await asyncio.sleep(1)
 
-    # test ocpp rejection messages sent from charger to cms
-    async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
-        subprotocols=["ocpp1.6"],
-    ) as ws:
-        # use a different id for debugging
-        cp = ChargePoint("CP_1_test_reject", ws)
-        cp.accept = False
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                    cs.charge_points[cs.cpid].trigger_boot_notification(),
-                    # cs.charge_points[cs.cpid].trigger_status_notification(),
-                    test_switches(hass, socket_enabled),
-                    test_services(hass, socket_enabled),
-                    test_buttons(hass, socket_enabled),
-                ),
-                timeout=3,
-            )
-        except asyncio.TimeoutError:
-            pass
-        except websockets.exceptions.ConnectionClosedOK:
-            pass
-
-    await asyncio.sleep(1)
-
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
@@ -286,6 +259,31 @@ async def test_cms_responses(hass, socket_enabled):
         except asyncio.TimeoutError:
             pass
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
+
+    # test ocpp rejection messages sent from charger to cms
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use same id to ensure metrics populated
+        cp = ChargePoint("CP_1_test", ws)
+        cp.accept = False
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cs.charge_points[cs.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.cpid].trigger_status_notification(),
+                    test_switches(hass, socket_enabled),
+                    test_services(hass, socket_enabled),
+                    test_buttons(hass, socket_enabled),
+                ),
+                timeout=3,
+            )
+        except asyncio.TimeoutError:
+            pass
+        except websockets.exceptions.ConnectionClosedOK:
+            pass
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
