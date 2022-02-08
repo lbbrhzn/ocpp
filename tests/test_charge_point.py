@@ -196,15 +196,6 @@ async def test_cms_responses(hass, socket_enabled):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
-                    cp.send_boot_notification(),
-                    cp.send_authorize(),
-                    cp.send_heartbeat(),
-                    cp.send_status_notification(),
-                    cp.send_firmware_status(),
-                    cp.send_data_transfer(),
-                    cp.send_start_transaction(),
-                    cp.send_meter_periodic_data(),
-                    cp.send_stop_transaction(),
                     cs.charge_points[cs.cpid].trigger_boot_notification(),
                     cs.charge_points[cs.cpid].trigger_status_notification(),
                     test_switches(hass, socket_enabled),
@@ -214,6 +205,8 @@ async def test_cms_responses(hass, socket_enabled):
                 timeout=3,
             )
         except asyncio.TimeoutError:
+            pass
+        except websockets.exceptions.ConnectionClosedOK:
             pass
 
     await asyncio.sleep(1)
@@ -238,7 +231,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_start_transaction(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(),
+                    cp.send_stop_transaction(2),
                 ),
                 timeout=3,
             )
