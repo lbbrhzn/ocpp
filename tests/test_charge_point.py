@@ -200,8 +200,9 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
-                    cp.send_stop_transaction(),
                     cp.send_meter_periodic_data(),
+                    # add delay to allow meter data to be processed
+                    cp.send_stop_transaction(2),
                 ),
                 timeout=3,
             )
@@ -664,8 +665,10 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_stop_transaction(self):
+    async def send_stop_transaction(self, delay: int = 0):
         """Send a stop transaction notification."""
+        # add delay to allow meter data to be processed
+        await asyncio.sleep(delay)
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
         request = call.StopTransactionPayload(
