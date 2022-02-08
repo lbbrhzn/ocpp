@@ -182,6 +182,8 @@ async def test_cms_responses(hass, socket_enabled):
         except websockets.exceptions.ConnectionClosedOK:
             pass
 
+    await asyncio.sleep(1)
+
     # test ocpp rejection messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
@@ -213,6 +215,8 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except asyncio.TimeoutError:
             pass
+
+    await asyncio.sleep(1)
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
