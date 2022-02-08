@@ -1013,7 +1013,7 @@ class ChargePoint(cp):
 
         transaction_matches: bool = False
         # match is also false if no transaction is in progress ie active_transaction_id==transaction_id==0
-        if transaction_id == self.active_transaction_id and transaction_id !=0:
+        if transaction_id == self.active_transaction_id and transaction_id != 0:
             transaction_matches = True
         elif transaction_id != 0:
             _LOGGER.warning("Unknown transaction detected with id=%i", transaction_id)
