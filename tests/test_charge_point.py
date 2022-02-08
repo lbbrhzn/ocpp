@@ -149,7 +149,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
             )
@@ -175,12 +175,14 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
                     cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
+
+    await asyncio.sleep(1)
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
@@ -200,8 +202,9 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
-                    cp.send_stop_transaction(),
-                    cp.send_meter_data(),
+                    cp.send_meter_periodic_data(),
+                    # add delay to allow meter data to be processed
+                    cp.send_stop_transaction(2),
                 ),
                 timeout=3,
             )
@@ -210,7 +213,7 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
-    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(0)
     assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
@@ -234,6 +237,7 @@ async def test_cms_responses(hass, socket_enabled):
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
+    # test processing of clock aligned meter data
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
@@ -248,10 +252,36 @@ async def test_cms_responses(hass, socket_enabled):
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
+                    cp.send_meter_clock_data(),
                 ),
                 timeout=3,
             )
         except asyncio.TimeoutError:
+            pass
+    assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
+
+    # test ocpp rejection messages sent from charger to cms
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use same id to ensure metrics populated
+        cp = ChargePoint("CP_1_test", ws)
+        cp.accept = False
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cs.charge_points[cs.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.cpid].trigger_status_notification(),
+                    test_switches(hass, socket_enabled),
+                    test_buttons(hass, socket_enabled),
+                ),
+                timeout=3,
+            )
+        except asyncio.TimeoutError:
+            pass
+        except websockets.exceptions.ConnectionClosedOK:
             pass
 
     await asyncio.sleep(1)
@@ -279,7 +309,8 @@ class ChargePoint(cpclass):
     def __init__(self, id, connection, response_timeout=30):
         """Init extra variables for testing."""
         super().__init__(id, connection)
-        self._transactionId = 0
+        self.active_transactionId: int = 0
+        self.accept: bool = True
 
     @on(Action.GetConfiguration)
     def on_get_configuration(self, key, **kwargs):
@@ -344,49 +375,86 @@ class ChargePoint(cpclass):
     @on(Action.ChangeConfiguration)
     def on_change_configuration(self, **kwargs):
         """Handle a get configuration request."""
-        return call_result.ChangeConfigurationPayload(ConfigurationStatus.accepted)
+        if self.accept is True:
+            return call_result.ChangeConfigurationPayload(ConfigurationStatus.accepted)
+        else:
+            return call_result.ChangeConfigurationPayload(ConfigurationStatus.rejected)
 
     @on(Action.ChangeAvailability)
     def on_change_availability(self, **kwargs):
         """Handle change availability request."""
-        return call_result.ChangeAvailabilityPayload(AvailabilityStatus.accepted)
+        if self.accept is True:
+            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.accepted)
+        else:
+            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.rejected)
 
     @on(Action.UnlockConnector)
     def on_unlock_connector(self, **kwargs):
         """Handle unlock request."""
-        return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
+        if self.accept is True:
+            return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
+        else:
+            return call_result.UnlockConnectorPayload(UnlockStatus.unlock_failed)
 
     @on(Action.Reset)
     def on_reset(self, **kwargs):
         """Handle change availability request."""
-        return call_result.ResetPayload(ResetStatus.accepted)
+        if self.accept is True:
+            return call_result.ResetPayload(ResetStatus.accepted)
+        else:
+            return call_result.ResetPayload(ResetStatus.rejected)
 
     @on(Action.RemoteStartTransaction)
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
-        return call_result.RemoteStartTransactionPayload(RemoteStartStopStatus.accepted)
+        if self.accept is True:
+            return call_result.RemoteStartTransactionPayload(
+                RemoteStartStopStatus.accepted
+            )
+        else:
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.rejected
+            )
 
     @on(Action.RemoteStopTransaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
-        return call_result.RemoteStopTransactionPayload(RemoteStartStopStatus.accepted)
+        if self.accept is True:
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.accepted
+            )
+        else:
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.rejected
+            )
 
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
-        return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
+        if self.accept is True:
+            return call_result.SetChargingProfilePayload(ChargingProfileStatus.accepted)
+        else:
+            return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
 
     @on(Action.ClearChargingProfile)
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
-        return call_result.ClearChargingProfilePayload(
-            ClearChargingProfileStatus.accepted
-        )
+        if self.accept is True:
+            return call_result.ClearChargingProfilePayload(
+                ClearChargingProfileStatus.accepted
+            )
+        else:
+            return call_result.ClearChargingProfilePayload(
+                ClearChargingProfileStatus.rejected
+            )
 
     @on(Action.TriggerMessage)
     def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
-        return call_result.TriggerMessagePayload(TriggerMessageStatus.accepted)
+        if self.accept is True:
+            return call_result.TriggerMessagePayload(TriggerMessageStatus.accepted)
+        else:
+            return call_result.TriggerMessagePayload(TriggerMessageStatus.rejected)
 
     @on(Action.UpdateFirmware)
     def on_update_firmware(self, **kwargs):
@@ -401,7 +469,10 @@ class ChargePoint(cpclass):
     @on(Action.DataTransfer)
     def on_data_transfer(self, **kwargs):
         """Handle get data transfer request."""
-        return call_result.DataTransferPayload(DataTransferStatus.accepted)
+        if self.accept is True:
+            return call_result.DataTransferPayload(DataTransferStatus.accepted)
+        else:
+            return call_result.DataTransferPayload(DataTransferStatus.rejected)
 
     async def send_boot_notification(self):
         """Send a boot notification."""
@@ -458,7 +529,7 @@ class ChargePoint(cpclass):
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
         )
         resp = await self.call(request)
-        self._transactionId = resp.transaction_id
+        self.active_transactionId = resp.transaction_id
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
 
     async def send_status_notification(self):
@@ -496,11 +567,13 @@ class ChargePoint(cpclass):
 
         assert resp is not None
 
-    async def send_meter_data(self):
-        """Send meter data notification."""
+    async def send_meter_periodic_data(self):
+        """Send periodic meter data notification."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
         request = call.MeterValuesPayload(
             connector_id=1,
-            transaction_id=self._transactionId,
+            transaction_id=self.active_transactionId,
             meter_value=[
                 {
                     "timestamp": "2021-06-21T16:15:09Z",
@@ -662,12 +735,62 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_stop_transaction(self):
+    async def send_meter_clock_data(self):
+        """Send periodic meter data notification."""
+        self.active_transactionId = 0
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
+                            "measurand": "Voltage",
+                            "context": "Sample.Clock",
+                            "unit": "V",
+                            "value": "228.490",
+                        },
+                        {
+                            "measurand": "Power.Active.Import",
+                            "context": "Sample.Clock",
+                            "unit": "W",
+                            "value": "0.000",
+                        },
+                        {
+                            "measurand": "Energy.Active.Import.Register",
+                            "context": "Sample.Clock",
+                            "unit": "kWh",
+                            "value": "1101.452",
+                        },
+                        {
+                            "measurand": "Current.Import",
+                            "context": "Sample.Clock",
+                            "unit": "A",
+                            "value": "0.054",
+                        },
+                        {
+                            "measurand": "Frequency",
+                            "context": "Sample.Clock",
+                            "value": "50.000",
+                        },
+                    ],
+                },
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_stop_transaction(self, delay: int = 0):
         """Send a stop transaction notification."""
+        # add delay to allow meter data to be processed
+        await asyncio.sleep(delay)
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
         request = call.StopTransactionPayload(
             meter_stop=54321,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
-            transaction_id=self._transactionId,
+            transaction_id=self.active_transactionId,
             reason="EVDisconnected",
             id_tag="test_cp",
         )
