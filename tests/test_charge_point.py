@@ -394,7 +394,7 @@ class ChargePoint(cpclass):
         if self.accept is True:
             return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
         else:
-            return call_result.UnlockConnectorPayload(UnlockStatus.rejected)
+            return call_result.UnlockConnectorPayload(UnlockStatus.unlock_failed)
 
     @on(Action.Reset)
     def on_reset(self, **kwargs):
