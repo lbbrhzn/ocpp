@@ -235,6 +235,7 @@ async def test_cms_responses(hass, socket_enabled):
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
+    # test processing of clock aligned meter data
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
         subprotocols=["ocpp1.6"],
@@ -249,11 +250,13 @@ async def test_cms_responses(hass, socket_enabled):
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
+                    cp.send_meter_clock_data(),
                 ),
                 timeout=3,
             )
         except asyncio.TimeoutError:
             pass
+    assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
@@ -660,6 +663,52 @@ class ChargePoint(cpclass):
                         },
                     ],
                 }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_clock_data(self):
+        """Send periodic meter data notification."""
+        self.active_transactionId = 0
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
+                            "measurand": "Voltage",
+                            "context": "Sample.Clock",
+                            "unit": "V",
+                            "value": "228.490",
+                        },
+                        {
+                            "measurand": "Power.Active.Import",
+                            "context": "Sample.Clock",
+                            "unit": "W",
+                            "value": "0.000",
+                        },
+                        {
+                            "measurand": "Energy.Active.Import.Register",
+                            "context": "Sample.Clock",
+                            "unit": "kWh",
+                            "value": "1101.452",
+                        },
+                        {
+                            "measurand": "Current.Import",
+                            "context": "Sample.Clock",
+                            "unit": "A",
+                            "value": "0.054",
+                        },
+                        {
+                            "measurand": "Frequency",
+                            "context": "Sample.Clock",
+                            "value": "50.000",
+                        },
+                    ],
+                },
             ],
         )
         resp = await self.call(request)
