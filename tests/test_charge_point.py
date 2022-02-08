@@ -275,7 +275,6 @@ async def test_cms_responses(hass, socket_enabled):
                     cs.charge_points[cs.cpid].trigger_boot_notification(),
                     cs.charge_points[cs.cpid].trigger_status_notification(),
                     test_switches(hass, socket_enabled),
-                    test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
                 ),
                 timeout=3,
