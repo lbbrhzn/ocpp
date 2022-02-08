@@ -446,7 +446,7 @@ class ChargePoint(cpclass):
             )
         else:
             return call_result.ClearChargingProfilePayload(
-                ClearChargingProfileStatus.rejected
+                ClearChargingProfileStatus.unknown
             )
 
     @on(Action.TriggerMessage)
