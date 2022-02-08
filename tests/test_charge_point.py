@@ -279,7 +279,7 @@ class ChargePoint(cpclass):
     def __init__(self, id, connection, response_timeout=30):
         """Init extra variables for testing."""
         super().__init__(id, connection)
-        self.active_transactionId = 0
+        self.active_transactionId = 1000
 
     @on(Action.GetConfiguration)
     def on_get_configuration(self, key, **kwargs):
