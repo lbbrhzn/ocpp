@@ -140,7 +140,7 @@ class CentralSystem:
         self.websocket_close_timeout = entry.data.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         )
-        self.WEBSOCKET_PING_TRIES = entry.data.get(
+        self.websocket_ping_tries = entry.data.get(
             CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
         )
         self.websocket_ping_interval = entry.data.get(
@@ -846,10 +846,16 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
             except asyncio.TimeoutError as timeout_exception:
+                _LOGGER.debug(
+                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 timeout_counter += 1
-                if timeout_counter > self.central.WEBSOCKET_PING_TRIES:
+                if timeout_counter > self.central.websocket_ping_tries:
+                    _LOGGER.debug(
+                        f"Connection to '{self.id}' timed out after '{self.central.websocket_ping_tries}' ping tries",
+                    )
                     raise timeout_exception
                 else:
                     continue
@@ -873,7 +879,7 @@ class ChargePoint(cp):
         try:
             await asyncio.gather(*self.tasks)
         except asyncio.TimeoutError:
-            _LOGGER.debug(f"Timeout in connection '{self.id}'")
+            pass
         except websockets.exceptions.WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
         except Exception as other_exception:
