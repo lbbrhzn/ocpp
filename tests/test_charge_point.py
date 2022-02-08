@@ -412,7 +412,9 @@ class ChargePoint(cpclass):
                 RemoteStartStopStatus.accepted
             )
         else:
-            call_result.RemoteStopTransactionPayload(RemoteStartStopStatus.rejected)
+            return call_result.RemoteStopTransactionPayload(
+                RemoteStartStopStatus.rejected
+            )
 
     @on(Action.RemoteStopTransaction)
     def on_remote_stop_transaction(self, **kwargs):
