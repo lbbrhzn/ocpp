@@ -211,7 +211,7 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
-    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(20)
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(0)
     assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
