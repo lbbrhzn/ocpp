@@ -388,7 +388,6 @@ class ChargePoint(cp):
 
         try:
             self.status = STATE_OK
-            await self.async_update_device_info({})
             await asyncio.sleep(2)
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
