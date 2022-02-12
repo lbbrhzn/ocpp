@@ -323,6 +323,7 @@ class ChargePoint(cp):
         self.active_transaction_id: int = 0
         self.triggered_boot_notification = False
         self.received_boot_notification = False
+        self.post_connect_success = False
         self.tasks = None
         self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
@@ -453,6 +454,7 @@ class ChargePoint(cp):
                     handle_get_diagnostics,
                     GDIAG_SERVICE_DATA_SCHEMA,
                 )
+            self.post_connect_success = True
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
@@ -907,7 +909,12 @@ class ChargePoint(cp):
         self.status = STATE_OK
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
-        await self.run([super().start(), self.monitor_connection()])
+        if self.post_connect_success is True:
+            await self.run([super().start(), self.monitor_connection()])
+        else:
+            await self.run(
+                [super().start(), self.post_connect(), self.monitor_connection()]
+            )
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
