@@ -394,11 +394,7 @@ class ChargePoint(cp):
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
-            if prof.REM in self._attr_supported_features:
-                if self.received_boot_notification is False:
-                    await self.trigger_boot_notification()
-                await self.trigger_status_notification()
-            await self.become_operative()
+            await self.set_availability()
             await self.get_configuration(ckey.heartbeat_interval.value)
             await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
@@ -455,6 +451,11 @@ class ChargePoint(cp):
                     GDIAG_SERVICE_DATA_SCHEMA,
                 )
             self.post_connect_success = True
+            # nice to have, but not needed for integration to function
+            if prof.REM in self._attr_supported_features: 
+                if self.received_boot_notification is False: 
+                    await self.trigger_boot_notification() 
+                await self.trigger_status_notification()
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
@@ -508,10 +509,6 @@ class ChargePoint(cp):
                 return_value = False
         return return_value
 
-    async def become_operative(self):
-        """Become operative."""
-        resp = await self.set_availability()
-        return resp
 
     async def clear_profile(self):
         """Clear all charging profiles."""
