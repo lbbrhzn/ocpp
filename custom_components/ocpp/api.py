@@ -451,7 +451,10 @@ class ChargePoint(cp):
                     GDIAG_SERVICE_DATA_SCHEMA,
                 )
             self.post_connect_success = True
+            _LOGGER.debug(f"'{self.id}' post connection setup completed successfully",)
+
             # nice to have, but not needed for integration to function
+            # and can cause issues with some chargers
             if prof.REM in self._attr_supported_features: 
                 if self.received_boot_notification is False: 
                     await self.trigger_boot_notification() 
