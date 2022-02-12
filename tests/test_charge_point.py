@@ -268,6 +268,7 @@ async def test_cms_responses(hass, socket_enabled):
         # use same id to ensure metrics populated
         cp = ChargePoint("CP_1_test", ws)
         cp.accept = False
+        cp.received_boot_notification = False
         try:
             await asyncio.wait_for(
                 asyncio.gather(
