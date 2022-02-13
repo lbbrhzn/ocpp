@@ -323,6 +323,7 @@ class ChargePoint(cp):
         self.active_transaction_id: int = 0
         self.triggered_boot_notification = False
         self.received_boot_notification = False
+        self.post_connect_success = False
         self.tasks = None
         self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
@@ -392,11 +393,7 @@ class ChargePoint(cp):
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
-            if prof.REM in self._attr_supported_features:
-                if self.received_boot_notification is False:
-                    await self.trigger_boot_notification()
-                await self.trigger_status_notification()
-            await self.become_operative()
+            await self.set_availability()
             await self.get_configuration(ckey.heartbeat_interval.value)
             await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
@@ -452,6 +449,15 @@ class ChargePoint(cp):
                     handle_get_diagnostics,
                     GDIAG_SERVICE_DATA_SCHEMA,
                 )
+            self.post_connect_success = True
+            _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
+
+            # nice to have, but not needed for integration to function
+            # and can cause issues with some chargers
+            if prof.REM in self._attr_supported_features:
+                if self.received_boot_notification is False:
+                    await self.trigger_boot_notification()
+                await self.trigger_status_notification()
         except (NotImplementedError) as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
@@ -504,11 +510,6 @@ class ChargePoint(cp):
                 _LOGGER.warning("Failed with response: %s", resp.status)
                 return_value = False
         return return_value
-
-    async def become_operative(self):
-        """Become operative."""
-        resp = await self.set_availability()
-        return resp
 
     async def clear_profile(self):
         """Clear all charging profiles."""
@@ -906,7 +907,12 @@ class ChargePoint(cp):
         self.status = STATE_OK
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
-        await self.run([super().start(), self.monitor_connection()])
+        if self.post_connect_success is True:
+            await self.run([super().start(), self.monitor_connection()])
+        else:
+            await self.run(
+                [super().start(), self.post_connect(), self.monitor_connection()]
+            )
 
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
