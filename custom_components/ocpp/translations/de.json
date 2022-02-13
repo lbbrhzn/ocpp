@@ -1,0 +1,58 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "OCPP-Konfiguration",
+                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier nach: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "host": "Host-Adresse des Zentralsystems",
+                    "port": "Portnummer des Zentralsystems",
+                    "csid": "Identität des Zentralsystems",
+                    "cpid": "Identität des Ladestation",
+                    "meter_interval": "Abtastintervall Laden (Sekunden)",
+                    "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
+                    "websocket_close_timeout": "Timeout beim Schließen des Websockets (Sekunden)",
+                    "websocket_ping_tries": "Verbindungsversuche vor dem Schließen des Websocket",
+                    "websocket_ping_interval": "Websocket-Ping-Intervall (Sekunden)",
+                    "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
+                    "skip_schema_validation": "OCPP-Schemavalidierung überspringen"
+                }
+            },
+            "measurands": {
+                "title": "OCPP-Messwerte",
+                "description": "Wähle aus, welche Messwerte im Home Assistant angezeigt werden sollen.",
+                "data": {
+                    "Current.Export": "Momentaner Stromfluss von E-Auto",
+                    "Current.Import": "Momentaner Stromfluss zu E-Auto",
+                    "Current.Offered": "Maximaler Strom, der dem E-Auto angeboten wird",
+                    "Energy.Active.Export.Register": "In das Netz exportierte Wirkenergie",
+                    "Energy.Active.Import.Register": "Aus dem Netz importierte Wirkenergie",
+                    "Energy.Reactive.Export.Register": "In das Netz exportierte Blindenergie",
+                    "Energy.Reactive.Import.Register": "Aus dem Netz importierte Blindenergie",
+                    "Energy.Active.Export.Interval": "Im letzten Intervall in das Netz exportierte Wirkenergie",
+                    "Energy.Active.Import.Interval": "Im letzten Intervall aus dem Netz importierte Wirkenergie",
+                    "Energy.Reactive.Export.Interval": "Im letzten Intervall ins Netz exportierte Blindenergie",
+                    "Energy.Reactive.Import.Interval": "Im letzten Intervall aus dem Netz importierte Blindenergie",
+                    "Frequency": "Netzfrequenz",
+                    "Power.Active.Export": "Von E-Auto exportierte momentane Wirkleistung",
+                    "Power.Active.Import": "Von E-Auto importierte momentane Wirkleistung",
+                    "Power.Factor": "Unmittelbarer Leistungsfaktor des gesamten Energieflusses",
+                    "Power.Offered": "Maximale dem E-Auto angebotene Leistung",
+                    "Power.Reactive.Export": "Von E-Auto exportierte momentane Blindleistung",
+                    "Power.Reactive.Import": "Von E-Auto importierte momentane Blindleistung",
+                    "RPM": "Lüfterdrehzahl in RPM",
+                    "SoC": "Ladezustand des EV in Prozent",
+                    "Temperature": "Temperaturmesswert in der Ladestation",
+                    "Voltage": "Momentane AC-Effektivspannung"
+                }
+            }
+        },
+        "error": {
+            "auth": "Benutzername/Passwort ist falsch.",
+            "measurand": "Unbekannter Messwert"
+        },
+        "abort": {
+            "single_instance_allowed": "Nur eine Instanz ist erlaubt."
+        }
+    }
+}
