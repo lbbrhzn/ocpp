@@ -207,7 +207,7 @@ class CentralSystem:
             await charge_point.start()
         else:
             _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-            charge_point: ChargePoint = self.charge_points[self.cpid]
+            charge_point = self.charge_points[self.cpid]
             await charge_point.reconnect(websocket)
         _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
