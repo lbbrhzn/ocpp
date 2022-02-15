@@ -64,7 +64,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         if ent.key == "maximum_current":
             ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
             ent.max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-            entities.append(OcppNumber(hass, central_system, cp_id, ent))
+        entities.append(OcppNumber(hass, central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
