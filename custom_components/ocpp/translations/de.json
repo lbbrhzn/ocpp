@@ -9,6 +9,7 @@
                     "port": "Portnummer des Zentralsystems",
                     "csid": "Identität des Zentralsystems",
                     "cpid": "Identität des Ladestation",
+                    "max_current": "Maximaler Ladestrom",
                     "meter_interval": "Abtastintervall Laden (Sekunden)",
                     "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
                     "websocket_close_timeout": "Timeout beim Schließen des Websockets (Sekunden)",
