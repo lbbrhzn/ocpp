@@ -16,7 +16,15 @@ from homeassistant.helpers.restore_state import RestoreEntity
 import voluptuous as vol
 
 from .api import CentralSystem
-from .const import CONF_CPID, DATA_UPDATED, DEFAULT_CPID, DOMAIN, ICON
+from .const import (
+    CONF_CPID,
+    CONF_MAX_CURRENT,
+    DATA_UPDATED,
+    DEFAULT_CPID,
+    DEFAULT_MAX_CURRENT,
+    DOMAIN,
+    ICON,
+)
 from .enums import Profiles
 
 
@@ -36,9 +44,9 @@ NUMBERS: Final = [
         key="maximum_current",
         name="Maximum_Current",
         icon=ICON,
-        initial_value=32,
+        initial_value=DEFAULT_MAX_CURRENT,
         min_value=0,
-        max_value=32,
+        max_value=DEFAULT_MAX_CURRENT,
         step=1,
     ),
 ]
@@ -46,13 +54,17 @@ NUMBERS: Final = [
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
+
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
     entities = []
 
     for ent in NUMBERS:
-        entities.append(OcppNumber(hass, central_system, cp_id, ent))
+        if ent.key == "maximum_current":
+            ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+            ent.max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+            entities.append(OcppNumber(hass, central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
