@@ -8,24 +8,24 @@
                     "host": "Host-Adresse des Zentralsystems",
                     "port": "Portnummer des Zentralsystems",
                     "csid": "Identität des Zentralsystems",
-                    "cpid": "Identität des Ladestation",
+                    "cpid": "Identität der Ladestation",
                     "max_current": "Maximaler Ladestrom",
                     "meter_interval": "Abtastintervall Laden (Sekunden)",
                     "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
                     "websocket_close_timeout": "Timeout beim Schließen des Websockets (Sekunden)",
-                    "websocket_ping_tries": "Verbindungsversuche vor dem Schließen des Websocket",
+                    "websocket_ping_tries": "Verbindungsversuche vor dem Schließen des Websockets",
                     "websocket_ping_interval": "Websocket-Ping-Intervall (Sekunden)",
                     "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
-                    "skip_schema_validation": "OCPP-Schemavalidierung überspringen"
+                    "skip_schema_validation": "Überspringe OCPP-Schemavalidierung"
                 }
             },
             "measurands": {
                 "title": "OCPP-Messwerte",
-                "description": "Wähle aus, welche Messwerte im Home Assistant angezeigt werden sollen.",
+                "description": "Wähle aus welche Messwerte in Home Assistant angezeigt werden sollen.",
                 "data": {
-                    "Current.Export": "Momentaner Stromfluss von E-Auto",
-                    "Current.Import": "Momentaner Stromfluss zu E-Auto",
-                    "Current.Offered": "Maximaler Strom, der dem E-Auto angeboten wird",
+                    "Current.Export": "Momentane Stromstärke vom E-Auto",
+                    "Current.Import": "Momentaner Stromstärke zum E-Auto",
+                    "Current.Offered": "Maximale dem E-Auto angebotene Stromstärke",
                     "Energy.Active.Export.Register": "In das Netz exportierte Wirkenergie",
                     "Energy.Active.Import.Register": "Aus dem Netz importierte Wirkenergie",
                     "Energy.Reactive.Export.Register": "In das Netz exportierte Blindenergie",
@@ -42,7 +42,7 @@
                     "Power.Reactive.Export": "Von E-Auto exportierte momentane Blindleistung",
                     "Power.Reactive.Import": "Von E-Auto importierte momentane Blindleistung",
                     "RPM": "Lüfterdrehzahl in RPM",
-                    "SoC": "Ladezustand des EV in Prozent",
+                    "SoC": "Ladezustand des E-Autos in Prozent",
                     "Temperature": "Temperaturmesswert in der Ladestation",
                     "Voltage": "Momentane AC-Effektivspannung"
                 }
@@ -53,7 +53,7 @@
             "measurand": "Unbekannter Messwert"
         },
         "abort": {
-            "single_instance_allowed": "Nur eine Instanz ist erlaubt."
+            "single_instance_allowed": "Es ist nur eine Instanz erlaubt."
         }
     }
 }
