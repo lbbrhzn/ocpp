@@ -1,0 +1,2 @@
+- name: Release Changelog Builder
+  uses: mikepenz/release-changelog-builder-action@v2.9.0
