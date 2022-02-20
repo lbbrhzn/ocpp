@@ -1,4 +1,4 @@
-name: 'CI'
+name: 'changelog'
 on:
   push:
     tags:
@@ -12,6 +12,8 @@ jobs:
       - name: Build Changelog
         id: github_release
         uses: mikepenz/release-changelog-builder-action@{latest-release}
+        with:
+          fromTag: v0.4.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
