@@ -9,6 +9,7 @@
                     "port": "Poort",
                     "csid": "Central system identifier",
                     "cpid": "Charge point identifier",
+                    "max_current": "Maximale laadstroom",
                     "meter_interval": "Meetinterval (secondes)",
                     "websocket_close_timeout": "Websocket close timeout (secondes)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
