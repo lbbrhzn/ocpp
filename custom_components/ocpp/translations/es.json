@@ -1,0 +1,58 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configuración OCPP",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un vistazo en: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "host": "Dirección de host del sistema central",
+                    "port": "Número de puerto del sistema central",
+                    "csid": "Nombre del sistema central",
+                    "cpid": "Nombre del punto de carga",
+                    "meter_interval": "Intervalo de mediciones (segundos)",
+                    "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
+                    "websocket_close_timeout": "Tiempo de espera Websocket (segundos)",
+                    "websocket_ping_tries": "Reintentos de conexión Websocket",
+                    "websocket_ping_interval": "Intervalo ping Websocket (segundos)",
+                    "websocket_ping_timeout": "Tiempo de espera ping Websocket (segundos)",
+                    "skip_schema_validation": "Omitir validación esquema OCPP"
+                }
+            },
+            "measurands": {
+                "title": "Mediciones OCPP",
+                "description": "Seleccione qué medida(s) debe(n) mostrarse en el Asistente de Inicio.",
+                "data": {
+                    "Current.Export": "Flujo de corriente instantáneo del VE",
+                    "Current.Import": "Flujo instantáneo de corriente hacia el VE",
+                    "Current.Offered": "Corriente máxima ofrecida al VE",
+                    "Energy.Active.Export.Register": "Energía activa exportada a la red",
+                    "Energy.Active.Import.Register": "Energía activa importada de la red",
+                    "Energy.Reactive.Export.Register": "Energía reactiva exportada a la red",
+                    "Energy.Reactive.Import.Register": "Energía reactiva importada de la red",
+                    "Energy.Active.Export.Interval": "Energía activa exportada a la red durante el último intervalo",
+                    "Energy.Active.Import.Interval": "Energía activa importada de la red durante el último intervalo",
+                    "Energy.Reactive.Export.Interval": "Energía reactiva exportada a la red durante el último intervalo",
+                    "Energy.Reactive.Import.Interval": "Energía reactiva importada de la red durante el último intervalo",
+                    "Frequency": "Frecuencia de la línea eléctrica",
+                    "Power.Active.Export": "Potencia activa instantánea exportada por el VE",
+                    "Power.Active.Import": "Potencia activa instantánea importada por el VE",
+                    "Power.Factor": "Factor de potencia instantáneo del flujo de energía total",
+                    "Power.Offered": "Potencia máxima ofrecida al VE",
+                    "Power.Reactive.Export": "Potencia reactiva instantánea exportada por el VE",
+                    "Power.Reactive.Import": "Potencia reactiva instantánea importada por el VE",
+                    "RPM": "Velocidad del ventilador en RPM",
+                    "SoC": "Estado de carga del VE en porcentaje",
+                    "Temperature": "Lectura de la temperatura en el interior del punto de carga",
+                    "Voltage": "Tensión de alimentación AC RMS instantánea"
+                }
+            }
+        },
+        "error": {
+            "auth": "Usuario/contraseña incorrecto.",
+            "measurand": "Medida desconocida"
+        },
+        "abort": {
+            "single_instance_allowed": "Sólo se permite una única instancia."
+        }
+    }
+}
