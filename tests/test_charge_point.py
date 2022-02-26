@@ -378,7 +378,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return call_result.GetConfigurationPayload(unknown_key=[{key[0]}])
+                return call_result.GetConfigurationPayload(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.charge_profile_max_stack_level.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "3"}]
