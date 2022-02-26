@@ -358,14 +358,9 @@ class ChargePoint(cpclass):
                 ]
             )
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
-            if self.accept is True:
-                return call_result.GetConfigurationPayload(
-                    configuration_key=[
-                        {"key": key[0], "readonly": False, "value": "60"}
-                    ]
-                )
-            else:
-                return call_result.GetConfigurationPayload(unknown_key=[{key[0]}])
+            return call_result.GetConfigurationPayload(
+                configuration_key=[{"key": key[0], "readonly": False, "value": "60"}]
+            )
         if (
             key[0]
             == ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value
@@ -376,9 +371,14 @@ class ChargePoint(cpclass):
                 ]
             )
         if key[0] == ConfigurationKey.authorize_remote_tx_requests.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[{"key": key[0], "readonly": False, "value": "false"}]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {"key": key[0], "readonly": False, "value": "false"}
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(unknown_key=[{key[0]}])
         if key[0] == ConfigurationKey.charge_profile_max_stack_level.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "3"}]
