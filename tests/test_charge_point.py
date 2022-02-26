@@ -59,7 +59,7 @@ async def test_cms_responses(hass, socket_enabled):
                 blocking=True,
             )
             assert result
-
+            await asyncio.sleep(1)
             result = await hass.services.async_call(
                 SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
