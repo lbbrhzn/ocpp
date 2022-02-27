@@ -620,7 +620,7 @@ class ChargePoint(cp):
         Check if authorisation enabled, if it is disable it before remote start
         """
         resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp.lower() == "true":
+        if resp is True:
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         req = call.RemoteStartTransactionPayload(
             connector_id=1, id_tag=self._metrics[cdet.identifier.value].value

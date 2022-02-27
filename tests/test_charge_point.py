@@ -59,7 +59,7 @@ async def test_cms_responses(hass, socket_enabled):
                 blocking=True,
             )
             assert result
-
+            await asyncio.sleep(1)
             result = await hass.services.async_call(
                 SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
@@ -337,9 +337,16 @@ class ChargePoint(cpclass):
                 configuration_key=[{"key": key[0], "readonly": False, "value": "1"}]
             )
         if key[0] == ConfigurationKey.web_socket_ping_interval.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[{"key": key[0], "readonly": False, "value": "60"}]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {"key": key[0], "readonly": False, "value": "60"}
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
+                )
         if key[0] == ConfigurationKey.meter_values_sampled_data.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[
@@ -364,9 +371,14 @@ class ChargePoint(cpclass):
                 ]
             )
         if key[0] == ConfigurationKey.authorize_remote_tx_requests.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[{"key": key[0], "readonly": False, "value": "false"}]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {"key": key[0], "readonly": False, "value": "false"}
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.charge_profile_max_stack_level.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "3"}]
