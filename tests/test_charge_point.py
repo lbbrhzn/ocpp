@@ -423,6 +423,7 @@ class ChargePoint(cpclass):
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         if self.accept is True:
+            asyncio.create_task(self.send_start_transaction())
             return call_result.RemoteStartTransactionPayload(
                 RemoteStartStopStatus.accepted
             )
