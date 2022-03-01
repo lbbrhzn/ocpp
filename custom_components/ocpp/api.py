@@ -1089,6 +1089,9 @@ class ChargePoint(cp):
                 self._metrics[csess.session_energy.value].value = float(
                     self._metrics[DEFAULT_MEASURAND].value or 0
                 ) - float(self._metrics[csess.meter_start.value].value)
+                self._metrics[csess.session_energy.value].extra_attr = {
+                    cstat.id_tag.name: self._metrics[cdet.identifier.value].value
+                }
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValuesPayload()
 
