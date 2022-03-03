@@ -3,6 +3,7 @@
 # -- Project information
 
 project = "homeassistant_ocpp"
+master_doc = 'index'
 
 # -- General configuration
 
