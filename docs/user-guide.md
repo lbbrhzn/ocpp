@@ -1,4 +1,5 @@
-# User guide
+User guide
+==========
 
 ## Installing the OCPP Integration
 
