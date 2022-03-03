@@ -5,9 +5,6 @@ home-assistant-ocpp
 
 This is a Home Assistant integration for Electric Vehicle chargers that support the Open Charge Point Protocol.
 
-
-Table of Contents
-=================
 .. toctree::
    :maxdepth: 16
 
