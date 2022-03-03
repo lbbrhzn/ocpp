@@ -1,4 +1,5 @@
-# Debugging
+Debugging
+=========
 
 To enable debug logging for this integration and related libraries you
 can control this in your Home Assistant `configuration.yaml`
