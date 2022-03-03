@@ -1,4 +1,4 @@
-# homeassistant-ocpp v0.4.20
+# home-assistant-ocpp v0.4.20
 
 Documents
 ---------
