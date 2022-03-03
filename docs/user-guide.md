@@ -2,7 +2,7 @@
 
 OCPP is a Home Assistant integration for Electric Vehicle chargers that support the Open Charge Point Protocol.
 
-# User Guide
+# User guide
 
 ## Installing the OCPP Integration
 
