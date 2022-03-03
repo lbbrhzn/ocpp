@@ -1,5 +1,6 @@
-.. image::https://github.com/home-assistant/brands/raw/master/custom_integrations/ocpp/icon.png
-
+.. image:: https://github.com/home-assistant/brands/raw/master/custom_integrations/ocpp/icon.png
+   :align: center
+   
 home-assistant-ocpp
 -------------------
 
