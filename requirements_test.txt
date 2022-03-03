@@ -1,5 +1,5 @@
 -r requirements_dev.txt
-pytest-homeassistant-custom-component==0.6.21
+pytest-homeassistant-custom-component==0.6.22
 ocpp==0.13.1
 websockets==10.2
 pytest-cov
