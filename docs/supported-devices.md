@@ -1,4 +1,5 @@
-# Supported devices
+Supported devices
+=================
 
 All OCPP 1.6j compatible devices should be supported, but not every device offers the same level of functionality. So far, we've tried:
 
