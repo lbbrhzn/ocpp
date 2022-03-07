@@ -3,7 +3,7 @@ Installation
 
 
 ## Install HACS
-- If you have not yet installed HACS, go get it at https://hacs.xyz/ and walk through the installation and configuration.
+- If you have not yet installed HACS, go get it at [https://hacs.xyz](https://hacs.xyz/) and walk through the installation and configuration.
 
 ## Install the OCPP Repository
 - In Home Assistant, select HACS / Integrations / + Explore & add repositories.
