@@ -1,6 +1,7 @@
 Installation
 ============
 
+
 ## Install HACS
 - If you have not yet installed HACS, go get it at https://hacs.xyz/ and walk through the installation and configuration.
 
