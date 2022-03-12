@@ -1,6 +1,3 @@
-Documentation
-===================
-
 This folder contains all the documentation. Changes are automatically updated to [readthedocs](https://home-assistant-ocpp.readthedocs.io) and the 
 [wiki](https://github.com/lbbrhzn/ocpp/wiki).
 
