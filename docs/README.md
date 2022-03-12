@@ -6,7 +6,7 @@ This folder contains all the documentation. Changes are automatically updated to
 
 Readthedocs
 -----------
-The toplevel file for readthedocs [index.rst](index.rst)
+The toplevel file for readthedocs is [index.rst](index.rst)
 
 Wiki
 ----
