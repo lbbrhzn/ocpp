@@ -10,3 +10,4 @@ Documents
 * [Development](development.md)
 * [Debugging](debugging.md)
 
+Documentation is also available on [readthedocs](https://home-assistant-ocpp.readthedocs.io)
