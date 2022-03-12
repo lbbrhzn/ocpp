@@ -6,3 +6,13 @@ OCPP is a Home Assistant integration for Electric Vehicle chargers that support 
 
 The Wiki contents is automatically generated from the [docs](https://github.com/lbbrhzn/ocpp/tree/main/docs) folder.
 It is also published on [readthedocs](https://home-assistant-ocpp.readthedocs.io)
+
+Contents
+---------
+* [Installation](installation.md)
+* [Supported devices](supported-devices.md)
+* [User guide](user-guide.md)
+* [Support](support.md)
+* [Development](development.md)
+* [Debugging](debugging.md)
+
