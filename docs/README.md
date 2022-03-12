@@ -12,7 +12,7 @@ Wiki
 ----
 The toplevel file for the wiki is [Home.md](Home.md)
 
-Chapters
+Contents
 ---------
 * [Installation](installation.md)
 * [Supported devices](supported-devices.md)
