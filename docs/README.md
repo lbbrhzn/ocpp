@@ -1,7 +1,7 @@
 home-assistant-ocpp
 ===================
 
-The documentation is published automatically to [readthedocs](https://home-assistant-ocpp.readthedocs.io)
+The documentation in this folder is published automatically to [readthedocs](https://home-assistant-ocpp.readthedocs.io)
 
 Documents
 ---------
