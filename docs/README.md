@@ -1,6 +1,8 @@
 home-assistant-ocpp
 ===================
 
+The documentation is published automatically to [readthedocs](https://home-assistant-ocpp.readthedocs.io)
+
 Documents
 ---------
 * [Installation](installation.md)
@@ -10,4 +12,3 @@ Documents
 * [Development](development.md)
 * [Debugging](debugging.md)
 
-The documentation is published automatically to [readthedocs](https://home-assistant-ocpp.readthedocs.io)
