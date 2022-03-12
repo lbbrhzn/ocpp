@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
 from homeassistant.helpers import device_registry
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
+
+from ocpp.v16.enums import AuthorizationStatus
 
 from .api import CentralSystem
 from .const import (
@@ -24,7 +26,6 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from ocpp.v16.enums import AuthorizationStatus
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
@@ -52,7 +53,7 @@ CONFIG_SCHEMA = vol.Schema(
 
 async def async_setup(hass: HomeAssistant, config: Config):
     """Read configuration from yaml."""
-    if not DOMAIN in hass.data:
+    if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
     hass.data[DOMAIN][CONFIG] = config
     return True
