@@ -2,20 +2,59 @@
 
 import asyncio
 import logging
+import voluptuous as vol
+import homeassistant.helpers.config_validation as cv
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
 from homeassistant.helpers import device_registry
 
 from .api import CentralSystem
-from .const import CONF_CPID, CONF_CSID, DEFAULT_CPID, DEFAULT_CSID, DOMAIN, PLATFORMS
+from .const import (
+    CONF_AUTH_LIST,
+    CONF_AUTH_STATUS,
+    CONF_CPID,
+    CONF_CSID,
+    CONF_DEFAULT_AUTH_STATUS,
+    CONF_ID_TAG,
+    CONF_NAME,
+    CONFIG,
+    DEFAULT_CPID,
+    DEFAULT_CSID,
+    DOMAIN,
+    PLATFORMS,
+)
+from ocpp.v16.enums import AuthorizationStatus
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 
+AUTH_LIST_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_ID_TAG): cv.string,
+        vol.Optional(CONF_NAME): cv.string,
+        vol.Optional(CONF_AUTH_STATUS): cv.string,
+    }
+)
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Optional(
+            CONF_DEFAULT_AUTH_STATUS, default=AuthorizationStatus.accepted.value
+        ): cv.string,
+        vol.Optional(CONF_AUTH_LIST, default={}): vol.Schema(
+            {cv.string: AUTH_LIST_SCHEMA}
+        ),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 
 async def async_setup(hass: HomeAssistant, config: Config):
-    """Set up this integration using YAML is not supported."""
+    """Read configuration from yaml."""
+    if not DOMAIN in hass.data:
+        hass.data[DOMAIN] = {}
+    hass.data[DOMAIN][CONFIG] = config
     return True
 
 
