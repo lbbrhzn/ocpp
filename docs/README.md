@@ -1,10 +1,18 @@
-home-assistant-ocpp
+Documentation
 ===================
 
-The documentation in this folder is published automatically to [readthedocs](https://home-assistant-ocpp.readthedocs.io)
-and to the project [wiki](https://github.com/lbbrhzn/ocpp/wiki)
+This folder contains all the documentation. Changes are automatically updated to [readthedocs](https://home-assistant-ocpp.readthedocs.io) and the 
+[wiki](https://github.com/lbbrhzn/ocpp/wiki).
 
-Documents
+Readthedocs
+-----------
+The toplevel file for readthedocs [index.rst](index.rst)
+
+Wiki
+----
+The toplevel file for the wiki is [Home.md](Home.md)
+
+Chapters
 ---------
 * [Installation](installation.md)
 * [Supported devices](supported-devices.md)
