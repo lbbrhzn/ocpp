@@ -1,19 +1,20 @@
 default_config:
 
 ocpp:
+  default_authorization_status: 'Invalid'
   authorization_list:
     - id_tag: '12345678'
       name: 'My tag'
-      status : Accepted
+      authorization_status : Accepted
     - id_tag: 'CAFEBABE'
       name: 'Some other tag'
-      status: Blocked
+      authorization_status: Blocked
     - id_tag: 'DEADBEEF'
       name: 'Old tag'
       status: Expired
     - id_tag: '12341234'
       name: 'Invalid tag'
-      status: Invalid
+      authorization_status: Invalid
 
 logger:
   default: info

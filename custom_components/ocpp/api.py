@@ -54,6 +54,7 @@ from .const import (
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_HOST,
+    CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
@@ -1195,14 +1196,21 @@ class ChargePoint(cp):
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
-        # Check the authorizaton list
+        # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
+        # get the default authorization status. Use accept if not configured
         default_auth_status = config.get(
             CONF_DEFAULT_AUTH_STATUS, AuthorizationStatus.accepted.value
         )
+        # get the authorization list
         auth_list = config.get(CONF_AUTH_LIST, {})
-        auth_entry = auth_list.get(id_tag, {})
-        auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
+        # search for the entry, based on the id_tag
+        auth_status = default_auth_status
+        for auth_entry in auth_list:
+            if id_tag is auth_entry.get(CONF_ID_TAG, None):
+                # get the authorization status, use the default if not configured
+                auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
+                break
 
         if auth_status is AuthorizationStatus.accepted.value:
             self.active_transaction_id = int(time.time())
