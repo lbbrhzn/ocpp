@@ -776,7 +776,7 @@ class ChargePoint(cp):
         req = call.GetConfigurationPayload(key=[key])
 
         resp = await self.call(req)
-        
+
         if resp.unknown_key is not None:
             if key in resp.unknown_key:
                 _LOGGER.warning("%s is unknown (not supported)", key)
