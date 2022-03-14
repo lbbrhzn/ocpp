@@ -366,9 +366,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 return call_result.GetConfigurationPayload(
-                    configuration_key=[
-                        {"key": key[0], "readonly": True, "value": "60"}
-                    ]
+                    configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
                 )
         if (
             key[0]
