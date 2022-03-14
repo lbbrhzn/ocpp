@@ -777,6 +777,10 @@ class ChargePoint(cp):
 
         resp = await self.call(req)
 
+        if key in resp.unknown_key:
+            _LOGGER.warning("%s is unknown (not supported)", key)
+            return
+
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
             # it.
