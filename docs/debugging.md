@@ -17,8 +17,9 @@ The log file can be displayed in your webbrowser, by selecting:
 
 Configuration / Settings / Logs / LOAD FULL HOME ASSISTANT LOG
 
-![LOAD FULL HOME ASSISTANT LOG](https://user-images.githubusercontent.com/8673442/158487245-7d844c9e-fd67-46d9-a4b2-2af1ae522172.png)
+![LOAD FULL HOME ASSISTANT LOG](https://user-images.githubusercontent.com/8673442/158488329-64a2e38a-24d2-40ff-8743-643ebb337408.png)
 
 You can filter for OCPP related messages by typing 'ocpp' in the 'search logs' box at the top of the page.
 
-![search logs](https://user-images.githubusercontent.com/8673442/158487966-4e9dc3e3-6316-4cce-8215-56981e48a74e.png)
+![search logs](https://user-images.githubusercontent.com/8673442/158488440-a5ae8076-5f33-49dd-86cb-7521cc74d96a.png)
+
