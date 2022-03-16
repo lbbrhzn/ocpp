@@ -11,6 +11,7 @@ logger:
     custom_components.ocpp: debug
     websocket: debug
 ```
+See [Home Assistant Logger](https://www.home-assistant.io/integrations/logger/)  for more info.
 
 After a restart detailed log entries will appear in `/config/home-assistant.log`.
 The log file can be displayed in your webbrowser, by selecting:
