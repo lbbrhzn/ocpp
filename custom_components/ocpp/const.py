@@ -4,10 +4,14 @@ import homeassistant.const as ha
 
 from ocpp.v16.enums import Measurand, UnitOfMeasure
 
+CONF_AUTH_LIST = "authorization_list"
+CONF_AUTH_STATUS = "authorization_status"
 CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CSID = "csid"
+CONF_DEFAULT_AUTH_STATUS = "default_authorization_status"
 CONF_HOST = ha.CONF_HOST
+CONF_ID_TAG = "id_tag"
 CONF_ICON = ha.CONF_ICON
 CONF_IDLE_INTERVAL = "idle_interval"
 CONF_MAX_CURRENT = "max_current"
@@ -41,6 +45,7 @@ DEFAULT_WEBSOCKET_PING_TRIES = 2
 DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
 DOMAIN = "ocpp"
+CONFIG = "config"
 ICON = "mdi:ev-station"
 SLEEP_TIME = 60
 

@@ -48,9 +48,13 @@ from ocpp.v16.enums import (
 )
 
 from .const import (
+    CONF_AUTH_LIST,
+    CONF_AUTH_STATUS,
     CONF_CPID,
     CONF_CSID,
+    CONF_DEFAULT_AUTH_STATUS,
     CONF_HOST,
+    CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
@@ -61,6 +65,7 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
+    CONFIG,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
@@ -1200,16 +1205,38 @@ class ChargePoint(cp):
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
-        self._metrics[cstat.id_tag.value].value = id_tag
-        self.active_transaction_id = int(time.time())
-        self._metrics[cstat.stop_reason.value].value = ""
-        self._metrics[csess.transaction_id.value].value = self.active_transaction_id
-        self._metrics[csess.meter_start.value].value = int(meter_start) / 1000
-        self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.StartTransactionPayload(
-            id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
-            transaction_id=self.active_transaction_id,
+        # get the domain wide configuration
+        config = self.hass.data[DOMAIN].get(CONFIG, {})
+        # get the default authorization status. Use accept if not configured
+        default_auth_status = config.get(
+            CONF_DEFAULT_AUTH_STATUS, AuthorizationStatus.accepted.value
         )
+        # get the authorization list
+        auth_list = config.get(CONF_AUTH_LIST, {})
+        # search for the entry, based on the id_tag
+        auth_status = default_auth_status
+        for auth_entry in auth_list:
+            if id_tag is auth_entry.get(CONF_ID_TAG, None):
+                # get the authorization status, use the default if not configured
+                auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
+                break
+
+        if auth_status is AuthorizationStatus.accepted.value:
+            self.active_transaction_id = int(time.time())
+            self._metrics[cstat.id_tag.value].value = id_tag
+            self._metrics[cstat.stop_reason.value].value = ""
+            self._metrics[csess.transaction_id.value].value = self.active_transaction_id
+            self._metrics[csess.meter_start.value].value = int(meter_start) / 1000
+            result = call_result.StartTransactionPayload(
+                id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
+                transaction_id=self.active_transaction_id,
+            )
+        else:
+            result = call_result.StartTransactionPayload(
+                id_tag_info={om.status.value: auth_status}, transaction_id=0
+            )
+        self.hass.async_create_task(self.central.update(self.central.cpid))
+        return result
 
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
