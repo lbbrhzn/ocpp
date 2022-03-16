@@ -48,7 +48,7 @@ A typical log for a working connection should look like this:
 2022-03-16 16:36:20 DEBUG (MainThread) [custom_components.ocpp] Connection latency from 'central' to 'pulsar': ping=2.0 ms, pong=9.0 ms
 ```
 
-You can log even more information by enabling debug logging for websockets.server:
+To debug issues with establishing the ocpp connection, you can enable debug logging for websockets.server:
 
 ```
 logger:
@@ -57,7 +57,7 @@ logger:
     websockets.server: debug
 ```
 
-Filtering for websockets.server will yield this:
+Filtering for websockets.server should yield something like this:
 
 ```
 2022-03-16 16:33:08 INFO (MainThread) [websockets.server] server listening on 0.0.0.0:9000
