@@ -2,6 +2,7 @@
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/lbbrhzn/ocpp.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/lbbrhzn/ocpp/alerts/)
 [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/lbbrhzn/ocpp.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/lbbrhzn/ocpp/context:python)
 [![codecov](https://codecov.io/gh/lbbrhzn/ocpp/branch/main/graph/badge.svg?token=3FRJIF5KRW)](https://codecov.io/gh/lbbrhzn/ocpp)
+[![Documentation Status](https://readthedocs.org/projects/home-assistant-ocpp/badge/?version=latest)](https://home-assistant-ocpp.readthedocs.io/en/latest/?badge=latest)
 
 ![OCPP](https://github.com/home-assistant/brands/raw/master/custom_integrations/ocpp/icon.png)
 
