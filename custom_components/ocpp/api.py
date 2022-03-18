@@ -1205,12 +1205,22 @@ class ChargePoint(cp):
         # get the authorization list
         auth_list = config.get(CONF_AUTH_LIST, {})
         # search for the entry, based on the id_tag
-        auth_status = default_auth_status
+        auth_status = None
         for auth_entry in auth_list:
-            if id_tag is auth_entry.get(CONF_ID_TAG, None):
+            id_entry = auth_entry.get(CONF_ID_TAG, None)
+            if id_tag == id_entry:
                 # get the authorization status, use the default if not configured
                 auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
+                _LOGGER.debug(
+                    f"id_tag='{id_tag}' found in auth_list, authorization_status='{auth_status}'"
+                )
                 break
+
+        if auth_status is None:
+            auth_status = default_auth_status
+            _LOGGER.debug(
+                f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
+            )
 
         if auth_status is AuthorizationStatus.accepted.value:
             self.active_transaction_id = int(time.time())

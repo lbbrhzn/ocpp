@@ -53,11 +53,13 @@ CONFIG_SCHEMA = vol.Schema(
 
 async def async_setup(hass: HomeAssistant, config: Config):
     """Read configuration from yaml."""
+
+    ocpp_config = config.get(DOMAIN,{})
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
-    hass.data[DOMAIN][CONFIG] = config
+    hass.data[DOMAIN][CONFIG] = ocpp_config
+    _LOGGER.info(f"config = {ocpp_config}")
     return True
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up this integration from config entry."""
