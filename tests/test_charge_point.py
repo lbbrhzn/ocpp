@@ -345,7 +345,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 return call_result.GetConfigurationPayload(
-                    configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
+                    unknown_key=["WebSocketPingInterval"]
                 )
         if key[0] == ConfigurationKey.meter_values_sampled_data.value:
             return call_result.GetConfigurationPayload(
@@ -358,9 +358,16 @@ class ChargePoint(cpclass):
                 ]
             )
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[{"key": key[0], "readonly": False, "value": "60"}]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {"key": key[0], "readonly": False, "value": "60"}
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
+                )
         if (
             key[0]
             == ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value

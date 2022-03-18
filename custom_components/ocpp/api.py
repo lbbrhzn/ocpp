@@ -59,6 +59,7 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
+    CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SUBPROTOCOL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
@@ -74,6 +75,7 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
+    DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SUBPROTOCOL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
@@ -182,7 +184,9 @@ class CentralSystem:
         self, websocket: websockets.server.WebSocketServerProtocol, path: str
     ):
         """Request handler executed for every new OCPP connection."""
-
+        if self.config.get(CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION):
+            _LOGGER.warning("Skipping websocket subprotocol validation")
+            return
         try:
             requested_protocols = websocket.request_headers["Sec-WebSocket-Protocol"]
         except KeyError:
@@ -781,6 +785,11 @@ class ChargePoint(cp):
         req = call.GetConfigurationPayload(key=[key])
 
         resp = await self.call(req)
+
+        if resp.unknown_key is not None:
+            if key in resp.unknown_key:
+                _LOGGER.warning("%s is unknown (not supported)", key)
+                return
 
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
