@@ -3,7 +3,7 @@ default_config:
 ocpp:
   default_authorization_status: 'Invalid'
   authorization_list:
-    - id_tag: '12345678'
+    - id_tag: 'pulsar'
       name: 'My tag'
       authorization_status : Accepted
     - id_tag: 'CAFEBABE'
