@@ -41,7 +41,11 @@ SWITCHES: Final = [
         on_action=HAChargerServices.service_charge_start.name,
         off_action=HAChargerServices.service_charge_stop.name,
         metric_state=HAChargerStatuses.status_connector.value,
-        metric_condition=ChargePointStatus.charging.value,
+        metric_condition=[
+            ChargePointStatus.charging.value, 
+            ChargePointStatus.suspended_evse.value, 
+            ChargePointStatus.suspended_ev.value
+        ],
     ),
     OcppSwitchDescription(
         key="availability",
@@ -50,7 +54,7 @@ SWITCHES: Final = [
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
         metric_state=HAChargerStatuses.status_connector.value,
-        metric_condition=ChargePointStatus.available.value,
+        metric_condition=[ChargePointStatus.available.value],
         default_state=True,
     ),
 ]
@@ -110,7 +114,7 @@ class ChargePointSwitch(SwitchEntity):
             resp = self.central_system.get_metric(
                 self.cp_id, self.entity_description.metric_state
             )
-            if resp == self.entity_description.metric_condition:
+            if resp in self.entity_description.metric_condition:
                 self._state = True
             else:
                 self._state = False
