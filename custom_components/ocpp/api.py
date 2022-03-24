@@ -1,4 +1,4 @@
-"""Representation of a OCCP Entities."""
+"""Representation of  OCPP Entities."""
 from __future__ import annotations
 
 import asyncio
@@ -84,7 +84,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-    UNITS_OCCP_TO_HA,
+    UNITS_OCPP_TO_HA,
 )
 from .enums import (
     ConfigurationKey as ckey,
@@ -1370,7 +1370,7 @@ class Metric:
     @property
     def ha_unit(self):
         """Get the home assistant unit of the metric."""
-        return UNITS_OCCP_TO_HA.get(self._unit, self._unit)
+        return UNITS_OCPP_TO_HA.get(self._unit, self._unit)
 
     @property
     def extra_attr(self):
