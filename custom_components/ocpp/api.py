@@ -1197,18 +1197,8 @@ class ChargePoint(cp):
         )
         return call_result.DiagnosticsStatusNotificationPayload()
 
-    @on(Action.Authorize)
-    def on_authorize(self, id_tag, **kwargs):
-        """Handle an Authorization request."""
-        self._metrics[cstat.id_tag.value].value = id_tag
-
-        return call_result.AuthorizePayload(
-            id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
-        )
-
-    @on(Action.StartTransaction)
-    def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
-        """Handle a Start Transaction request."""
+    def get_authorization_status(self, id_tag):
+        """Get the authorization status for an id_tag."""
         # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         # get the default authorization status. Use accept if not configured
@@ -1234,8 +1224,21 @@ class ChargePoint(cp):
             _LOGGER.debug(
                 f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
             )
+        return auth_status
 
-        if auth_status is AuthorizationStatus.accepted.value:
+    @on(Action.Authorize)
+    def on_authorize(self, id_tag, **kwargs):
+        """Handle an Authorization request."""
+        self._metrics[cstat.id_tag.value].value = id_tag
+        auth_status = self.get_authorization_status(id_tag)
+        return call_result.AuthorizePayload(id_tag_info={om.status.value: auth_status})
+
+    @on(Action.StartTransaction)
+    def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
+        """Handle a Start Transaction request."""
+
+        auth_status = self.get_authorization_status(id_tag)
+        if auth_status == AuthorizationStatus.accepted.value:
             self.active_transaction_id = int(time.time())
             self._metrics[cstat.id_tag.value].value = id_tag
             self._metrics[cstat.stop_reason.value].value = ""
