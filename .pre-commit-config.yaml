@@ -1,11 +1,11 @@
 repos:
   - repo: https://github.com/asottile/pyupgrade
-    rev: v2.31.0
+    rev: v2.31.1
     hooks:
       - id: pyupgrade
         args: [--py37-plus]
   - repo: https://github.com/psf/black
-    rev: 21.12b0
+    rev: 22.1.0
     hooks:
       - id: black
         args:
@@ -22,7 +22,7 @@ repos:
           - --quiet-level=2
         exclude_types: [csv, json]
   - repo: https://gitlab.com/pycqa/flake8
-    rev: 4.0.1
+    rev: 3.9.2
     hooks:
       - id: flake8
         additional_dependencies:
@@ -30,7 +30,7 @@ repos:
           - pydocstyle==5.0.2
         files: ^(custom_components|homeassistant|script|tests)/.+\.py$
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.1
+    rev: 1.7.4
     hooks:
       - id: bandit
         args:

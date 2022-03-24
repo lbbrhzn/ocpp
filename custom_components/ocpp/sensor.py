@@ -142,14 +142,10 @@ class ChargePointMetric(SensorEntity):
             device_class = SensorDeviceClass.VOLTAGE
         elif self.metric.lower().startswith("energy."):
             device_class = SensorDeviceClass.ENERGY
-        elif (
-            self.metric
-            in [
-                Measurand.frequency,
-                Measurand.rpm,
-            ]
-            or self.metric.lower().startswith("frequency")
-        ):
+        elif self.metric in [
+            Measurand.frequency,
+            Measurand.rpm,
+        ] or self.metric.lower().startswith("frequency"):
             device_class = SensorDeviceClass.FREQUENCY
         elif self.metric.lower().startswith("power."):
             device_class = SensorDeviceClass.POWER
