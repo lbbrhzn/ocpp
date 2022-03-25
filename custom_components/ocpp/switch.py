@@ -42,8 +42,8 @@ SWITCHES: Final = [
         off_action=HAChargerServices.service_charge_stop.name,
         metric_state=HAChargerStatuses.status_connector.value,
         metric_condition=[
-            ChargePointStatus.charging.value, 
-            ChargePointStatus.suspended_evse.value, 
+            ChargePointStatus.charging.value,
+            ChargePointStatus.suspended_evse.value,
             ChargePointStatus.suspended_ev.value,
         ],
     ),
