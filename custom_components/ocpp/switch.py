@@ -44,7 +44,7 @@ SWITCHES: Final = [
         metric_condition=[
             ChargePointStatus.charging.value, 
             ChargePointStatus.suspended_evse.value, 
-            ChargePointStatus.suspended_ev.value
+            ChargePointStatus.suspended_ev.value,
         ],
     ),
     OcppSwitchDescription(
