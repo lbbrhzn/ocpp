@@ -30,8 +30,8 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Energy Active Import Register` or `Energy Session` (they give the same readings)
 * `Power Active Import` (instantaneous charging power)
 * `Current Offered` (maximum charging current available)
-* `Voltage`
-* `Frequency`
+* `Voltage` (single phase versions only)
+* `Frequency` (single phase versions only)
 * `Time Session` (elapsed time from start of charging session)
 
 ### Diagnostics
@@ -44,3 +44,4 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Charge Control`
 * `Availability` (must be set to ON before EV is plugged in)
 * `Maximum Current` (sets maximum charging current available)
+* `Reset`
