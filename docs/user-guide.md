@@ -36,7 +36,7 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 
 ### Diagnostics
 
-* `Status Connector` (shows the current state of charging/not charging/preparing/suspended etc)
+* `Status Connector` (shows the current state of available/preparing/charging/finishing/suspended etc)
 * `Stop Reason` (reason the charging session was stopped)
 
 ### Controls
