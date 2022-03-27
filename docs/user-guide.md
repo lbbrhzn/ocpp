@@ -30,8 +30,8 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Energy Active Import Register` or `Energy Session` (they give the same readings)
 * `Power Active Import` (instantaneous charging power)
 * `Current Offered` (maximum charging current available)
-* `Voltage` (single phase versions only, doesn't work on 3-phase)
-* `Frequency` (single phase versions only, doesn't work on 3-phase)
+* `Voltage` (single phase models only, doesn't work on 3-phase)
+* `Frequency` (single phase models only, doesn't work on 3-phase)
 * `Time Session` (elapsed time from start of charging session)
 
 ### Diagnostics
