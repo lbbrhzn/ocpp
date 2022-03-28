@@ -52,7 +52,7 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 
 * `Current Offered` (maximum charging current available)
 * `Time Session` (elapsed time from start of charging session)
-* `Temperature' (internal charger temperature)
+* `Temperature` (internal charger temperature)
 
 ### Diagnostics
 
