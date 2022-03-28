@@ -45,3 +45,23 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Availability` (must be set to ON before EV is plugged in)
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
+
+## Useful Entities for EVBox Elvi
+
+### Metrics
+
+* `Current Offered` (maximum charging current available)
+* `Time Session` (elapsed time from start of charging session)
+* `Temperature' (internal charger temperature)
+
+### Diagnostics
+
+* `Status Connector` (shows the current state of available/preparing/charging/finishing/suspended etc)
+* `Stop Reason` (reason the charging session was stopped)
+
+### Controls
+
+* `Charge Control`
+* `Availability` (must be set to ON before EV is plugged in)
+* `Maximum Current` (sets maximum charging current available)
+* `Reset`
