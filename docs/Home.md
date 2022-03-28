@@ -1,4 +1,4 @@
-<!-- This is top level document for the hitub Wiki -->
+<!-- This is top level document for the github Wiki -->
 
 ![OCPP](https://github.com/home-assistant/brands/raw/master/custom_integrations/ocpp/icon.png)
 
@@ -8,7 +8,7 @@ The Wiki contents is automatically generated from the [docs](https://github.com/
 It is also published on [readthedocs](https://home-assistant-ocpp.readthedocs.io)
 
 Contents
----------
+========
 <!-- links within the wiki should not use a file extension! -->
 * [Installation](installation)
 * [Supported devices](supported-devices)
