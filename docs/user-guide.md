@@ -62,6 +62,6 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 ### Controls
 
 * `Charge Control`
-* `Availability` (must be set to ON before EV is plugged in)
+* `Availability` (OFF when something causes a problem or during a reboot etc)
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
