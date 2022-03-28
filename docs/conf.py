@@ -3,7 +3,7 @@
 # -- Project information
 
 project = "home-assistant-ocpp"
-master_doc = 'index'
+master_doc = "index"
 
 # -- General configuration
 
@@ -29,3 +29,5 @@ html_theme = "sphinx_rtd_theme"
 
 # -- Options for EPUB output
 epub_show_urls = "footnote"
+
+exclude_patterns = ["build", "Home.md", "README.md"]
