@@ -478,9 +478,8 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
+        self._attr_supported_features = prof.CORE
         for key_value in resp.configuration_key:
-            if om.feature_profile_core.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.CORE
             if om.feature_profile_firmware.value in key_value[om.value.value]:
                 self._attr_supported_features |= prof.FW
             if om.feature_profile_smart.value in key_value[om.value.value]:
