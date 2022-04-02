@@ -497,12 +497,10 @@ class ChargePoint(cp):
             elif item == om.feature_profile_auth.value:
                 self._attr_supported_features |= prof.AUTH
             else:
-                _LOGGER.warning(
-                    "Unknown feature profile detected ignoring: %s", item
-                )
+                _LOGGER.warning("Unknown feature profile detected ignoring: %s", item)
                 await self.notify_ha(
                     f"Warning: Unknown feature profile detected ignoring {item}"
-                )    
+                )
         self._metrics[cdet.features.value].value = self._attr_supported_features
         _LOGGER.debug("Feature profiles returned: %s", feature_list)
 
