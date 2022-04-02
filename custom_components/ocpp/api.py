@@ -478,7 +478,7 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
-        feature_list = resp.configuration_key[om.value.value].split(",")
+        feature_list = (resp.configuration_key[om.value.value]).split(",")
         if feature_list is None:
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha(f"No feature profiles detected, defaulting to Core")
@@ -497,9 +497,11 @@ class ChargePoint(cp):
             elif item == om.feature_profile_auth.value:
                 self._attr_supported_features |= prof.AUTH
             else:
-                _LOGGER.warning("Unknown feature profile detected ignoring: %s", key_value)
+                _LOGGER.warning(
+                    "Unknown feature profile detected ignoring: %s", item
+                )
                 await self.notify_ha(
-                    f"Warning: Unknown feature profile detected ignoring {key_value}"
+                    f"Warning: Unknown feature profile detected ignoring {item}"
                 )    
         self._metrics[cdet.features.value].value = self._attr_supported_features
         _LOGGER.debug("Feature profiles returned: %s", feature_list)
