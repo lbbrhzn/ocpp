@@ -481,7 +481,7 @@ class ChargePoint(cp):
         feature_list = (resp.configuration_key[0][om.value.value]).split(",")
         if feature_list is None:
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
-            await self.notify_ha(f"No feature profiles detected, defaulting to Core")
+            await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
         for item in feature_list:
             if item == om.feature_profile_core.value:
