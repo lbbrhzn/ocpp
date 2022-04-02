@@ -155,7 +155,8 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
-
+    await asyncio.sleep(1)
+    
     # unsupported subprotocol
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1",
@@ -206,7 +207,7 @@ async def test_cms_responses(hass, socket_enabled):
                     # add delay to allow meter data to be processed
                     cp.send_stop_transaction(2),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
@@ -254,11 +255,13 @@ async def test_cms_responses(hass, socket_enabled):
                     test_buttons(hass, socket_enabled),
                     cp.send_meter_clock_data(),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
+    
+    await asyncio.sleep(1)
 
     # test ocpp rejection messages sent from charger to cms
     async with websockets.connect(
