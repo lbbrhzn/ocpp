@@ -319,15 +319,26 @@ class ChargePoint(cpclass):
     def on_get_configuration(self, key, **kwargs):
         """Handle a get configuration requests."""
         if key[0] == ConfigurationKey.supported_feature_profiles.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[
-                    {
-                        "key": key[0],
-                        "readonly": False,
-                        "value": "Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger",
-                    }
-                ]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {
+                            "key": key[0],
+                            "readonly": False,
+                            "value": "Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger,Dummy",
+                        }
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {
+                            "key": key[0],
+                            "readonly": False,
+                            "value": "",
+                        }
+                    ]
+                )
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
