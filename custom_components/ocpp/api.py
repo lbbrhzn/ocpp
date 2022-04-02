@@ -496,12 +496,12 @@ class ChargePoint(cp):
                 await self.notify_ha(
                     f"Warning: Unknown feature profile detected {key_value}"
                 )
-         if resp.configuration_key is None:
+        if resp.configuration_key is None:
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha(f"No feature profiles detected, defaulting to Core")
             self._attr_supported_features = prof.CORE    
-         self._metrics[cdet.features.value].value = self._attr_supported_features
-         _LOGGER.debug("Supported feature profiles: %s", key_value[om.value.value])
+        self._metrics[cdet.features.value].value = self._attr_supported_features
+        _LOGGER.debug("Supported feature profiles: %s", key_value[om.value.value])
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
