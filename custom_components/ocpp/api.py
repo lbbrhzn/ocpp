@@ -478,28 +478,29 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            if om.feature_profile_core.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.CORE
-            elif om.feature_profile_firmware.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.FW
-            elif om.feature_profile_smart.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.SMART
-            elif om.feature_profile_reservation.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.RES
-            elif om.feature_profile_remote.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.REM
-            elif om.feature_profile_auth.value in key_value[om.value.value]:
-                self._attr_supported_features |= prof.AUTH
-            else:
-                _LOGGER.warning("Unknown feature profile detected: %s", key_value)
-                await self.notify_ha(
-                    f"Warning: Unknown feature profile detected {key_value}"
-                )
-        if resp.configuration_key is None:
+        feature_list = resp.configuration_key[om.value.value].split(",")
+        if feature_list is None:
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha(f"No feature profiles detected, defaulting to Core")
-            self._attr_supported_features = prof.CORE    
+            feature_list = [om.feature_profile_core.value]
+        for item in feature_list:
+            if item == om.feature_profile_core.value:
+                self._attr_supported_features |= prof.CORE
+            elif item == om.feature_profile_firmware.value:
+                self._attr_supported_features |= prof.FW
+            elif item == om.feature_profile_smart.value:
+                self._attr_supported_features |= prof.SMART
+            elif item == om.feature_profile_reservation.value:
+                self._attr_supported_features |= prof.RES
+            elif item == om.feature_profile_remote.value:
+                self._attr_supported_features |= prof.REM
+            elif item == om.feature_profile_auth.value:
+                self._attr_supported_features |= prof.AUTH
+            else:
+                _LOGGER.warning("Unknown feature profile detected ignoring: %s", key_value)
+                await self.notify_ha(
+                    f"Warning: Unknown feature profile detected ignoring {key_value}"
+                )    
         self._metrics[cdet.features.value].value = self._attr_supported_features
         _LOGGER.debug("Supported feature profiles: %s", key_value[om.value.value])
 
