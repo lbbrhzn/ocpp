@@ -480,7 +480,7 @@ class ChargePoint(cp):
         resp = await self.call(req)
         if resp.configuration_key is None:
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
-            await self.notify_ha("No feature profiles detected, defaulting to Core")
+            await self.notify_ha(f"No feature profiles detected, defaulting to Core")
         self._attr_supported_features = prof.CORE
         for key_value in resp.configuration_key:
             if om.feature_profile_firmware.value in key_value[om.value.value]:
