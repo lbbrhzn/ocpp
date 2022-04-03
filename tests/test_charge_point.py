@@ -133,7 +133,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     # no subprotocol
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_nosub",
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_no_subprotocol", ws)
@@ -159,7 +159,7 @@ async def test_cms_responses(hass, socket_enabled):
     
     # unsupported subprotocol
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_unsup",
         subprotocols=["ocpp0.0"],
     ) as ws:
         # use a different id for debugging
@@ -187,11 +187,11 @@ async def test_cms_responses(hass, socket_enabled):
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_norm",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_normal", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -240,10 +240,10 @@ async def test_cms_responses(hass, socket_enabled):
     # should reconnect as already started above
     # test processing of clock aligned meter data
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_serv",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_services", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -265,11 +265,11 @@ async def test_cms_responses(hass, socket_enabled):
 
     # test ocpp rejection messages sent from charger to cms
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use same id to ensure metrics populated
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_error", ws)
         cp.accept = False
         cs.charge_points["test_cpid"].received_boot_notification = False
         cs.charge_points["test_cpid"].post_connect_success = False
