@@ -593,7 +593,7 @@ class ChargePoint(cp):
             _LOGGER.debug(
                 "ChargePointMaxProfile is not supported by this charger, trying TxDefaultProfile instead..."
             )
-            #try a lower stack level for chargers where level < maximum, not <=
+            # try a lower stack level for chargers where level < maximum, not <=
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
