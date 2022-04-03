@@ -269,10 +269,10 @@ async def test_cms_responses(hass, socket_enabled):
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use same id to ensure metrics populated
-        cp = ChargePoint("CP_1_error", ws)
-        cp.accept = False
         cs.charge_points["test_cpid"].received_boot_notification = False
         cs.charge_points["test_cpid"].post_connect_success = False
+        cp = ChargePoint("CP_1_error", ws)
+        cp.accept = False
         try:
             await asyncio.wait_for(
                 asyncio.gather(
