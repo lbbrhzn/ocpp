@@ -593,11 +593,12 @@ class ChargePoint(cp):
             _LOGGER.debug(
                 "ChargePointMaxProfile is not supported by this charger, trying TxDefaultProfile instead..."
             )
+            #try a lower stack level for chargers where level < maximum, not <=
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
-                    om.stack_level.value: stack_level,
+                    om.stack_level.value: stack_level - 1,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
                     om.charging_schedule.value: {
