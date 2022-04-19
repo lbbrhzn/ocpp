@@ -187,15 +187,6 @@ class CentralSystem:
         if self.config.get(CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION):
             _LOGGER.warning("Skipping websocket subprotocol validation")
         else:
-            try:
-                requested_protocols = websocket.request_headers[
-                    "Sec-WebSocket-Protocol"
-                ]
-            except KeyError:
-                _LOGGER.error(
-                    "Client hasn't requested any Subprotocol. Closing connection"
-                )
-                return await websocket.close()
             if websocket.subprotocol is not None:
                 _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
             else:
@@ -206,7 +197,7 @@ class CentralSystem:
                     "Protocols mismatched | expected Subprotocols: %s,"
                     " but client supports  %s | Closing connection",
                     websocket.available_subprotocols,
-                    requested_protocols,
+                    websocket.request_headers.get("Sec-WebSocket-Protocol", ""),
                 )
                 return await websocket.close()
 
