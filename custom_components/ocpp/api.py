@@ -196,8 +196,8 @@ class CentralSystem:
                     "Client hasn't requested any Subprotocol. Closing connection"
                 )
                 return await websocket.close()
-            if requested_protocols in websocket.available_subprotocols:
-                _LOGGER.info("Websocket Subprotocol matched: %s", requested_protocols)
+            if websocket.subprotocol is not None:
+                _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
             else:
                 # In the websockets lib if no subprotocols are supported by the
                 # client and the server, it proceeds without a subprotocol,

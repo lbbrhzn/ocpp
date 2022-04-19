@@ -188,7 +188,7 @@ async def test_cms_responses(hass, socket_enabled):
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_norm",
-        subprotocols=["ocpp1.6"],
+        subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_normal", ws)
