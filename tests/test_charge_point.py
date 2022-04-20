@@ -129,8 +129,6 @@ async def test_cms_responses(hass, socket_enabled):
     assert await async_setup_entry(hass, config_entry2)
     await hass.async_block_till_done()
 
-    cs = hass.data[OCPP_DOMAIN][config_entry2.entry_id]
-
     # no subprotocol
     async with websockets.connect(
         "ws://127.0.0.1:9002/CP_1_nosub",
