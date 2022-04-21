@@ -75,7 +75,7 @@ MOCK_CONFIG_DATA_2 = {
     CONF_HOST: "127.0.0.1",
     CONF_PORT: 9002,
     CONF_CPID: "test_cpid_2",
-    CONF_CSID: "test_csid_2",
+    CONF_CSID: "test_csid",
     CONF_IDLE_INTERVAL: 900,
     CONF_MAX_CURRENT: 32,
     CONF_METER_INTERVAL: 60,

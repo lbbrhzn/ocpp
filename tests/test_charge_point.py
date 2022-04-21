@@ -103,6 +103,7 @@ async def test_cms_responses(hass, socket_enabled):
                 data = {"upload_url": "https://webhook.site/abc"}
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
+
             result = await hass.services.async_call(
                 OCPP_DOMAIN,
                 service.value,
@@ -122,39 +123,42 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
-    # Create a mock entry so we don't have to go through config flow
-    config_entry2 = MockConfigEntry(
-        domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms"
-    )
-    assert await async_setup_entry(hass, config_entry2)
-    await hass.async_block_till_done()
+    if True:
+        # Create a mock entry so we don't have to go through config flow
+        config_entry2 = MockConfigEntry(
+            domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms2"
+        )
+        assert await async_setup_entry(hass, config_entry2)
+        await hass.async_block_till_done()
 
-    # no subprotocol
-    async with websockets.connect(
-        "ws://127.0.0.1:9002/CP_1_nosub",
-    ) as ws2:
-        # use a different id for debugging
-        cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp2.start(),
-                    cp2.send_boot_notification(),
-                    cp2.send_authorize(),
-                    cp2.send_heartbeat(),
-                    cp2.send_status_notification(),
-                    cp2.send_firmware_status(),
-                    cp2.send_data_transfer(),
-                    cp2.send_start_transaction(),
-                    cp2.send_stop_transaction(),
-                    cp2.send_meter_periodic_data(),
-                ),
-                timeout=3,
-            )
-        except asyncio.TimeoutError:
-            pass
-        await ws2.close()
-    await asyncio.sleep(1)
+        # no subprotocol
+        async with websockets.connect(
+            "ws://127.0.0.1:9002/CP_1_nosub",
+        ) as ws2:
+            # use a different id for debugging
+            cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        cp2.start(),
+                        cp2.send_boot_notification(),
+                        cp2.send_authorize(),
+                        cp2.send_heartbeat(),
+                        cp2.send_status_notification(),
+                        cp2.send_firmware_status(),
+                        cp2.send_data_transfer(),
+                        cp2.send_start_transaction(),
+                        cp2.send_stop_transaction(),
+                        cp2.send_meter_periodic_data(),
+                    ),
+                    timeout=3,
+                )
+            except asyncio.TimeoutError:
+                pass
+            await ws2.close()
+        await asyncio.sleep(1)
+        await async_unload_entry(hass, config_entry2)
+        await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -164,6 +168,34 @@ async def test_cms_responses(hass, socket_enabled):
     await hass.async_block_till_done()
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
+
+    # no subprotocol
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_unsup",
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_no_subprotocol", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_boot_notification(),
+                    cp.send_authorize(),
+                    cp.send_heartbeat(),
+                    cp.send_status_notification(),
+                    cp.send_firmware_status(),
+                    cp.send_data_transfer(),
+                    cp.send_start_transaction(),
+                    cp.send_stop_transaction(),
+                    cp.send_meter_periodic_data(),
+                ),
+                timeout=3,
+            )
+        except websockets.exceptions.ConnectionClosedOK:
+            pass
+        await ws.close()
+
+    await asyncio.sleep(1)
 
     # unsupported subprotocol
     async with websockets.connect(
