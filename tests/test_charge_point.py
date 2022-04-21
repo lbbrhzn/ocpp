@@ -41,7 +41,7 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
 async def test_cms_responses(hass, socket_enabled):
@@ -103,6 +103,7 @@ async def test_cms_responses(hass, socket_enabled):
                 data = {"upload_url": "https://webhook.site/abc"}
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
+
             result = await hass.services.async_call(
                 OCPP_DOMAIN,
                 service.value,
@@ -122,6 +123,43 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
+    if True:
+        # Create a mock entry so we don't have to go through config flow
+        config_entry2 = MockConfigEntry(
+            domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms2"
+        )
+        assert await async_setup_entry(hass, config_entry2)
+        await hass.async_block_till_done()
+
+        # no subprotocol
+        async with websockets.connect(
+            "ws://127.0.0.1:9002/CP_1_nosub",
+        ) as ws2:
+            # use a different id for debugging
+            cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        cp2.start(),
+                        cp2.send_boot_notification(),
+                        cp2.send_authorize(),
+                        cp2.send_heartbeat(),
+                        cp2.send_status_notification(),
+                        cp2.send_firmware_status(),
+                        cp2.send_data_transfer(),
+                        cp2.send_start_transaction(),
+                        cp2.send_stop_transaction(),
+                        cp2.send_meter_periodic_data(),
+                    ),
+                    timeout=3,
+                )
+            except asyncio.TimeoutError:
+                pass
+            await ws2.close()
+        await asyncio.sleep(1)
+        await async_unload_entry(hass, config_entry2)
+        await hass.async_block_till_done()
+
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
@@ -133,7 +171,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     # no subprotocol
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1_nosub",
+        "ws://127.0.0.1:9000/CP_1_unsup",
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_no_subprotocol", ws)
@@ -155,6 +193,8 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
+
     await asyncio.sleep(1)
 
     # unsupported subprotocol
@@ -182,13 +222,14 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
 
     await asyncio.sleep(1)
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_norm",
-        subprotocols=["ocpp1.6"],
+        subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_normal", ws)
@@ -211,6 +252,7 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except asyncio.TimeoutError:
             pass
+        await ws.close()
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
@@ -259,6 +301,7 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except asyncio.TimeoutError:
             pass
+        await ws.close()
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
 
     await asyncio.sleep(1)
@@ -288,6 +331,7 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
