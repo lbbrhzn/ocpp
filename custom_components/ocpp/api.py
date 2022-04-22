@@ -475,6 +475,7 @@ class ChargePoint(cp):
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
         for item in feature_list:
+            item = item.strip()
             if item == om.feature_profile_core.value:
                 self._attr_supported_features |= prof.CORE
             elif item == om.feature_profile_firmware.value:
