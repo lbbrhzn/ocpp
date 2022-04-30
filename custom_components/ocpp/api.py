@@ -169,7 +169,7 @@ class CentralSystem:
         if entry.data.get(CONF_SSL, DEFAULT_SSL):
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_pem = pathlib.Path.cwd().with_name("fullchain.pem")
+            localhost_pem = pathlib.Path.cwd().joinpath("fullchain.pem")
             self.ssl_context.load_cert_chain(localhost_pem)
         else:
             self.ssl_context = None
