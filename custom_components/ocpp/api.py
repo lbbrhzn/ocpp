@@ -6,6 +6,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
+import pathlib
+import ssl
 import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
@@ -60,6 +62,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
+    CONF_SSL,
     CONF_SUBPROTOCOL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
@@ -76,6 +79,7 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
+    DEFAULT_SSL,
     DEFAULT_SUBPROTOCOL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
@@ -162,6 +166,13 @@ class CentralSystem:
         self.config = entry.data
         self.id = entry.entry_id
         self.charge_points = {}
+        if entry.data.get(CONF_SSL, DEFAULT_SSL):
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
+            localhost_pem = pathlib.Path.cwd().joinpath("fullchain.pem")
+            self.ssl_context.load_cert_chain(localhost_pem)
+        else:
+            self.ssl_context = None
 
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
@@ -176,6 +187,7 @@ class CentralSystem:
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
             close_timeout=self.websocket_close_timeout,
+            ssl=self.ssl_context,
         )
         self._server = server
         return self

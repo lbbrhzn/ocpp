@@ -7,6 +7,7 @@
                 "data": {
                     "host": "Central system host address",
                     "port": "Central system port number",
+                    "ssl": "Secure connection",
                     "csid": "Central system identity",
                     "cpid": "Charge point identity",
                     "max_current": "Maximum charging current",
