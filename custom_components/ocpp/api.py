@@ -708,7 +708,7 @@ class ChargePoint(cp):
                 _LOGGER.debug("Failed to parse url: %s", e)
             update_time = (
                 datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)
-            ).isoformat()
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             req = call.UpdateFirmwarePayload(location=url, retrieve_date=update_time)
             resp = await self.call(req)
             _LOGGER.info("Response: %s", resp)
@@ -1120,7 +1120,7 @@ class ChargePoint(cp):
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
         resp = call_result.BootNotificationPayload(
-            current_time=datetime.now(tz=timezone.utc).isoformat(),
+            current_time=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
@@ -1304,7 +1304,9 @@ class ChargePoint(cp):
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.HeartbeatPayload(current_time=now.isoformat())
+        return call_result.HeartbeatPayload(
+            current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
 
     @property
     def supported_features(self) -> int:
