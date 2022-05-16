@@ -1304,7 +1304,9 @@ class ChargePoint(cp):
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.HeartbeatPayload(current_time=now.strftime('%Y-%m-%dT%H:%M:%SZ'))
+        return call_result.HeartbeatPayload(
+            current_time=now.strftime('%Y-%m-%dT%H:%M:%SZ')
+        )
 
     @property
     def supported_features(self) -> int:
