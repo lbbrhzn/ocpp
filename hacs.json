@@ -2,6 +2,5 @@
   "name": "Open Charge Point Protocol (OCPP)",
   "content_in_root": false,
   "homeassistant": "2021.12.0",
-  "iot_class": "Local Push",
   "render_readme": true
 }
