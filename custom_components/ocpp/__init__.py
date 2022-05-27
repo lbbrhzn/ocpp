@@ -28,7 +28,7 @@ from .const import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 AUTH_LIST_SCHEMA = vol.Schema(
     {
