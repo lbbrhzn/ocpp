@@ -9,7 +9,7 @@ on:
   pull_request:
 
 env:
-  DEFAULT_PYTHON: 3.10
+  DEFAULT_PYTHON: "3.10"
 
 jobs:
   pre-commit:
