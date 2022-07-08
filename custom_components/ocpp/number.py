@@ -122,15 +122,6 @@ class OcppNumber(RestoreNumber, NumberEntity):
     async def async_set_native_value(self, value):
         """Set new value."""
         num_value = float(value)
-
-        if (
-            num_value < self._attr_native_min_value
-            or num_value > self._attr_native_max_value
-        ):
-            raise vol.Invalid(
-                f"Invalid value for {self.entity_id}: {value} (range {self._attr_native_min_value} - {self._attr_native_max_value})"
-            )
-
         if self.central_system.get_available(
             self.cp_id
         ) and Profiles.SMART & self.central_system.get_supported_features(self.cp_id):
