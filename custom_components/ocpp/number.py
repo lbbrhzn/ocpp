@@ -13,7 +13,6 @@ from homeassistant.components.number import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
-import voluptuous as vol
 
 from .api import CentralSystem
 from .const import (
