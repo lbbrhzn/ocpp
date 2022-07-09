@@ -35,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v3.1.0
         if: ${{ github.event_name == 'push' }}
         with:
-          name: dius_powersensor
+          name: ocpp
           path: ${{ github.workspace }}/custom_components/ocpp
 
       # Pack the dir as a zip and upload to the release
