@@ -14,3 +14,4 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 (Ability to configure a custom OCPP server such as HA is being discontinued)
 ## [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
+## [V2C Trydan](https://v2charge.com/trydan)
