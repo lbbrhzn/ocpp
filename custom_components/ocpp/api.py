@@ -483,9 +483,9 @@ class ChargePoint(cp):
         resp = await self.call(req)
         feature_list = (resp.configuration_key[0][om.value.value]).split(",")
         if feature_list[0] == "":
-            _LOGGER.warning("No feature profiles detected, defaulting to Core")
-            await self.notify_ha("No feature profiles detected, defaulting to Core")
-            feature_list = [om.feature_profile_core.value]
+            _LOGGER.warning("No feature profiles detected, defaulting to Core with Smart")
+            await self.notify_ha("No feature profiles detected, defaulting to Core with Smart")
+            feature_list = [om.feature_profile_core.value, om.feature_profile_smart.value]
         for item in feature_list:
             item = item.strip()
             if item == om.feature_profile_core.value:
@@ -565,13 +565,21 @@ class ChargePoint(cp):
             if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
+            elif resp == "":
+                lim = limit_amps
+                units = ChargingRateUnitType.amps.value
+                _LOGGER.info("Empty response to ChargerRateUnitType request. Assuming amps.")
             else:
                 lim = limit_watts
                 units = ChargingRateUnitType.watts.value
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
-            stack_level = int(resp)
+            if resp == "":
+                stack_level = 0
+                _LOGGER.info("Empty response to MaxStackLevel request. Assuming stack level 0.")
+            else:
+                stack_level = int(resp)
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
