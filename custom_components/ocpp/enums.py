@@ -34,6 +34,10 @@ class HAChargerStatuses(str, Enum):
     firmware_status = "Status.Firmware"
     reconnects = "Reconnects"
     id_tag = "Id.Tag"
+    current_import = "Current.Import"
+    voltage = "Voltage"
+    power_active_import = "Power.Active.Import"
+    temperature = "Temperature"
 
 
 class HAChargerDetails(str, Enum):
