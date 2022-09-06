@@ -5,6 +5,7 @@ import voluptuous as vol
 from .const import (
     CONF_CPID,
     CONF_CSID,
+    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -19,6 +20,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_CPID,
     DEFAULT_CSID,
+    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
@@ -59,6 +61,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ): int,
         vol.Required(
             CONF_SKIP_SCHEMA_VALIDATION, default=DEFAULT_SKIP_SCHEMA_VALIDATION
+        ): bool,
+        vol.Required(
+            CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
     }
 )
