@@ -488,7 +488,9 @@ class ChargePoint(cp):
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
-        if self.central.config.get(CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING):
+        if self.central.config.get(
+            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+        ):
             _LOGGER.warning("Force Smart Charging feature profile")
             self._attr_supported_features |= prof.SMART
         for item in feature_list:
