@@ -123,6 +123,7 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
+    # Test MOCK_CONFIG_DATA_2
     if True:
         # Create a mock entry so we don't have to go through config flow
         config_entry2 = MockConfigEntry(

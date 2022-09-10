@@ -15,7 +15,8 @@
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (secondes)",
                     "websocket_ping_timeout": "Websocket ping timeout (secondes)",
-                    "skip_schema_validation": "Skip OCPP schema validation"
+                    "skip_schema_validation": "Skip OCPP schema validation",
+                    "force_smart_charging": "Functieprofiel Smart Charging forceren"
                 }
             },
             "measurands": {

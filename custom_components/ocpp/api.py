@@ -55,6 +55,7 @@ from .const import (
     CONF_CPID,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
+    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
@@ -72,6 +73,7 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
@@ -486,6 +488,11 @@ class ChargePoint(cp):
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
+        if self.central.config.get(
+            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+        ):
+            _LOGGER.warning("Force Smart Charging feature profile")
+            self._attr_supported_features |= prof.SMART
         for item in feature_list:
             item = item.strip()
             if item == om.feature_profile_core.value:
@@ -506,7 +513,7 @@ class ChargePoint(cp):
                     f"Warning: Unknown feature profile detected ignoring {item}"
                 )
         self._metrics[cdet.features.value].value = self._attr_supported_features
-        _LOGGER.debug("Feature profiles returned: %s", feature_list)
+        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
