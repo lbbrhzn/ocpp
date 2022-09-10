@@ -317,7 +317,7 @@ async def test_cms_responses(hass, socket_enabled):
     # test ocpp rejection messages sent from charger to cms
     cs.charge_points["test_cpid"].received_boot_notification = False
     cs.charge_points["test_cpid"].post_connect_success = False
-    cs.config[CONF_FORCE_SMART_CHARGING] = True
+    cs.charge_points["test_cpid"].config[CONF_FORCE_SMART_CHARGING] = True
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
