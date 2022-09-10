@@ -16,10 +16,7 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import (
-    CONF_FORCE_SMART_CHARGING,
-    DOMAIN as OCPP_DOMAIN,
-)
+from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
 from custom_components.ocpp.enums import (
     ConfigurationKey,
     HAChargerServices as csvcs,
@@ -317,8 +314,6 @@ async def test_cms_responses(hass, socket_enabled):
     # test ocpp rejection messages sent from charger to cms
     cs.charge_points["test_cpid"].received_boot_notification = False
     cs.charge_points["test_cpid"].post_connect_success = False
-    config_entry.data[CONF_FORCE_SMART_CHARGING] = True
-    await hass.config_entries.async_update_entry(config_entry)
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
