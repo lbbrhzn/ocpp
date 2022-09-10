@@ -83,14 +83,6 @@ MOCK_CONFIG_DATA_2 = {
     CONF_SKIP_SCHEMA_VALIDATION: True,
 }
 
-# configuration with force smart charging
-MOCK_CONFIG_DATA_3 = {
-    **MOCK_CONFIG_DATA,
-    CONF_PORT: 9003,
-    CONF_CPID: "test_cpid_3",
-    CONF_FORCE_SMART_CHARGING: True,
-}
-
 # separate entry for switch so tests can run concurrently
 MOCK_CONFIG_SWITCH = {
     CONF_HOST: "127.0.0.1",

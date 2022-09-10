@@ -16,8 +16,15 @@ import websockets
 
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
-from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
+from custom_components.ocpp.const import (
+    CONF_FORCE_SMART_CHARGING,
+    DOMAIN as OCPP_DOMAIN,
+)
+from custom_components.ocpp.enums import (
+    ConfigurationKey,
+    HAChargerServices as csvcs,
+    Profiles,
+)
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
 from ocpp.routing import on
@@ -41,7 +48,7 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2, MOCK_CONFIG_DATA_3
+from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
 async def test_cms_responses(hass, socket_enabled):
@@ -160,44 +167,6 @@ async def test_cms_responses(hass, socket_enabled):
         await asyncio.sleep(1)
         await async_unload_entry(hass, config_entry2)
         await hass.async_block_till_done()
-
-        # Test MOCK_CONFIG_DATA_3
-        if True:
-            # Create a mock entry so we don't have to go through config flow
-            config_entry3 = MockConfigEntry(
-                domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_3, entry_id="test_cms3"
-            )
-            assert await async_setup_entry(hass, config_entry3)
-            await hass.async_block_till_done()
-
-            # no subprotocol
-            async with websockets.connect(
-                "ws://127.0.0.1:9003/CP_1_nosub",
-            ) as ws3:
-                # use a different id for debugging
-                cp3 = ChargePoint("CP_1_no_subprotocol", ws3)
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(
-                            cp3.start(),
-                            cp3.send_boot_notification(),
-                            cp3.send_authorize(),
-                            cp3.send_heartbeat(),
-                            cp3.send_status_notification(),
-                            cp3.send_firmware_status(),
-                            cp3.send_data_transfer(),
-                            cp3.send_start_transaction(),
-                            cp3.send_stop_transaction(),
-                            cp3.send_meter_periodic_data(),
-                        ),
-                        timeout=3,
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                await ws3.close()
-            await asyncio.sleep(1)
-            await async_unload_entry(hass, config_entry3)
-            await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -348,6 +317,7 @@ async def test_cms_responses(hass, socket_enabled):
     # test ocpp rejection messages sent from charger to cms
     cs.charge_points["test_cpid"].received_boot_notification = False
     cs.charge_points["test_cpid"].post_connect_success = False
+    cs.config[CONF_FORCE_SMART_CHARGING] = True
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
@@ -371,6 +341,7 @@ async def test_cms_responses(hass, socket_enabled):
         except websockets.exceptions.ConnectionClosedOK:
             pass
         await ws.close()
+    assert cs.get_metric("test_cpid", "Features") == Profiles.SMART
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
