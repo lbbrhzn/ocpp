@@ -410,7 +410,6 @@ class ChargePoint(cp):
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
             await self.get_configuration(ckey.heartbeat_interval.value)
-            await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
                 ckey.meter_values_sampled_data.value,
                 self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
@@ -469,6 +468,7 @@ class ChargePoint(cp):
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
+            await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.set_availability()
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
