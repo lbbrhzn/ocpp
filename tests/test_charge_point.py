@@ -17,11 +17,7 @@ import websockets
 from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
-from custom_components.ocpp.enums import (
-    ConfigurationKey,
-    HAChargerServices as csvcs,
-    Profiles,
-)
+from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
 from ocpp.routing import on
@@ -337,7 +333,6 @@ async def test_cms_responses(hass, socket_enabled):
         except websockets.exceptions.ConnectionClosedOK:
             pass
         await ws.close()
-    assert cs.get_metric("test_cpid", "Features") == Profiles.CORE | Profiles.SMART
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection

@@ -513,7 +513,7 @@ class ChargePoint(cp):
                     f"Warning: Unknown feature profile detected ignoring {item}"
                 )
         self._metrics[cdet.features.value].value = self._attr_supported_features
-        _LOGGER.debug("Feature profiles returned: %s", feature_list)
+        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
