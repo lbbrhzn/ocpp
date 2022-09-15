@@ -55,6 +55,7 @@ from .const import (
     CONF_CPID,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
+    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
@@ -72,6 +73,7 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
@@ -409,9 +411,7 @@ class ChargePoint(cp):
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
-            await self.set_availability()
             await self.get_configuration(ckey.heartbeat_interval.value)
-            await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
                 ckey.meter_values_sampled_data.value,
                 self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
@@ -470,6 +470,8 @@ class ChargePoint(cp):
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
+            await self.configure(ckey.web_socket_ping_interval.value, "60")
+            await self.set_availability()
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
@@ -483,9 +485,14 @@ class ChargePoint(cp):
         resp = await self.call(req)
         feature_list = (resp.configuration_key[0][om.value.value]).split(",")
         if feature_list[0] == "":
-            _LOGGER.warning("No feature profiles detected, defaulting to Core with Smart")
-            await self.notify_ha("No feature profiles detected, defaulting to Core with Smart")
-            feature_list = [om.feature_profile_core.value, om.feature_profile_smart.value]
+            _LOGGER.warning("No feature profiles detected, defaulting to Core")
+            await self.notify_ha("No feature profiles detected, defaulting to Core")
+            feature_list = [om.feature_profile_core.value]
+        if self.central.config.get(
+            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+        ):
+            _LOGGER.warning("Force Smart Charging feature profile")
+            self._attr_supported_features |= prof.SMART
         for item in feature_list:
             item = item.strip()
             if item == om.feature_profile_core.value:
@@ -506,7 +513,7 @@ class ChargePoint(cp):
                     f"Warning: Unknown feature profile detected ignoring {item}"
                 )
         self._metrics[cdet.features.value].value = self._attr_supported_features
-        _LOGGER.debug("Feature profiles returned: %s", feature_list)
+        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
