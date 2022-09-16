@@ -19,3 +19,5 @@ Documentation can be found here [home-assistant-ocpp.readthedocs.io](https://hom
 <a href="https://www.buymeacoffee.com/lbbrhzn" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/default-black.png" alt="Buy Me A Coffee" width="150px">
 </a>
+
+To use with ProjectEV charger Force Smart Charging Option must be set.
