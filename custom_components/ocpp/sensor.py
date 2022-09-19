@@ -174,7 +174,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         value = self.central_system.get_metric(self.cp_id, self.metric)
         if isinstance(value, float):
             value = round(value, self.entity_description.scale)
-        if value:
+        if value is not None:
             self._attr_native_value = value
         return self._attr_native_value
 
@@ -182,7 +182,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     def native_unit_of_measurement(self):
         """Return the native unit of measurement."""
         value = self.central_system.get_ha_unit(self.cp_id, self.metric)
-        if value:
+        if value is not None:
             self._attr_native_unit_of_measurement = value
         return self._attr_native_unit_of_measurement
 
