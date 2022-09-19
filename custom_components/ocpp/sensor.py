@@ -12,10 +12,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import CONF_MONITORED_VARIABLES
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON, Measurand
+from .const import CONF_CPID, DATA_UPDATED, DEFAULT_CPID, DOMAIN, ICON, Measurand
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
 
@@ -62,7 +65,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class ChargePointMetric(SensorEntity):
+class ChargePointMetric(RestoreEntity, SensorEntity):
     """Individual sensor for charge point metrics."""
 
     entity_description: OcppSensorDescription
@@ -167,9 +170,25 @@ class ChargePointMetric(SensorEntity):
         value = self.central_system.get_metric(self.cp_id, self.metric)
         if isinstance(value, float):
             value = round(value, self.entity_description.scale)
-        return value
+        if value:
+            self._attr_native_value = value
+        return self._attr_native_value
 
     @property
     def native_unit_of_measurement(self):
         """Return the native unit of measurement."""
         return self.central_system.get_ha_unit(self.cp_id, self.metric)
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+        if restored := await self.async_get_last_state():
+            self._attr_native_value = restored.native_value
+
+        async_dispatcher_connect(
+            self._hass, DATA_UPDATED, self._schedule_immediate_update
+        )
+
+    @callback
+    def _schedule_immediate_update(self):
+        self.async_schedule_update_ha_state(True)
