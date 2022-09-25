@@ -6,16 +6,19 @@ from dataclasses import dataclass
 import homeassistant
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
 from homeassistant.const import CONF_MONITORED_VARIABLES
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON, Measurand
+from .const import CONF_CPID, DATA_UPDATED, DEFAULT_CPID, DOMAIN, ICON, Measurand
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
 
@@ -53,6 +56,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     for ent in SENSORS:
         entities.append(
             ChargePointMetric(
+                hass,
                 central_system,
                 cp_id,
                 ent,
@@ -62,13 +66,14 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class ChargePointMetric(SensorEntity):
+class ChargePointMetric(RestoreSensor, SensorEntity):
     """Individual sensor for charge point metrics."""
 
     entity_description: OcppSensorDescription
 
     def __init__(
         self,
+        hass: HomeAssistant,
         central_system: CentralSystem,
         cp_id: str,
         description: OcppSensorDescription,
@@ -78,6 +83,7 @@ class ChargePointMetric(SensorEntity):
         self.cp_id = cp_id
         self.entity_description = description
         self.metric = self.entity_description.name
+        self._hass = hass
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
         self._attr_unique_id = ".".join(
@@ -92,6 +98,7 @@ class ChargePointMetric(SensorEntity):
             SENSOR_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
         )
         self._attr_icon = ICON
+        self._attr_native_unit_of_measurement = None
 
     @property
     def available(self) -> bool:
@@ -167,9 +174,29 @@ class ChargePointMetric(SensorEntity):
         value = self.central_system.get_metric(self.cp_id, self.metric)
         if isinstance(value, float):
             value = round(value, self.entity_description.scale)
-        return value
+        if value is not None:
+            self._attr_native_value = value
+        return self._attr_native_value
 
     @property
     def native_unit_of_measurement(self):
         """Return the native unit of measurement."""
-        return self.central_system.get_ha_unit(self.cp_id, self.metric)
+        value = self.central_system.get_ha_unit(self.cp_id, self.metric)
+        if value is not None:
+            self._attr_native_unit_of_measurement = value
+        return self._attr_native_unit_of_measurement
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+        if restored := await self.async_get_last_sensor_data():
+            self._attr_native_value = restored.native_value
+            self._attr_native_unit_of_measurement = restored.native_unit_of_measurement
+
+        async_dispatcher_connect(
+            self._hass, DATA_UPDATED, self._schedule_immediate_update
+        )
+
+    @callback
+    def _schedule_immediate_update(self):
+        self.async_schedule_update_ha_state(True)
