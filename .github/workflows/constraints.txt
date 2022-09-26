@@ -7,5 +7,5 @@ flake8==5.0.4
 isort==5.10.1
 pre-comit-hooks==4.1.0
 pyupgrade==2.38.0
-reorder-python-imports==3.8.2
+reorder-python-imports==3.8.3
 sqlalchemy>=1.4.23
