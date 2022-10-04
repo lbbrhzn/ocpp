@@ -753,6 +753,14 @@ class ChargePoint(cpclass):
                             "measurand": "Voltage",
                             "location": "Outlet",
                             "unit": "V",
+                            "phase": "L1",
+                        },
+                        {
+                            "value": "228.000",
+                            "context": "Sample.Periodic",
+                            "measurand": "Voltage",
+                            "location": "Outlet",
+                            "unit": "V",
                             "phase": "L1-N",
                         },
                         {

@@ -1021,6 +1021,12 @@ class ChargePoint(cp):
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_to_line_phases]
                     ) / sqrt(3)
+                elif (phase_info.keys() & line_phases) is not None:
+                    # Workaround for chargers that don't follow engineering convention
+                    # Assumes voltages are line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_phases]
+                    )
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
