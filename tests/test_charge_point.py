@@ -245,7 +245,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
-                    cp.send_meter_err_voltage(),
+                    cp.send_meter_err_phases(),
                     cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
@@ -844,7 +844,7 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_meter_err_voltage(self):
+    async def send_meter_err_phases(self):
         """Send erroneous voltage phase."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
@@ -862,6 +862,14 @@ class ChargePoint(cpclass):
                             "location": "Outlet",
                             "unit": "V",
                             "phase": "L1",
+                        },
+                        {
+                            "value": "23",
+                            "context": "Sample.Periodic",
+                            "measurand": "Current",
+                            "location": "Outlet",
+                            "unit": "A",
+                            "phase": "L1-N",
                         },
                     ],
                 }
