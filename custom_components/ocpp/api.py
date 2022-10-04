@@ -988,7 +988,7 @@ class ChargePoint(cp):
 
         measurand_data = {}
         for item in data:
-            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
+            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
             measurand = item.get(om.measurand.value, None)
             phase = item.get(om.phase.value, None)
             value = item.get(om.value.value, None)
