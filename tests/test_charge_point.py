@@ -246,6 +246,8 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
+                    cp.send_meter_err_phases(),
+                    cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
                     cp.send_stop_transaction(2),
@@ -773,6 +775,38 @@ class ChargePoint(cpclass):
                             "phase": "L3-N",
                         },
                         {
+                            "value": "89.00",
+                            "context": "Sample.Periodic",
+                            "measurand": "Power.Reactive.Import",
+                            "unit": "W",
+                        },
+                        {
+                            "value": "0.010",
+                            "context": "Transaction.Begin",
+                            "unit": "kWh",
+                        },
+                        {
+                            "value": "1305570.000",
+                        },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_line_voltage(self):
+        """Send line voltages."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
                             "value": "395.900",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
@@ -796,19 +830,39 @@ class ChargePoint(cpclass):
                             "unit": "V",
                             "phase": "L3-L1",
                         },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_err_phases(self):
+        """Send erroneous voltage phase."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
                         {
-                            "value": "89.00",
+                            "value": "230",
                             "context": "Sample.Periodic",
-                            "measurand": "Power.Reactive.Import",
-                            "unit": "W",
+                            "measurand": "Voltage",
+                            "location": "Outlet",
+                            "unit": "V",
+                            "phase": "L1",
                         },
                         {
-                            "value": "0.010",
-                            "context": "Transaction.Begin",
-                            "unit": "kWh",
-                        },
-                        {
-                            "value": "1305570.000",
+                            "value": "23",
+                            "context": "Sample.Periodic",
+                            "measurand": "Current.Import",
+                            "location": "Outlet",
+                            "unit": "A",
+                            "phase": "L1-N",
                         },
                     ],
                 }

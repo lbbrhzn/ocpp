@@ -988,13 +988,13 @@ class ChargePoint(cp):
 
         measurand_data = {}
         for item in data:
-            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
+            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
             measurand = item.get(om.measurand.value, None)
             phase = item.get(om.phase.value, None)
             value = item.get(om.value.value, None)
             unit = item.get(om.unit.value, None)
             context = item.get(om.context.value, None)
-            if measurand is not None and phase is not None:
+            if measurand is not None and phase is not None and unit is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
@@ -1011,27 +1011,33 @@ class ChargePoint(cp):
         for metric, phase_info in measurand_data.items():
             metric_value = None
             if metric in [Measurand.voltage.value]:
-                if (phase_info.keys() & line_to_neutral_phases) is not None:
+                if not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Line to neutral voltages are averaged
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
                     )
-                elif (phase_info.keys() & line_to_line_phases) is not None:
+                elif not phase_info.keys().isdisjoint(line_to_line_phases):
                     # Line to line voltages are averaged and converted to line to neutral
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_to_line_phases]
                     ) / sqrt(3)
+                elif not phase_info.keys().isdisjoint(line_phases):
+                    # Workaround for chargers that don't follow engineering convention
+                    # Assumes voltages are line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_phases]
+                    )
             elif metric in [
                 Measurand.current_import.value,
                 Measurand.current_export.value,
                 Measurand.power_active_import.value,
                 Measurand.power_active_export.value,
             ]:
-                if (phase_info.keys() & line_phases) is not None:
+                if not phase_info.keys().isdisjoint(line_phases):
                     metric_value = sum(
                         phase_info.get(phase, 0) for phase in line_phases
                     )
-                elif (phase_info.keys() & line_to_neutral_phases) is not None:
+                elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Workaround for some chargers that erroneously use line to neutral for current
                     metric_value = sum(
                         phase_info.get(phase, 0) for phase in line_to_neutral_phases
