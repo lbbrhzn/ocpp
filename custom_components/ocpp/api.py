@@ -1219,6 +1219,20 @@ class ChargePoint(cp):
         )
         return call_result.DiagnosticsStatusNotificationPayload()
 
+    @on(Action.SecurityEventNotification)
+    def on_security_event(self, type, timestamp, **kwargs):
+        """Handle security event notification."""
+        _LOGGER.info(
+            "Security event notification received: %s at %s [techinfo: %s]",
+            type,
+            timestamp,
+            kwargs.get(om.tech_info.name, "none"),
+        )
+        self.hass.async_create_task(
+            self.notify_ha(f"Security event notification received: {type}")
+        )
+        return call_result.SecurityEventNotificationPayload()
+
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
         # get the domain wide configuration

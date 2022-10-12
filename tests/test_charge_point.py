@@ -242,6 +242,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_authorize(),
                     cp.send_heartbeat(),
                     cp.send_status_notification(),
+                    cp.send_security_event(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
@@ -877,3 +878,12 @@ class ChargePoint(cpclass):
         )
         resp = await self.call(request)
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
+
+    async def send_security_event(self):
+        """Send a security event notification."""
+        request = call.SecurityEventNotificationPayload(
+            type="SettingSystemTime",
+            timestamp="2022-09-29T20:58:29Z",
+            tech_info="BootNotification",
+        )
+        await self.call(request)
