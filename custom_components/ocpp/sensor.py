@@ -69,6 +69,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class ChargePointMetric(RestoreSensor, SensorEntity):
     """Individual sensor for charge point metrics."""
 
+    _attr_has_entity_name = True
     entity_description: OcppSensorDescription
 
     def __init__(
@@ -89,13 +90,10 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self._attr_unique_id = ".".join(
             [DOMAIN, self.cp_id, self.entity_description.key, SENSOR_DOMAIN]
         )
-        self._attr_name = ".".join([self.cp_id, self.entity_description.name])
+        self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),
-        )
-        self.entity_id = (
-            SENSOR_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
         )
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
