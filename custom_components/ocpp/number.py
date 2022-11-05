@@ -37,7 +37,7 @@ class OcppNumberDescription(NumberEntityDescription):
 NUMBERS: Final = [
     OcppNumberDescription(
         key="maximum_current",
-        name="Maximum_Current",
+        name="Maximum Current",
         icon=ICON,
         initial_value=DEFAULT_MAX_CURRENT,
         native_min_value=0,
