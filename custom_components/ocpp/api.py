@@ -1005,7 +1005,7 @@ class ChargePoint(cp):
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
-        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l2_n.value]
+        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
         for metric, phase_info in measurand_data.items():
@@ -1027,12 +1027,7 @@ class ChargePoint(cp):
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_phases]
                     )
-            elif metric in [
-                Measurand.current_import.value,
-                Measurand.current_export.value,
-                Measurand.power_active_import.value,
-                Measurand.power_active_export.value,
-            ]:
+            else:
                 if not phase_info.keys().isdisjoint(line_phases):
                     metric_value = sum(
                         phase_info.get(phase, 0) for phase in line_phases
