@@ -67,6 +67,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class OcppNumber(RestoreNumber, NumberEntity):
     """Individual slider for setting charge rate."""
 
+    _attr_has_entity_name = True
     entity_description: OcppNumberDescription
 
     def __init__(
@@ -84,10 +85,7 @@ class OcppNumber(RestoreNumber, NumberEntity):
         self._attr_unique_id = ".".join(
             [NUMBER_DOMAIN, self.cp_id, self.entity_description.key]
         )
-        self._attr_name = ".".join([self.cp_id, self.entity_description.name])
-        self.entity_id = (
-            NUMBER_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
-        )
+        self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),

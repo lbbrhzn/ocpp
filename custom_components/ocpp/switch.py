@@ -76,6 +76,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class ChargePointSwitch(SwitchEntity):
     """Individual switch for charge point."""
 
+    _attr_has_entity_name = True
     entity_description: OcppSwitchDescription
 
     def __init__(
@@ -92,13 +93,10 @@ class ChargePointSwitch(SwitchEntity):
         self._attr_unique_id = ".".join(
             [SWITCH_DOMAIN, DOMAIN, self.cp_id, self.entity_description.key]
         )
-        self._attr_name = ".".join([self.cp_id, self.entity_description.name])
+        self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
             via_device=(DOMAIN, self.central_system.id),
-        )
-        self.entity_id = (
-            SWITCH_DOMAIN + "." + "_".join([self.cp_id, self.entity_description.key])
         )
 
     @property
