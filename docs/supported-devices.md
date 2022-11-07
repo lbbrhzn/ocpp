@@ -15,3 +15,10 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 ## [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 ## [V2C Trydan](https://v2charge.com/trydan)
+
+When a charger is not listed as a supported charger it simply means that it has not been reported to work. Whether it will work or not in practice really depends on whether it is compliant with the OCPP standard. Some vendors claim their device is compliant without bothering to do a compliance test, because that takes time and costs money!
+
+When it is fully compliant, then it should work out of the box, since the ocpp integration is designed to work for fully compliant chargers. Any issues should be reported, and we will do out best to analyze them. In some cases modifications or workarounds may be needed. As long as these workarounds do not break compliance to the OCPP standard they can be added to this repository.
+Otherwise, we urge you to request your vendor to update their firmware to make their device OCPP compliant.
+
+You can always make your own fork of this repository to solve issues for a specific device that are not OCPP compliant. However, we will not integrate these type of changes into this repository, because that may prevent other chargers to work.
