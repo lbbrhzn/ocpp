@@ -41,14 +41,14 @@ async def async_setup_entry(hass, entry, async_add_devices):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
-                name=metric,
+                name=metric.replace("."," "),
             )
         )
     for metric in list(HAChargerStatuses) + list(HAChargerDetails):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
-                name=metric,
+                name=metric.replace("."," "),
                 entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
