@@ -65,3 +65,35 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Availability` (OFF when something causes a problem or during a reboot etc)
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
+
+## Useful Entities and Workarounds for United Chargers Grizzl-E
+
+Comments below relate to Grizzl-E firmware version 5.633, tested Oct-Nov 2022. 
+
+### Metrics
+The Grizzl-E updates these metrics every 30s during charging sessions:
+* `Current Import` (current flowing into EV)
+* `Power Active Import` (power flowing into EV)
+* `Energy Active Import Register` (cumulative energy supplied to EV during charging session. Resets to zero at start of each session)
+* `Time Session` (elapsed time from start of charging session)
+
+### Diagnostics
+
+* `Status Connector` (current charger state: available/preparing/charging/finishing/suspended etc)
+* `Stop Reason` (reason the charging session was stopped)
+* `Latency Pong` (elapsed time for charger's response to internet ping. Good for diagnosing connectivity issues. Usually less than 1000ms)
+* `Version Firmware` (charger firmware version and build)
+
+### Controls
+
+* `Charge Control` (User switches to ON to start charging session, once charger is in Preparing state. Can be automated in HA - see this [comment in Issue #442](https://github.com/lbbrhzn/ocpp/issues/442#issuecomment-1295865797) for details)
+* `Availability` (ON when charger is idle. OFF during active charging session, or when something causes a problem)
+* `Maximum Current` (sets maximum charging current available. Reverts to value set by charger's internal DIP switch following reboots; tweak slider to reload)
+
+### OCPP Compatibility Issues
+
+Grizzl-E firmware has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
+
+The workaround consists of:
+- checking the *Skip OCPP schema validation* checkbox during OCPP server configuration
+- commenting-out several lines in `/config/custom_components/ocpp/api.py` and adding a few default values to the OCPP server source code. Details are in this [comment in Issue #442](https://github.com/lbbrhzn/ocpp/issues/442#issuecomment-1237651231)
