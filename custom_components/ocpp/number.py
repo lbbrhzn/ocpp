@@ -10,6 +10,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     RestoreNumber,
 )
+from homeassistant.const import ELECTRIC_CURRENT_AMPERE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -43,6 +44,7 @@ NUMBERS: Final = [
         native_min_value=0,
         native_max_value=DEFAULT_MAX_CURRENT,
         native_step=1,
+        native_unit_of_measurement=ELECTRIC_CURRENT_AMPERE,
     ),
 ]
 
