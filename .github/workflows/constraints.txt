@@ -6,6 +6,6 @@ black==22.10.0
 flake8==5.0.4
 isort==5.10.1
 pre-comit-hooks==4.1.0
-pyupgrade==3.2.0
+pyupgrade==3.3.0
 reorder-python-imports==3.9.0
 sqlalchemy>=1.4.23
