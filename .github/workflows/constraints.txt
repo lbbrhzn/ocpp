@@ -4,7 +4,7 @@ pre-commit==2.20.0
 bandit==1.7.4
 black==22.10.0
 flake8==5.0.4
-isort==5.10.1
+isort==5.11.4
 pre-comit-hooks==4.1.0
 pyupgrade==3.2.0
 reorder-python-imports==3.9.0
