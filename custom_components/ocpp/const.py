@@ -1,5 +1,6 @@
 """Define constants for OCPP integration."""
 import homeassistant.components.input_number as input_number
+from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
 
 from ocpp.v16.enums import Measurand, UnitOfMeasure
@@ -95,21 +96,29 @@ HA_POWER_UNIT = UnitOfMeasure.kw.value
 
 # Where a HA unit does not exist use Ocpp unit
 UNITS_OCCP_TO_HA = {
-    UnitOfMeasure.wh: ha.ENERGY_WATT_HOUR,
-    UnitOfMeasure.kwh: ha.ENERGY_KILO_WATT_HOUR,
+    UnitOfMeasure.wh: ha.UnitOfEnergy.WATT_HOUR,
+    UnitOfMeasure.kwh: ha.UnitOfEnergy.KILO_WATT_HOUR,
     UnitOfMeasure.varh: UnitOfMeasure.varh,
     UnitOfMeasure.kvarh: UnitOfMeasure.kvarh,
-    UnitOfMeasure.w: ha.POWER_WATT,
-    UnitOfMeasure.kw: ha.POWER_KILO_WATT,
-    UnitOfMeasure.va: ha.POWER_VOLT_AMPERE,
+    UnitOfMeasure.w: ha.UnitOfPower.WATT,
+    UnitOfMeasure.kw: ha.UnitOfPower.KILO_WATT,
+    UnitOfMeasure.va: ha.UnitOfApparentPower.VOLT_AMPERE,
     UnitOfMeasure.kva: UnitOfMeasure.kva,
     UnitOfMeasure.var: UnitOfMeasure.var,
     UnitOfMeasure.kvar: UnitOfMeasure.kvar,
-    UnitOfMeasure.a: ha.ELECTRIC_CURRENT_AMPERE,
-    UnitOfMeasure.v: ha.ELECTRIC_POTENTIAL_VOLT,
-    UnitOfMeasure.celsius: ha.TEMP_CELSIUS,
-    UnitOfMeasure.fahrenheit: ha.TEMP_FAHRENHEIT,
-    UnitOfMeasure.k: ha.TEMP_KELVIN,
+    UnitOfMeasure.a: ha.UnitOfElectricCurrent.AMPERE,
+    UnitOfMeasure.v: ha.UnitOfElectricCurrent.VOLT,
+    UnitOfMeasure.celsius: ha.UnitOfTemperature.CELSIUS,
+    UnitOfMeasure.fahrenheit: ha.UnitOfTemperature.FAHRENHEIT,
+    UnitOfMeasure.k: ha.UnitOfTemperature.KELVIN,
     UnitOfMeasure.percent: ha.PERCENTAGE,
-    UnitOfMeasure.hertz: ha.FREQUENCY_HERTZ,
+    UnitOfMeasure.hertz: ha.UnitOfFrequency.HERTZ,
+}
+
+# Where an occp unit is not reported and only one possibility assign HA unit on device class
+DEFAULT_CLASS_UNITS_HA = {
+    SensorDeviceClass.CURRENT: ha.UnitOfElectricCurrent.AMPERE,
+    SensorDeviceClass.VOLTAGE: ha.UnitOfElectricCurrent.VOLT,
+    SensorDeviceClass.FREQUENCY: ha.UnitOfFrequency.HERTZ,
+    SensorDeviceClass.BATTERY: ha.PERCENTAGE,
 }
