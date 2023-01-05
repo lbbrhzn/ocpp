@@ -107,7 +107,7 @@ UNITS_OCCP_TO_HA = {
     UnitOfMeasure.var: UnitOfMeasure.var,
     UnitOfMeasure.kvar: UnitOfMeasure.kvar,
     UnitOfMeasure.a: ha.UnitOfElectricCurrent.AMPERE,
-    UnitOfMeasure.v: ha.UnitOfElectricCurrent.VOLT,
+    UnitOfMeasure.v: ha.UnitOfElectricPotential.VOLT,
     UnitOfMeasure.celsius: ha.UnitOfTemperature.CELSIUS,
     UnitOfMeasure.fahrenheit: ha.UnitOfTemperature.FAHRENHEIT,
     UnitOfMeasure.k: ha.UnitOfTemperature.KELVIN,
@@ -118,7 +118,7 @@ UNITS_OCCP_TO_HA = {
 # Where an occp unit is not reported and only one possibility assign HA unit on device class
 DEFAULT_CLASS_UNITS_HA = {
     SensorDeviceClass.CURRENT: ha.UnitOfElectricCurrent.AMPERE,
-    SensorDeviceClass.VOLTAGE: ha.UnitOfElectricCurrent.VOLT,
+    SensorDeviceClass.VOLTAGE: ha.UnitOfElectricPotential.VOLT,
     SensorDeviceClass.FREQUENCY: ha.UnitOfFrequency.HERTZ,
     SensorDeviceClass.BATTERY: ha.PERCENTAGE,
 }
