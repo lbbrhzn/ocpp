@@ -1,3 +1,0 @@
-homeassistant>=2023.1.0
-ocpp==0.15.0
-websockets>=10.1
