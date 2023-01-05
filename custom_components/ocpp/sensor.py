@@ -35,6 +35,7 @@ class OcppSensorDescription(SensorEntityDescription):
     """Class to describe a Sensor entity."""
 
     scale: int = 1  # used for rounding metric
+    metric: str | None = None
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -50,6 +51,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
             OcppSensorDescription(
                 key=metric.lower(),
                 name=metric.replace(".", " "),
+                metric=metric,
             )
         )
     for metric in list(HAChargerStatuses) + list(HAChargerDetails):
@@ -57,6 +59,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
             OcppSensorDescription(
                 key=metric.lower(),
                 name=metric.replace(".", " "),
+                metric=metric,
                 entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
@@ -91,7 +94,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self.central_system = central_system
         self.cp_id = cp_id
         self.entity_description = description
-        self.metric = self.entity_description.name
+        self.metric = self.entity_description.metric
         self._hass = hass
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)

@@ -121,4 +121,6 @@ DEFAULT_CLASS_UNITS_HA = {
     SensorDeviceClass.VOLTAGE: ha.UnitOfElectricPotential.VOLT,
     SensorDeviceClass.FREQUENCY: ha.UnitOfFrequency.HERTZ,
     SensorDeviceClass.BATTERY: ha.PERCENTAGE,
+    SensorDeviceClass.POWER: ha.UnitOfPower.KILO_WATT,
+    SensorDeviceClass.ENERGY: ha.UnitOfEnergy.KILO_WATT_HOUR,
 }
