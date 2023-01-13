@@ -95,7 +95,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 ### Metrics
 
 * `Energy Active Import Register` (cumulative energy supplied to EV during charging session. Resets to zero at start of each session)
-* `Energy Active Import Interval` in case you need the energy spent in total for the current charging session
+* `Energy Active Import Interval` (in case you need the energy spent in total for the current charging session)
 * `Power Active Import` (instantaneous charging power)
 * `Current Import`
 * `Time Session` (elapsed time from start of charging session)
