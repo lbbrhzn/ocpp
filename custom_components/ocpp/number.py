@@ -10,6 +10,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     RestoreNumber,
 )
+from homeassistant.const import ELECTRIC_CURRENT_AMPERE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -37,12 +38,13 @@ class OcppNumberDescription(NumberEntityDescription):
 NUMBERS: Final = [
     OcppNumberDescription(
         key="maximum_current",
-        name="Maximum_Current",
+        name="Maximum Current",
         icon=ICON,
         initial_value=DEFAULT_MAX_CURRENT,
         native_min_value=0,
         native_max_value=DEFAULT_MAX_CURRENT,
         native_step=1,
+        native_unit_of_measurement=ELECTRIC_CURRENT_AMPERE,
     ),
 ]
 
