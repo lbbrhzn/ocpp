@@ -36,7 +36,7 @@ class OcppSwitchDescription(SwitchEntityDescription):
 SWITCHES: Final = [
     OcppSwitchDescription(
         key="charge_control",
-        name="Charge_Control",
+        name="Charge Control",
         icon=ICON,
         on_action=HAChargerServices.service_charge_start.name,
         off_action=HAChargerServices.service_charge_stop.name,
