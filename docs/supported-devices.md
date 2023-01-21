@@ -8,6 +8,7 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 ## [Alfen - Eve Single Pro-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 ## [Alfen - Eve Single S-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 ## [CTEK Chargestorm Connected 2](https://www.ctek.com/uk/ev-charging/chargestorm%C2%AE-connected-2)
+[Jonas Karlsson](https://github.com/jonasbkarlsson) has written a [getting started guide](https://github.com/jonasbkarlsson/ocpp/wiki/CTEK-Chargestorm-Connected-2) for connecting CTEK Chargestorm Connected 2.
 ## [EVBox Elvi](https://evbox.com/en/ev-chargers/elvi)
 ## [EVLink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/) 
