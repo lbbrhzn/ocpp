@@ -6,6 +6,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
+import pathlib
+import ssl
 import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
@@ -53,6 +55,7 @@ from .const import (
     CONF_CPID,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
+    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
@@ -60,6 +63,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
+    CONF_SSL,
     CONF_SUBPROTOCOL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
@@ -69,6 +73,7 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
@@ -76,6 +81,7 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
+    DEFAULT_SSL,
     DEFAULT_SUBPROTOCOL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
@@ -97,7 +103,7 @@ from .enums import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+logging.getLogger(DOMAIN).setLevel(logging.INFO)
 # Uncomment these when Debugging
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
@@ -162,6 +168,13 @@ class CentralSystem:
         self.config = entry.data
         self.id = entry.entry_id
         self.charge_points = {}
+        if entry.data.get(CONF_SSL, DEFAULT_SSL):
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
+            localhost_pem = pathlib.Path.cwd().joinpath("fullchain.pem")
+            self.ssl_context.load_cert_chain(localhost_pem)
+        else:
+            self.ssl_context = None
 
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
@@ -176,6 +189,7 @@ class CentralSystem:
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
             close_timeout=self.websocket_close_timeout,
+            ssl=self.ssl_context,
         )
         self._server = server
         return self
@@ -187,17 +201,8 @@ class CentralSystem:
         if self.config.get(CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION):
             _LOGGER.warning("Skipping websocket subprotocol validation")
         else:
-            try:
-                requested_protocols = websocket.request_headers[
-                    "Sec-WebSocket-Protocol"
-                ]
-            except KeyError:
-                _LOGGER.error(
-                    "Client hasn't requested any Subprotocol. Closing connection"
-                )
-                return await websocket.close()
-            if requested_protocols in websocket.available_subprotocols:
-                _LOGGER.info("Websocket Subprotocol matched: %s", requested_protocols)
+            if websocket.subprotocol is not None:
+                _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
             else:
                 # In the websockets lib if no subprotocols are supported by the
                 # client and the server, it proceeds without a subprotocol,
@@ -206,7 +211,7 @@ class CentralSystem:
                     "Protocols mismatched | expected Subprotocols: %s,"
                     " but client supports  %s | Closing connection",
                     websocket.available_subprotocols,
-                    requested_protocols,
+                    websocket.request_headers.get("Sec-WebSocket-Protocol", ""),
                 )
                 return await websocket.close()
 
@@ -406,9 +411,7 @@ class ChargePoint(cp):
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
-            await self.set_availability()
             await self.get_configuration(ckey.heartbeat_interval.value)
-            await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.configure(
                 ckey.meter_values_sampled_data.value,
                 self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
@@ -467,6 +470,8 @@ class ChargePoint(cp):
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
+            await self.configure(ckey.web_socket_ping_interval.value, "60")
+            await self.set_availability()
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
@@ -478,21 +483,37 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
-        for key_value in resp.configuration_key:
-            if om.feature_profile_core.value in key_value[om.value.value]:
+        feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+        if feature_list[0] == "":
+            _LOGGER.warning("No feature profiles detected, defaulting to Core")
+            await self.notify_ha("No feature profiles detected, defaulting to Core")
+            feature_list = [om.feature_profile_core.value]
+        if self.central.config.get(
+            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+        ):
+            _LOGGER.warning("Force Smart Charging feature profile")
+            self._attr_supported_features |= prof.SMART
+        for item in feature_list:
+            item = item.strip()
+            if item == om.feature_profile_core.value:
                 self._attr_supported_features |= prof.CORE
-            if om.feature_profile_firmware.value in key_value[om.value.value]:
+            elif item == om.feature_profile_firmware.value:
                 self._attr_supported_features |= prof.FW
-            if om.feature_profile_smart.value in key_value[om.value.value]:
+            elif item == om.feature_profile_smart.value:
                 self._attr_supported_features |= prof.SMART
-            if om.feature_profile_reservation.value in key_value[om.value.value]:
+            elif item == om.feature_profile_reservation.value:
                 self._attr_supported_features |= prof.RES
-            if om.feature_profile_remote.value in key_value[om.value.value]:
+            elif item == om.feature_profile_remote.value:
                 self._attr_supported_features |= prof.REM
-            if om.feature_profile_auth.value in key_value[om.value.value]:
+            elif item == om.feature_profile_auth.value:
                 self._attr_supported_features |= prof.AUTH
-            self._metrics[cdet.features.value].value = self._attr_supported_features
-            _LOGGER.info("Supported feature profiles: %s", key_value[om.value.value])
+            else:
+                _LOGGER.warning("Unknown feature profile detected ignoring: %s", item)
+                await self.notify_ha(
+                    f"Warning: Unknown feature profile detected ignoring {item}"
+                )
+        self._metrics[cdet.features.value].value = self._attr_supported_features
+        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -583,11 +604,12 @@ class ChargePoint(cp):
             _LOGGER.debug(
                 "ChargePointMaxProfile is not supported by this charger, trying TxDefaultProfile instead..."
             )
+            # try a lower stack level for chargers where level < maximum, not <=
             req = call.SetChargingProfilePayload(
                 connector_id=0,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
-                    om.stack_level.value: stack_level,
+                    om.stack_level.value: stack_level - 1,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
                     om.charging_schedule.value: {
@@ -636,7 +658,7 @@ class ChargePoint(cp):
         if resp is True:
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         req = call.RemoteStartTransactionPayload(
-            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value
+            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value[:20]
         )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
@@ -705,7 +727,7 @@ class ChargePoint(cp):
                 _LOGGER.debug("Failed to parse url: %s", e)
             update_time = (
                 datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)
-            ).isoformat()
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             req = call.UpdateFirmwarePayload(location=url, retrieve_date=update_time)
             resp = await self.call(req)
             _LOGGER.info("Response: %s", resp)
@@ -966,13 +988,13 @@ class ChargePoint(cp):
 
         measurand_data = {}
         for item in data:
-            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1":"230"...}}
+            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
             measurand = item.get(om.measurand.value, None)
             phase = item.get(om.phase.value, None)
             value = item.get(om.value.value, None)
             unit = item.get(om.unit.value, None)
             context = item.get(om.context.value, None)
-            if measurand is not None and phase is not None:
+            if measurand is not None and phase is not None and unit is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
@@ -983,33 +1005,34 @@ class ChargePoint(cp):
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
-        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l2_n.value]
+        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
         for metric, phase_info in measurand_data.items():
             metric_value = None
             if metric in [Measurand.voltage.value]:
-                if (phase_info.keys() & line_to_neutral_phases) is not None:
+                if not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Line to neutral voltages are averaged
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
                     )
-                elif (phase_info.keys() & line_to_line_phases) is not None:
+                elif not phase_info.keys().isdisjoint(line_to_line_phases):
                     # Line to line voltages are averaged and converted to line to neutral
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0) for phase in line_to_line_phases]
                     ) / sqrt(3)
-            elif metric in [
-                Measurand.current_import.value,
-                Measurand.current_export.value,
-                Measurand.power_active_import.value,
-                Measurand.power_active_export.value,
-            ]:
-                if (phase_info.keys() & line_phases) is not None:
+                elif not phase_info.keys().isdisjoint(line_phases):
+                    # Workaround for chargers that don't follow engineering convention
+                    # Assumes voltages are line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_phases]
+                    )
+            else:
+                if not phase_info.keys().isdisjoint(line_phases):
                     metric_value = sum(
                         phase_info.get(phase, 0) for phase in line_phases
                     )
-                elif (phase_info.keys() & line_to_neutral_phases) is not None:
+                elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Workaround for some chargers that erroneously use line to neutral for current
                     metric_value = sum(
                         phase_info.get(phase, 0) for phase in line_to_neutral_phases
@@ -1117,7 +1140,7 @@ class ChargePoint(cp):
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
         resp = call_result.BootNotificationPayload(
-            current_time=datetime.now(tz=timezone.utc).isoformat(),
+            current_time=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
@@ -1196,6 +1219,20 @@ class ChargePoint(cp):
             self.notify_ha(f"Diagnostics upload status: {status}")
         )
         return call_result.DiagnosticsStatusNotificationPayload()
+
+    @on(Action.SecurityEventNotification)
+    def on_security_event(self, type, timestamp, **kwargs):
+        """Handle security event notification."""
+        _LOGGER.info(
+            "Security event notification received: %s at %s [techinfo: %s]",
+            type,
+            timestamp,
+            kwargs.get(om.tech_info.name, "none"),
+        )
+        self.hass.async_create_task(
+            self.notify_ha(f"Security event notification received: {type}")
+        )
+        return call_result.SecurityEventNotificationPayload()
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
@@ -1301,7 +1338,9 @@ class ChargePoint(cp):
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.HeartbeatPayload(current_time=now.isoformat())
+        return call_result.HeartbeatPayload(
+            current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
 
     @property
     def supported_features(self) -> int:

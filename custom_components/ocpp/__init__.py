@@ -28,7 +28,7 @@ from .const import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
+logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 AUTH_LIST_SCHEMA = vol.Schema(
     {
@@ -70,7 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     central_sys = await CentralSystem.create(hass, entry)
 
-    dr = await device_registry.async_get_registry(hass)
+    dr = device_registry.async_get(hass)
 
     """ Create Central System Device """
     dr.async_get_or_create(

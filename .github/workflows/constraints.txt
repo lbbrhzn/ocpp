@@ -1,11 +1,11 @@
 # home assistant
-pip>=8.0.3,<22.1
-pre-commit==2.17.0
+pip>=8.0.3,<22.4
+pre-commit==2.20.0
 bandit==1.7.4
-black==22.1.0
-flake8==4.0.1
+black==22.10.0
+flake8==5.0.4
 isort==5.10.1
 pre-comit-hooks==4.1.0
-pyupgrade==2.31.1
-reorder-python-imports==3.0.1
+pyupgrade==3.2.0
+reorder-python-imports==3.9.0
 sqlalchemy>=1.4.23

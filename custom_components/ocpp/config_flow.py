@@ -5,6 +5,7 @@ import voluptuous as vol
 from .const import (
     CONF_CPID,
     CONF_CSID,
+    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -12,12 +13,14 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
+    CONF_SSL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_CPID,
     DEFAULT_CSID,
+    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
@@ -25,6 +28,7 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
+    DEFAULT_SSL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
@@ -37,6 +41,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Required(CONF_SSL, default=DEFAULT_SSL): bool,
         vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
@@ -56,6 +61,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ): int,
         vol.Required(
             CONF_SKIP_SCHEMA_VALIDATION, default=DEFAULT_SKIP_SCHEMA_VALIDATION
+        ): bool,
+        vol.Required(
+            CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
     }
 )

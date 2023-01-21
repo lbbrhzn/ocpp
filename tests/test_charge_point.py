@@ -41,7 +41,7 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
 async def test_cms_responses(hass, socket_enabled):
@@ -103,6 +103,7 @@ async def test_cms_responses(hass, socket_enabled):
                 data = {"upload_url": "https://webhook.site/abc"}
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
+
             result = await hass.services.async_call(
                 OCPP_DOMAIN,
                 service.value,
@@ -122,6 +123,44 @@ async def test_cms_responses(hass, socket_enabled):
             )
             assert result
 
+    # Test MOCK_CONFIG_DATA_2
+    if True:
+        # Create a mock entry so we don't have to go through config flow
+        config_entry2 = MockConfigEntry(
+            domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms2"
+        )
+        assert await async_setup_entry(hass, config_entry2)
+        await hass.async_block_till_done()
+
+        # no subprotocol
+        async with websockets.connect(
+            "ws://127.0.0.1:9002/CP_1_nosub",
+        ) as ws2:
+            # use a different id for debugging
+            cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        cp2.start(),
+                        cp2.send_boot_notification(),
+                        cp2.send_authorize(),
+                        cp2.send_heartbeat(),
+                        cp2.send_status_notification(),
+                        cp2.send_firmware_status(),
+                        cp2.send_data_transfer(),
+                        cp2.send_start_transaction(),
+                        cp2.send_stop_transaction(),
+                        cp2.send_meter_periodic_data(),
+                    ),
+                    timeout=3,
+                )
+            except asyncio.TimeoutError:
+                pass
+            await ws2.close()
+        await asyncio.sleep(1)
+        await async_unload_entry(hass, config_entry2)
+        await hass.async_block_till_done()
+
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
@@ -133,7 +172,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     # no subprotocol
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_unsup",
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_no_subprotocol", ws)
@@ -155,10 +194,13 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
+
+    await asyncio.sleep(1)
 
     # unsupported subprotocol
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_unsup",
         subprotocols=["ocpp0.0"],
     ) as ws:
         # use a different id for debugging
@@ -181,16 +223,17 @@ async def test_cms_responses(hass, socket_enabled):
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
 
     await asyncio.sleep(1)
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
-        subprotocols=["ocpp1.6"],
+        "ws://127.0.0.1:9000/CP_1_norm",
+        subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_normal", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -199,17 +242,21 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_authorize(),
                     cp.send_heartbeat(),
                     cp.send_status_notification(),
+                    cp.send_security_event(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
                     cp.send_start_transaction(),
+                    cp.send_meter_err_phases(),
+                    cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
                     cp.send_stop_transaction(2),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
+        await ws.close()
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
     )
@@ -239,10 +286,10 @@ async def test_cms_responses(hass, socket_enabled):
     # should reconnect as already started above
     # test processing of clock aligned meter data
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_serv",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_services", ws)
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -254,22 +301,24 @@ async def test_cms_responses(hass, socket_enabled):
                     test_buttons(hass, socket_enabled),
                     cp.send_meter_clock_data(),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except asyncio.TimeoutError:
             pass
+        await ws.close()
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
 
+    await asyncio.sleep(1)
+
     # test ocpp rejection messages sent from charger to cms
+    cs.charge_points["test_cpid"].received_boot_notification = False
+    cs.charge_points["test_cpid"].post_connect_success = False
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1",
+        "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        # use same id to ensure metrics populated
-        cp = ChargePoint("CP_1_test", ws)
+        cp = ChargePoint("CP_1_error", ws)
         cp.accept = False
-        cs.charge_points[cs.cpid].received_boot_notification = False
-        cs.charge_points[cs.cpid].post_connect_success = False
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -286,6 +335,7 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         except websockets.exceptions.ConnectionClosedOK:
             pass
+        await ws.close()
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
@@ -319,15 +369,26 @@ class ChargePoint(cpclass):
     def on_get_configuration(self, key, **kwargs):
         """Handle a get configuration requests."""
         if key[0] == ConfigurationKey.supported_feature_profiles.value:
-            return call_result.GetConfigurationPayload(
-                configuration_key=[
-                    {
-                        "key": key[0],
-                        "readonly": False,
-                        "value": "Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger",
-                    }
-                ]
-            )
+            if self.accept is True:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {
+                            "key": key[0],
+                            "readonly": False,
+                            "value": "Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger,Dummy",
+                        }
+                    ]
+                )
+            else:
+                return call_result.GetConfigurationPayload(
+                    configuration_key=[
+                        {
+                            "key": key[0],
+                            "readonly": False,
+                            "value": "",
+                        }
+                    ]
+                )
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfigurationPayload(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
@@ -714,6 +775,38 @@ class ChargePoint(cpclass):
                             "phase": "L3-N",
                         },
                         {
+                            "value": "89.00",
+                            "context": "Sample.Periodic",
+                            "measurand": "Power.Reactive.Import",
+                            "unit": "W",
+                        },
+                        {
+                            "value": "0.010",
+                            "context": "Transaction.Begin",
+                            "unit": "kWh",
+                        },
+                        {
+                            "value": "1305570.000",
+                        },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_line_voltage(self):
+        """Send line voltages."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
                             "value": "395.900",
                             "context": "Sample.Periodic",
                             "measurand": "Voltage",
@@ -737,19 +830,39 @@ class ChargePoint(cpclass):
                             "unit": "V",
                             "phase": "L3-L1",
                         },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_err_phases(self):
+        """Send erroneous voltage phase."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
                         {
-                            "value": "89.00",
+                            "value": "230",
                             "context": "Sample.Periodic",
-                            "measurand": "Power.Reactive.Import",
-                            "unit": "W",
+                            "measurand": "Voltage",
+                            "location": "Outlet",
+                            "unit": "V",
+                            "phase": "L1",
                         },
                         {
-                            "value": "0.010",
-                            "context": "Transaction.Begin",
-                            "unit": "kWh",
-                        },
-                        {
-                            "value": "1305570.000",
+                            "value": "23",
+                            "context": "Sample.Periodic",
+                            "measurand": "Current.Import",
+                            "location": "Outlet",
+                            "unit": "A",
+                            "phase": "L1-N",
                         },
                     ],
                 }
@@ -819,3 +932,12 @@ class ChargePoint(cpclass):
         )
         resp = await self.call(request)
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
+
+    async def send_security_event(self):
+        """Send a security event notification."""
+        request = call.SecurityEventNotificationPayload(
+            type="SettingSystemTime",
+            timestamp="2022-09-29T20:58:29Z",
+            tech_info="BootNotification",
+        )
+        await self.call(request)

@@ -16,7 +16,8 @@
                     "websocket_ping_tries": "Verbindungsversuche vor dem Schließen des Websockets",
                     "websocket_ping_interval": "Websocket-Ping-Intervall (Sekunden)",
                     "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
-                    "skip_schema_validation": "Überspringe OCPP-Schemavalidierung"
+                    "skip_schema_validation": "Überspringe OCPP-Schemavalidierung",
+                    "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil"
                 }
             },
             "measurands": {

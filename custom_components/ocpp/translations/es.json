@@ -15,7 +15,8 @@
                     "websocket_ping_tries": "Reintentos de conexión Websocket",
                     "websocket_ping_interval": "Intervalo ping Websocket (segundos)",
                     "websocket_ping_timeout": "Tiempo de espera ping Websocket (segundos)",
-                    "skip_schema_validation": "Omitir validación esquema OCPP"
+                    "skip_schema_validation": "Omitir validación esquema OCPP",
+                    "force_smart_charging": "Forzar perfil de función Smart Charging"
                 }
             },
             "measurands": {
