@@ -18,7 +18,15 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, DATA_UPDATED, DEFAULT_CPID, DOMAIN, ICON, Measurand
+from .const import (
+    CONF_CPID,
+    DATA_UPDATED,
+    DEFAULT_CLASS_UNITS_HA,
+    DEFAULT_CPID,
+    DOMAIN,
+    ICON,
+    Measurand,
+)
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
 
@@ -27,6 +35,7 @@ class OcppSensorDescription(SensorEntityDescription):
     """Class to describe a Sensor entity."""
 
     scale: int = 1  # used for rounding metric
+    metric: str | None = None
 
 
 async def async_setup_entry(hass, entry, async_add_devices):
@@ -41,14 +50,16 @@ async def async_setup_entry(hass, entry, async_add_devices):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
-                name=metric,
+                name=metric.replace(".", " "),
+                metric=metric,
             )
         )
     for metric in list(HAChargerStatuses) + list(HAChargerDetails):
         SENSORS.append(
             OcppSensorDescription(
                 key=metric.lower(),
-                name=metric,
+                name=metric.replace(".", " "),
+                metric=metric,
                 entity_category=EntityCategory.DIAGNOSTIC,
             )
         )
@@ -83,7 +94,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self.central_system = central_system
         self.cp_id = cp_id
         self.entity_description = description
-        self.metric = self.entity_description.name
+        self.metric = self.entity_description.metric
         self._hass = hass
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
@@ -182,6 +193,10 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         value = self.central_system.get_ha_unit(self.cp_id, self.metric)
         if value is not None:
             self._attr_native_unit_of_measurement = value
+        else:
+            self._attr_native_unit_of_measurement = DEFAULT_CLASS_UNITS_HA.get(
+                self.device_class
+            )
         return self._attr_native_unit_of_measurement
 
     async def async_added_to_hass(self) -> None:

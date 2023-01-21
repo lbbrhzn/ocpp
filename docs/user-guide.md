@@ -90,6 +90,28 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Availability` (ON when charger is idle. OFF during active charging session, or when something causes a problem)
 * `Maximum Current` (sets maximum charging current available. Reverts to value set by charger's internal DIP switch following reboots; tweak slider to reload)
 
+## Useful Entities for Vestel EVC-04 Wallboxes
+
+### Metrics
+
+* `Energy Active Import Register` (cumulative energy supplied to EV during charging session. Resets to zero at start of each session)
+* `Energy Active Import Interval` (in case you need the energy spent in total for the current charging session)
+* `Power Active Import` (instantaneous charging power)
+* `Current Import`
+* `Time Session` (elapsed time from start of charging session)
+
+### Diagnostics
+
+* `Status Connector` (shows the current state of available/preparing/charging/finishing/suspended etc)
+* `Stop Reason` (reason the charging session was stopped)
+
+### Controls
+
+* `Charge Control`
+* `Availability` (must be set to ON before EV is plugged in)
+* `Maximum Current` (sets maximum charging current available)
+* `Reset`
+
 ### OCPP Compatibility Issues
 
 Grizzl-E firmware has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
