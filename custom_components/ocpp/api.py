@@ -64,6 +64,8 @@ from .const import (
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
+    CONF_SSL_CERTFILE_PATH,
+    CONF_SSL_KEYFILE_PATH,
     CONF_SUBPROTOCOL,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
@@ -82,6 +84,8 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
+    DEFAULT_SSL_CERTFILE_PATH,
+    DEFAULT_SSL_KEYFILE_PATH,
     DEFAULT_SUBPROTOCOL,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
@@ -171,8 +175,9 @@ class CentralSystem:
         if entry.data.get(CONF_SSL, DEFAULT_SSL):
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_pem = pathlib.Path.cwd().joinpath("fullchain.pem")
-            self.ssl_context.load_cert_chain(localhost_pem)
+            localhost_certfile = entry.data.get(CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH)
+            localhost_keyfile = entry.data.get(CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH)
+            self.ssl_context.load_cert_chain(localhost_certfile, keyfile=localhost_keyfile)
         else:
             self.ssl_context = None
 
