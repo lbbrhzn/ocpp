@@ -174,9 +174,15 @@ class CentralSystem:
         if entry.data.get(CONF_SSL, DEFAULT_SSL):
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_certfile = entry.data.get(CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH)
-            localhost_keyfile = entry.data.get(CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH)
-            self.ssl_context.load_cert_chain(localhost_certfile, keyfile=localhost_keyfile)
+            localhost_certfile = entry.data.get(
+                CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH
+            )
+            localhost_keyfile = entry.data.get(
+                CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH
+            )
+            self.ssl_context.load_cert_chain(
+                localhost_certfile, keyfile=localhost_keyfile
+            )
         else:
             self.ssl_context = None
 
