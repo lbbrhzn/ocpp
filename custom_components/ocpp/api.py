@@ -6,7 +6,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from math import sqrt
-import pathlib
 import ssl
 import time
 
