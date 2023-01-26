@@ -72,7 +72,7 @@ MOCK_CONFIG_DATA = {
     CONF_FORCE_SMART_CHARGING: True,
     CONF_SSL: False,
     CONF_SSL_CERTFILE_PATH: "/config/fullchain.pem",
-    CONF_SSL_KEYFILE_PATH: "/config/privkey.pem"
+    CONF_SSL_KEYFILE_PATH: "/config/privkey.pem",
     CONF_WEBSOCKET_CLOSE_TIMEOUT: 1,
     CONF_WEBSOCKET_PING_TRIES: 0,
     CONF_WEBSOCKET_PING_INTERVAL: 1,
