@@ -60,6 +60,29 @@ class HAChargerSession(str, Enum):
     meter_start = "Energy.Meter.Start"  # in kWh
 
 
+class HAConnectorStatuses(str, Enum):
+    """Connector status conditions to report in home assistant."""
+
+    status = "Status"
+    status_connector = "Status.Connector"
+    heartbeat = "Heartbeat"
+    latency_ping = "Latency.Ping"
+    latency_pong = "Latency.Pong"
+    error_code = "Error.Code"
+    error_code_connector = "Error.Code.Connector"
+    stop_reason = "Stop.Reason"
+    id_tag = "Id.Tag"
+
+
+class HAConnectorSession(str, Enum):
+    """Connector session information to report in home assistant."""
+
+    transaction_id = "Transaction.Id"
+    session_time = "Time.Session"  # in min
+    session_energy = "Energy.Session"  # in kWh
+    meter_start = "Energy.Meter.Start"  # in kWh
+
+
 class Profiles(IntFlag):
     """Flags to indicate supported feature profiles."""
 

@@ -3,6 +3,7 @@ from homeassistant import config_entries
 import voluptuous as vol
 
 from .const import (
+    CONF_CONN_PREFIX,
     CONF_CPID,
     CONF_CSID,
     CONF_FORCE_SMART_CHARGING,
@@ -11,6 +12,7 @@ from .const import (
     CONF_MAX_CURRENT,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_NO_OF_CONNECTORS,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -18,6 +20,7 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
+    DEFAULT_CONN_PREFIX,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_FORCE_SMART_CHARGING,
@@ -26,6 +29,7 @@ from .const import (
     DEFAULT_MAX_CURRENT,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
+    DEFAULT_NO_OF_CONNECTORS,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -44,6 +48,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SSL, default=DEFAULT_SSL): bool,
         vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
+        vol.Required(CONF_CONN_PREFIX, default=DEFAULT_CONN_PREFIX): str,
+        vol.Required(CONF_NO_OF_CONNECTORS, default=DEFAULT_NO_OF_CONNECTORS): int,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,

@@ -52,6 +52,7 @@ from ocpp.v16.enums import (
 from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
+    CONF_CONN_PREFIX,
     CONF_CPID,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
@@ -61,6 +62,7 @@ from .const import (
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_NO_OF_CONNECTORS,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -70,6 +72,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
     CONFIG,
+    DEFAULT_CONN_PREFIX,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
@@ -78,6 +81,7 @@ from .const import (
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
+    DEFAULT_NO_OF_CONNECTORS,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
@@ -103,7 +107,7 @@ from .enums import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
+# logging.getLogger(DOMAIN).setLevel(logging.DEBUG)
 # Uncomment these when Debugging
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
@@ -231,32 +235,56 @@ class CentralSystem:
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
+        # _LOGGER.debug(f"get_metric: {cp_id} measurand: {measurand}")
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].value
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return charge_point._connectors[cp_id]._metrics[measurand].value
         return None
 
     def get_unit(self, cp_id: str, measurand: str):
         """Return unit of given measurand."""
+        # _LOGGER.debug(f"get_unit: {cp_id} measurand: {measurand}")
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].unit
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return charge_point._connectors[cp_id]._metrics[measurand].unit
         return None
 
     def get_ha_unit(self, cp_id: str, measurand: str):
         """Return home assistant unit of given measurand."""
+        # _LOGGER.debug(f"get_ha_unit: {cp_id} measurand: {measurand}")
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].ha_unit
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return charge_point._connectors[cp_id]._metrics[measurand].ha_unit
         return None
 
     def get_extra_attr(self, cp_id: str, measurand: str):
+        # _LOGGER.debug(f"get_extra_attr: {cp_id} measurand: {measurand}")
         """Return last known extra attributes for given measurand."""
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].extra_attr
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return charge_point._connectors[cp_id]._metrics[measurand].extra_attr
         return None
 
     def get_available(self, cp_id: str):
-        """Return whether the charger is available."""
+        """Return whether the charger or connector is available."""
         if cp_id in self.charge_points:
             return self.charge_points[cp_id].status == STATE_OK
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return charge_point._connectors[cp_id].get_status() == STATE_OK
         return False
 
     def get_supported_features(self, cp_id: str):
@@ -268,7 +296,16 @@ class CentralSystem:
     async def set_max_charge_rate_amps(self, cp_id: str, value: float):
         """Set the maximum charge rate in amps."""
         if cp_id in self.charge_points:
-            return await self.charge_points[cp_id].set_charge_rate(limit_amps=value)
+            return await self.charge_points[cp_id].set_charge_rate(
+                limit_amps=value, connector_id=0
+            )
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    return await charge_point.set_charge_rate(
+                        limit_amps=value,
+                        connector_id=charge_point._connectors[cp_id].connector_no,
+                    )
         return False
 
     async def set_charger_state(
@@ -287,15 +324,40 @@ class CentralSystem:
                 resp = await self.charge_points[cp_id].reset()
             if service_name == csvcs.service_unlock.name:
                 resp = await self.charge_points[cp_id].unlock()
+        else:
+            for key, charge_point in self.charge_points.items():
+                if cp_id in charge_point._connectors:
+                    if service_name == csvcs.service_availability.name:
+                        resp = await charge_point.set_availability(
+                            state=state,
+                            connector_id=charge_point._connectors[cp_id].connector_no,
+                        )
+                    if service_name == csvcs.service_charge_start.name:
+                        resp = await charge_point.start_transaction(
+                            connector_id=charge_point._connectors[cp_id].connector_no,
+                        )
+                    if service_name == csvcs.service_charge_stop.name:
+                        resp = await charge_point.stop_transaction()
+                    if service_name == csvcs.service_reset.name:
+                        resp = await charge_point.reset()
+                    if service_name == csvcs.service_unlock.name:
+                        resp = await charge_point.unlock(
+                            connector_id=charge_point._connectors[cp_id].connector_no,
+                        )
         return resp
 
-    async def update(self, cp_id: str):
+    async def update(self, cp_id: str, connector_id: int = 0):
         """Update sensors values in HA."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cp_id)}
+
+        if connector_id > 0:
+            identifiers = {(DOMAIN, self.charge_points[cp_id].get_connector(connector_id).id)}
+        else:
+            identifiers = {(DOMAIN, cp_id)}
+
         dev = dr.async_get_device(identifiers)
-        # _LOGGER.info("Device id: %s updating", dev.name)
+        _LOGGER.info("Device id: %s updating", dev.name)
         for ent in entity_registry.async_entries_for_device(er, dev.id):
             # _LOGGER.info("Entity id: %s updating", ent.entity_id)
             self.hass.async_create_task(
@@ -351,9 +413,29 @@ class ChargePoint(cp):
         self._attr_supported_features: int = 0
         self._metrics[cstat.reconnects.value].value: int = 0
 
+        # Create connectors
+        self._connector_prefix = self.entry.data.get(
+            CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX
+        )
+        self._no_of_connectors = self.entry.data.get(
+            CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS
+        )
+        self._connectors = {}
+        for connector_no in range(1, self._no_of_connectors + 1):
+            conn_id = f"{self._connector_prefix}_{connector_no}"
+            self._connectors[conn_id] = Connector(
+                conn_id,
+                self.hass,
+                self.entry,
+                self.central,
+                self,
+                connector_no,
+            )
+
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
         # Define custom service handles for charge point
+
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
             if self.status == STATE_UNAVAILABLE:
@@ -408,18 +490,22 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await asyncio.sleep(2)
+
             await self.get_supported_features()
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
+
             await self.get_configuration(ckey.heartbeat_interval.value)
             await self.configure(
                 ckey.meter_values_sampled_data.value,
                 self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
             )
+
             await self.configure(
                 ckey.meter_value_sample_interval.value,
                 str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
             )
+
             await self.configure(
                 ckey.clock_aligned_data_interval.value,
                 str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
@@ -472,6 +558,7 @@ class ChargePoint(cp):
             # and can cause issues with some chargers
             await self.configure(ckey.web_socket_ping_interval.value, "60")
             await self.set_availability()
+
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
@@ -545,9 +632,11 @@ class ChargePoint(cp):
                 return_value = False
         return return_value
 
-    async def clear_profile(self):
+    async def clear_profile(self, connector_id: int = 1):
         """Clear all charging profiles."""
-        req = call.ClearChargingProfilePayload()
+        req = call.ClearChargingProfilePayload(
+            connector_id=connector_id,
+        )
         resp = await self.call(req)
         if resp.status == ClearChargingProfileStatus.accepted:
             return True
@@ -558,7 +647,9 @@ class ChargePoint(cp):
             )
             return False
 
-    async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
+    async def set_charge_rate(
+        self, limit_amps: int = 32, limit_watts: int = 22000, connector_id: int = 0
+    ):
         """Set a charging profile with defined limit."""
         if prof.SMART in self._attr_supported_features:
             resp = await self.get_configuration(
@@ -580,7 +671,7 @@ class ChargePoint(cp):
             )
             stack_level = int(resp)
             req = call.SetChargingProfilePayload(
-                connector_id=0,
+                connector_id=connector_id,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level,
@@ -630,14 +721,14 @@ class ChargePoint(cp):
                 )
                 return False
 
-    async def set_availability(self, state: bool = True):
+    async def set_availability(self, state: bool = True, connector_id: int = 0):
         """Change availability."""
         if state is True:
             typ = AvailabilityType.operative.value
         else:
             typ = AvailabilityType.inoperative.value
 
-        req = call.ChangeAvailabilityPayload(connector_id=0, type=typ)
+        req = call.ChangeAvailabilityPayload(connector_id=connector_id, type=typ)
         resp = await self.call(req)
         if resp.status == AvailabilityStatus.accepted:
             return True
@@ -648,7 +739,7 @@ class ChargePoint(cp):
             )
             return False
 
-    async def start_transaction(self):
+    async def start_transaction(self, connector_id: int = 1):
         """
         Remote start a transaction.
 
@@ -658,7 +749,8 @@ class ChargePoint(cp):
         if resp is True:
             await self.configure(ckey.authorize_remote_tx_requests.value, "false")
         req = call.RemoteStartTransactionPayload(
-            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value[:20]
+            connector_id=connector_id,
+            id_tag=self._metrics[cdet.identifier.value].value[:20],
         )
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
@@ -1057,6 +1149,10 @@ class ChargePoint(cp):
                     self._metrics[metric].value = float(metric_value)
                     self._metrics[metric].unit = metric_unit
 
+    def get_connector(self, connector_id: int = 1):
+        """Get the connector with id connector_id"""
+        return self._connectors[f"connector_{connector_id}"]
+
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
@@ -1065,7 +1161,10 @@ class ChargePoint(cp):
 
         transaction_matches: bool = False
         # match is also false if no transaction is in progress ie active_transaction_id==transaction_id==0
-        if transaction_id == self.active_transaction_id and transaction_id != 0:
+        if (
+            transaction_id == self.get_connector(connector_id).active_transaction_id
+            and transaction_id != 0
+        ):
             transaction_matches = True
         elif transaction_id != 0:
             _LOGGER.warning("Unknown transaction detected with id=%i", transaction_id)
@@ -1081,59 +1180,104 @@ class ChargePoint(cp):
                 location = sampled_value.get(om.location.value, None)
                 context = sampled_value.get(om.context.value, None)
 
+                _LOGGER.debug(
+                    "on_meter_values: measurand: %s, value: %s unit: %f phase :%s",
+                    measurand,
+                    value,
+                    unit,
+                    phase,
+                )
+
                 if len(sampled_value.keys()) == 1:  # Backwards compatibility
                     measurand = DEFAULT_MEASURAND
                     unit = DEFAULT_ENERGY_UNIT
 
                 if phase is None:
                     if unit == DEFAULT_POWER_UNIT:
-                        self._metrics[measurand].value = float(value) / 1000
-                        self._metrics[measurand].unit = HA_POWER_UNIT
+                        self.get_connector(connector_id)._metrics[measurand].value = (
+                            float(value) / 1000
+                        )
+                        self.get_connector(connector_id)._metrics[
+                            measurand
+                        ].unit = HA_POWER_UNIT
                     elif unit == DEFAULT_ENERGY_UNIT:
                         if transaction_matches:
-                            self._metrics[measurand].value = float(value) / 1000
-                            self._metrics[measurand].unit = HA_ENERGY_UNIT
+                            self.get_connector(connector_id)._metrics[
+                                measurand
+                            ].value = (float(value) / 1000)
+                            self.get_connector(connector_id)._metrics[
+                                measurand
+                            ].unit = HA_ENERGY_UNIT
                     else:
-                        self._metrics[measurand].value = float(value)
-                        self._metrics[measurand].unit = unit
+                        self.get_connector(connector_id)._metrics[
+                            measurand
+                        ].value = float(value)
+                        self.get_connector(connector_id)._metrics[measurand].unit = unit
                     if location is not None:
-                        self._metrics[measurand].extra_attr[
+                        self.get_connector(connector_id)._metrics[measurand].extra_attr[
                             om.location.value
                         ] = location
                     if context is not None:
-                        self._metrics[measurand].extra_attr[om.context.value] = context
+                        self.get_connector(connector_id)._metrics[measurand].extra_attr[
+                            om.context.value
+                        ] = context
                     processed_keys.append(idx)
             for idx in sorted(processed_keys, reverse=True):
                 unprocessed.pop(idx)
-            # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
+            _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
+
             if unprocessed is not None:
                 self.process_phases(unprocessed)
-        if csess.meter_start.value not in self._metrics:
-            self._metrics[csess.meter_start.value].value = self._metrics[
-                DEFAULT_MEASURAND
-            ]
-        if csess.transaction_id.value not in self._metrics:
-            self._metrics[csess.transaction_id.value].value = kwargs.get(
+
+        if csess.meter_start.value not in self.get_connector(connector_id)._metrics:
+            self.get_connector(connector_id)._metrics[
+                csess.meter_start.value
+            ].value = self.get_connector(connector_id)._metrics[DEFAULT_MEASURAND]
+        if csess.transaction_id.value not in self.get_connector(connector_id)._metrics:
+            self.get_connector(connector_id)._metrics[
+                csess.transaction_id.value
+            ].value = kwargs.get(om.transaction_id.name)
+            self.get_connector(connector_id).active_transaction_id = kwargs.get(
                 om.transaction_id.name
             )
-            self.active_transaction_id = kwargs.get(om.transaction_id.name)
+
         if transaction_matches:
-            self._metrics[csess.session_time.value].value = round(
+            self.get_connector(connector_id)._metrics[
+                csess.session_time.value
+            ].value = round(
                 (
                     int(time.time())
-                    - float(self._metrics[csess.transaction_id.value].value)
+                    - float(
+                        self.get_connector(connector_id)
+                        ._metrics[csess.transaction_id.value]
+                        .value
+                    )
                 )
                 / 60
             )
-            self._metrics[csess.session_time.value].unit = "min"
-            if self._metrics[csess.meter_start.value].value is not None:
-                self._metrics[csess.session_energy.value].value = float(
-                    self._metrics[DEFAULT_MEASURAND].value or 0
-                ) - float(self._metrics[csess.meter_start.value].value)
-                self._metrics[csess.session_energy.value].extra_attr[
-                    cstat.id_tag.name
-                ] = self._metrics[cstat.id_tag.value].value
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+            self.get_connector(connector_id)._metrics[
+                csess.session_time.value
+            ].unit = "min"
+            if (
+                self.get_connector(connector_id)._metrics[csess.meter_start.value].value
+                is not None
+            ):
+                self.get_connector(connector_id)._metrics[
+                    csess.session_energy.value
+                ].value = float(
+                    self.get_connector(connector_id)._metrics[DEFAULT_MEASURAND].value
+                    or 0
+                ) - float(
+                    self.get_connector(connector_id)
+                    ._metrics[csess.meter_start.value]
+                    .value
+                )
+                self.get_connector(connector_id)._metrics[
+                    csess.session_energy.value
+                ].extra_attr[cstat.id_tag.name] = (
+                    self.get_connector(connector_id)._metrics[cstat.id_tag.value].value
+                )
+        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -1171,36 +1315,80 @@ class ChargePoint(cp):
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         """Handle a status notification."""
 
+        _LOGGER.debug(
+            "on_status_notification1, connector_id: %s, error_code: %s, status: %s, kwargs: %s", connector_id, error_code, status, kwargs
+        )
+
         if connector_id == 0 or connector_id is None:
             self._metrics[cstat.status.value].value = status
             self._metrics[cstat.error_code.value].value = error_code
-        elif connector_id == 1:
-            self._metrics[cstat.status_connector.value].value = status
-            self._metrics[cstat.error_code_connector.value].value = error_code
-        if connector_id >= 1:
-            self._metrics[cstat.status_connector.value].extra_attr[
-                connector_id
-            ] = status
-            self._metrics[cstat.error_code_connector.value].extra_attr[
-                connector_id
-            ] = error_code
+            _LOGGER.debug(
+                "on_status_notification2, self._metrics[cstat.status.value].value: %s", self._metrics[cstat.status.value].value
+            )
+
+        else:
+            self.get_connector(connector_id)._metrics[cstat.status.value].value = status
+            self.get_connector(connector_id)._metrics[
+                cstat.error_code.value
+            ].value = error_code
+
+            _LOGGER.debug(
+                "on_status_notification3, self.get_connector(connector_id)._metrics[cstat.status.value].value: %s", self.get_connector(connector_id)._metrics[cstat.status.value].value
+            )
+
+            self.get_connector(connector_id)._metrics[
+                cstat.status_connector.value
+            ].value = status
+            self.get_connector(connector_id)._metrics[
+                cstat.error_code_connector.value
+            ].value = error_code
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
         ):
-            if Measurand.current_import.value in self._metrics:
-                self._metrics[Measurand.current_import.value].value = 0
-            if Measurand.power_active_import.value in self._metrics:
-                self._metrics[Measurand.power_active_import.value].value = 0
-            if Measurand.power_reactive_import.value in self._metrics:
-                self._metrics[Measurand.power_reactive_import.value].value = 0
-            if Measurand.current_export.value in self._metrics:
-                self._metrics[Measurand.current_export.value].value = 0
-            if Measurand.power_active_export.value in self._metrics:
-                self._metrics[Measurand.power_active_export.value].value = 0
-            if Measurand.power_reactive_export.value in self._metrics:
-                self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+            if (
+                Measurand.current_import.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.current_import.value
+                ].value = 0
+            if (
+                Measurand.power_active_import.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.power_active_import.value
+                ].value = 0
+            if (
+                Measurand.power_reactive_import.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.power_reactive_import.value
+                ].value = 0
+            if (
+                Measurand.current_export.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.current_export.value
+                ].value = 0
+            if (
+                Measurand.power_active_export.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.power_active_export.value
+                ].value = 0
+            if (
+                Measurand.power_reactive_export.value
+                in self.get_connector(connector_id)._metrics
+            ):
+                self.get_connector(connector_id)._metrics[
+                    Measurand.power_reactive_export.value
+                ].value = 0
+        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
@@ -1276,50 +1464,102 @@ class ChargePoint(cp):
 
         auth_status = self.get_authorization_status(id_tag)
         if auth_status == AuthorizationStatus.accepted.value:
-            self.active_transaction_id = int(time.time())
-            self._metrics[cstat.id_tag.value].value = id_tag
-            self._metrics[cstat.stop_reason.value].value = ""
-            self._metrics[csess.transaction_id.value].value = self.active_transaction_id
-            self._metrics[csess.meter_start.value].value = int(meter_start) / 1000
+            self.get_connector(connector_id).active_transaction_id = int(time.time())
+            self.get_connector(connector_id)._metrics[cstat.id_tag.value].value = id_tag
+            self.get_connector(connector_id)._metrics[cstat.stop_reason.value].value = ""
+            self.get_connector(connector_id)._metrics[
+                csess.transaction_id.value
+            ].value = self.get_connector(connector_id).active_transaction_id
+            self.get_connector(connector_id)._metrics[csess.meter_start.value].value = (
+                int(meter_start) / 1000
+            )
             result = call_result.StartTransactionPayload(
                 id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
-                transaction_id=self.active_transaction_id,
+                transaction_id=self.get_connector(connector_id).active_transaction_id,
             )
         else:
             result = call_result.StartTransactionPayload(
-                id_tag_info={om.status.value: auth_status}, transaction_id=0
+                id_tag_info={om.status.value: auth_status}, transaction_id=connector_id
             )
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
         return result
 
     @on(Action.StopTransaction)
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
         """Stop the current transaction."""
 
-        if transaction_id != self.active_transaction_id:
+        _active_transaction_connector: int = -1
+
+        for connector_no in range(1, self._no_of_connectors + 1):
+            if self.get_connector(connector_no).active_transaction_id == transaction_id:
+                _active_transaction_connector = connector_no
+
+        if _active_transaction_connector == -1:
             _LOGGER.error(
                 "Stop transaction received for unknown transaction id=%i",
                 transaction_id,
             )
-        self.active_transaction_id = 0
-        self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
-        if self._metrics[csess.meter_start.value].value is not None:
-            self._metrics[csess.session_energy.value].value = int(
-                meter_stop
-            ) / 1000 - float(self._metrics[csess.meter_start.value].value)
-        if Measurand.current_import.value in self._metrics:
-            self._metrics[Measurand.current_import.value].value = 0
-        if Measurand.power_active_import.value in self._metrics:
-            self._metrics[Measurand.power_active_import.value].value = 0
-        if Measurand.power_reactive_import.value in self._metrics:
-            self._metrics[Measurand.power_reactive_import.value].value = 0
-        if Measurand.current_export.value in self._metrics:
-            self._metrics[Measurand.current_export.value].value = 0
-        if Measurand.power_active_export.value in self._metrics:
-            self._metrics[Measurand.power_active_export.value].value = 0
-        if Measurand.power_reactive_export.value in self._metrics:
-            self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        else:
+            self.get_connector(_active_transaction_connector).active_transaction_id = 0
+            self.get_connector(_active_transaction_connector)._metrics[
+                cstat.stop_reason.value
+            ].value = kwargs.get(om.reason.name, None)
+            if (
+                self.get_connector(_active_transaction_connector)
+                ._metrics[csess.meter_start.value]
+                .value
+                is not None
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    csess.session_energy.value
+                ].value = int(meter_stop) / 1000 - float(
+                    self.get_connector(_active_transaction_connector)
+                    ._metrics[csess.meter_start.value]
+                    .value
+                )
+            if (
+                Measurand.current_import.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.current_import.value
+                ].value = 0
+            if (
+                Measurand.power_active_import.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.power_active_import.value
+                ].value = 0
+            if (
+                Measurand.power_reactive_import.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.power_reactive_import.value
+                ].value = 0
+            if (
+                Measurand.current_export.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.current_export.value
+                ].value = 0
+            if (
+                Measurand.power_active_export.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.power_active_export.value
+                ].value = 0
+            if (
+                Measurand.power_reactive_export.value
+                in self.get_connector(_active_transaction_connector)._metrics
+            ):
+                self.get_connector(_active_transaction_connector)._metrics[
+                    Measurand.power_reactive_export.value
+                ].value = 0
+        self.hass.async_create_task(self.central.update(self.central.cpid, _active_transaction_connector))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1376,6 +1616,78 @@ class ChargePoint(cp):
         )
         return True
 
+
+class Connector:
+    """Server side representation of a connector."""
+
+    def __init__(
+        self,
+        id: str,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        central: CentralSystem,
+        charge_point: ChargePoint,
+        connector_no: int,
+    ) -> None:
+        """Instantiate a Connector."""
+
+        self.id = id
+        self.hass = hass
+        self.entry = entry
+        self.central = central
+        self.charge_point = charge_point
+        self.connector_no = connector_no
+        self.active_transaction_id: int = 0
+
+        self._metrics = defaultdict(lambda: Metric(None, None))
+        self._metrics[csess.session_time.value].unit = TIME_MINUTES
+        self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
+        self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
+        self._attr_supported_features: int = 0
+        self._metrics[cstat.reconnects.value].value: int = 0
+
+        _LOGGER.debug(
+            "self._metrics[cstat.reconnects.value]: %s",
+            self._metrics[cstat.reconnects.value].value,
+        )
+
+    @property
+    def supported_features(self) -> int:
+        """Flag of Ocpp features that are supported."""
+        return self._attr_supported_features
+
+    def get_metric(self, measurand: str):
+        """Return last known value for given measurand."""
+        return self._metrics[measurand].value
+
+    def get_extra_attr(self, measurand: str):
+        """Return last known extra attributes for given measurand."""
+        return self._metrics[measurand].extra_attr
+
+    def get_unit(self, measurand: str):
+        """Return unit of given measurand."""
+        return self._metrics[measurand].unit
+
+    def get_ha_unit(self, measurand: str):
+        """Return home assistant unit of given measurand."""
+        return self._metrics[measurand].ha_unit
+
+    def get_status(self):
+        """Return the charge point status."""
+        return self.charge_point.status
+
+    async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
+        """Notify user via HA web frontend."""
+        await self.hass.services.async_call(
+            PN_DOMAIN,
+            "create",
+            service_data={
+                "title": title,
+                "message": msg,
+            },
+            blocking=False,
+        )
+        return True
 
 class Metric:
     """Metric class."""

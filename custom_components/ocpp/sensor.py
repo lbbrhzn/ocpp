@@ -19,15 +19,27 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
 from .const import (
+    CONF_CONN_PREFIX,
     CONF_CPID,
+    CONF_NO_OF_CONNECTORS,
     DATA_UPDATED,
-    DEFAULT_CLASS_UNITS_HA,
+    DEFAULT_CONN_PREFIX,
     DEFAULT_CPID,
+    DEFAULT_NO_OF_CONNECTORS,
     DOMAIN,
     ICON,
     Measurand,
+    CONNECTOR_SENSORS,
 )
-from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
+from .enums import (
+    HAChargerDetails,
+    HAChargerSession,
+    HAChargerStatuses,
+    HAConnectorSession,
+    HAConnectorStatuses,
+)
+import logging
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
 @dataclass
@@ -65,14 +77,31 @@ async def async_setup_entry(hass, entry, async_add_devices):
         )
 
     for ent in SENSORS:
-        entities.append(
-            ChargePointMetric(
-                hass,
-                central_system,
-                cp_id,
-                ent,
+        if (
+            ent.name in CONNECTOR_SENSORS
+            or ent.name in list(HAConnectorSession)
+            or ent.name in list(HAConnectorStatuses)
+        ):
+            for conn_no in range(
+                1, entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS) + 1
+            ):
+                entities.append(
+                    ChargePointMetric(
+                        hass,
+                        central_system,
+                        f"{entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)}_{conn_no}",
+                        ent,
+                    )
+                )
+        else:
+            entities.append(
+                ChargePointMetric(
+                    hass,
+                    central_system,
+                    cp_id,
+                    ent,
+                )
             )
-        )
 
     async_add_devices(entities, False)
 
