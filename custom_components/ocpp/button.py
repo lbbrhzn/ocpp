@@ -47,11 +47,22 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
+    conn_prefix = entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)
+    number_of_connectors = entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS)
 
     entities = []
 
     for ent in BUTTONS:
-        entities.append(ChargePointButton(central_system, cp_id, ent))
+        for conn_no in range(
+            1, number_of_connectors + 1
+        ):
+            entities.append(
+                ChargePointButton(
+                    central_system,
+                    f"{conn_prefix}_{conn_no}",
+                    ent,
+                )
+            )
 
     async_add_devices(entities, False)
 
