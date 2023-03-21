@@ -13,7 +13,15 @@ from homeassistant.components.button import (
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN
+from .const import (
+    CONF_CPID,
+    DEFAULT_CPID,
+    CONF_CONN_PREFIX,
+    DEFAULT_CONN_PREFIX,
+    CONF_NO_OF_CONNECTORS,
+    DEFAULT_NO_OF_CONNECTORS,
+    DOMAIN
+)
 from .enums import HAChargerServices
 
 
