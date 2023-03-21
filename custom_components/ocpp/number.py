@@ -16,7 +16,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api import CentralSystem
-	from .const import (
+from .const import (
     CONF_CONN_PREFIX,
     CONF_CPID,
     CONF_MAX_CURRENT,
@@ -61,7 +61,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     entities = []
 
-	    for ent in NUMBERS:
+    for ent in NUMBERS:
         for conn_no in range(
             1, entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS) + 1
         ):
@@ -105,7 +105,7 @@ class OcppNumber(RestoreNumber, NumberEntity):
         self._hass = hass
         self.central_system = central_system
         self.entity_description = description
-	        self._attr_unique_id = ".".join(
+        self._attr_unique_id = ".".join(
             [NUMBER_DOMAIN, self.connector_id, self.entity_description.key]
         )
         self._attr_name = ".".join([self.connector_id, self.entity_description.name])

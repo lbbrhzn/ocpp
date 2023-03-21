@@ -1,4 +1,4 @@
-	"""Define constants for OCPP integration."""
+"""Define constants for OCPP integration."""
 import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
@@ -97,6 +97,15 @@ DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
 DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
+
+# The measurands that belong to a specific connector
+CONNECTOR_SENSORS = [
+    Measurand.energy_active_import_register.value,
+    Measurand.energy_active_import_interval.value,
+    Measurand.power_active_import.value,
+    Measurand.current_import.value,
+    Measurand.voltage.value,
+]
 
 # Where a HA unit does not exist use Ocpp unit
 UNITS_OCCP_TO_HA = {

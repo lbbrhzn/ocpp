@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_CONN_PREFIX,
     DEFAULT_CPID,
     DEFAULT_NO_OF_CONNECTORS,
+    DEFAULT_CLASS_UNITS_HA,
     DOMAIN,
     ICON,
     Measurand,
