@@ -61,16 +61,19 @@ async def async_setup_entry(hass, entry, async_add_devices):
     entities = []
 
     for ent in BUTTONS:
-        for conn_no in range(
-            1, number_of_connectors + 1
-        ):
-            entities.append(
-                ChargePointButton(
-                    central_system,
-                    f"{conn_prefix}_{conn_no}",
-                    ent,
+        if ent.key == "unlock":
+            for conn_no in range(
+                1, number_of_connectors + 1
+            ):
+                entities.append(
+                    ChargePointButton(
+                        central_system,
+                        f"{conn_prefix}_{conn_no}",
+                        ent,
+                    )
                 )
-            )
+        else:
+            entities.append(ChargePointButton(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
