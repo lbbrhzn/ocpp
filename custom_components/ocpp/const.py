@@ -104,6 +104,7 @@ CONNECTOR_SENSORS = [
     Measurand.energy_active_import_interval.value,
     Measurand.power_active_import.value,
     Measurand.current_import.value,
+    Measurand.current_offered.value,
     Measurand.voltage.value,
 ]
 

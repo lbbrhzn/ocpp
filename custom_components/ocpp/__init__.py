@@ -13,16 +13,20 @@ from ocpp.v16.enums import AuthorizationStatus
 
 from .api import CentralSystem
 from .const import (
-    CONF_AUTH_LIST,
+	CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
+    CONF_CONN_PREFIX,
     CONF_CPID,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_NAME,
+    CONF_NO_OF_CONNECTORS,
     CONFIG,
+    DEFAULT_CONN_PREFIX,
     DEFAULT_CPID,
     DEFAULT_CSID,
+    DEFAULT_NO_OF_CONNECTORS,
     DOMAIN,
     PLATFORMS,
 )
@@ -88,6 +92,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         default_model="OCPP Charge Point",
         via_device=((DOMAIN), central_sys.id),
     )
+
+    """ Create Connector Device(s) """
+    for conn_no in range(
+        1, entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS) + 1
+    ):
+        dr.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={
+                (
+                    DOMAIN,
+                    f"{entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)}_{conn_no}",
+                )
+            },
+            name=f"{entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)}_{conn_no}",
+            default_model="OCPP Connector",
+            via_device=((DOMAIN), entry.data.get(CONF_CPID, DEFAULT_CPID)),
+        )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
 
