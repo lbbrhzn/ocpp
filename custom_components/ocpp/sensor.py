@@ -96,15 +96,15 @@ async def async_setup_entry(hass, entry, async_add_devices):
                         ent,
                     )
                 )
-        else:
-            entities.append(
-                ChargePointMetric(
-                    hass,
-                    central_system,
-                    cp_id,
-                    ent,
-                )
+
+        entities.append(
+            ChargePointMetric(
+                hass,
+                central_system,
+                cp_id,
+                ent,
             )
+        )
 
     async_add_devices(entities, False)
 
