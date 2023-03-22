@@ -58,26 +58,25 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
+    conn_prefix = entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)
+    number_of_connectors = entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS)
+    max_current = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
 
     entities = []
 
     for ent in NUMBERS:
         for conn_no in range(
-            1, entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS) + 1
+            1, number_of_connectors + 1
         ):
             if ent.key == "maximum_current":
-                ent.initial_value = entry.data.get(
-                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
-                )
-                ent.native_max_value = entry.data.get(
-                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
-                )
+                ent.initial_value = max_current
+                ent.native_max_value = max_current
             entities.append(
                 OcppNumber(
                     hass,
                     central_system,
                     cp_id,
-                    f"{entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)}_{conn_no}",
+                    f"{conn_prefix}_{conn_no}",
                     ent,
                 )
             )
