@@ -129,12 +129,6 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("ocpp_key"): cv.string,
     }
 )
-GMETERVALUE_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("meter_value"): cv.string,
-        vol.Optional("connector_id"): cv.positive_int,
-    }
-)
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("upload_url"): cv.string,
@@ -475,15 +469,6 @@ class ChargePoint(cp):
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
         
-        async def handle_get_mater_values(call):
-            """Handle the get meter values call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            meter_value = call.data.get("meter_value")
-            connector_id = int(call.data.get("connector_id", 1))
-            await self.get_meter_value(meter_value, connector_id)
-
         async def handle_get_diagnostics(call):
             """Handle the get get diagnostics service call."""
             if self.status == STATE_UNAVAILABLE:
@@ -542,12 +527,6 @@ class ChargePoint(cp):
                 csvcs.service_get_configuration.value,
                 handle_get_configuration,
                 GCONF_SERVICE_DATA_SCHEMA,
-            )
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_get_meter_value.value,
-                handle_get_mater_values,
-                GMETERVALUE_SERVICE_DATA_SCHEMA,
             )
             self.hass.services.async_register(
                 DOMAIN,
@@ -909,19 +888,6 @@ class ChargePoint(cp):
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
-            return None
-
-    async def get_meter_value(self, meter_value: str, connector_id: int = 1):
-        """Get Meter Value of charger for supported keys else return None."""
-        req = call.MeterValuesPayload(meter_value=[meter_value], connector_id=connector_id)
-        resp = await self.call(req)
-        _LOGGER.debug("Get Meter Value for %s: response: %s", meter_value, resp)
-        if resp.configuration_key is not None:
-            _LOGGER.debug("Get Meter Value  for %s", meter_value)
-            # return value
-        if resp.unknown_key is not None:
-            _LOGGER.warning("Get Meter Value returned unknown key for: %s", meter_value)
-            await self.notify_ha(f"Warning: charger reports {meter_value} is unknown")
             return None
         
     async def configure(self, key: str, value: str):

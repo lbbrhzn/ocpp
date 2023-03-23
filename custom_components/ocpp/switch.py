@@ -26,7 +26,8 @@ from .const import (
     ICON,
 )
 from .enums import HAChargerServices, HAChargerStatuses
-
+import logging
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 
 # Switch configuration definitions
 # At a minimum define switch name and on service call,
@@ -132,6 +133,7 @@ class ChargePointSwitch(SwitchEntity):
             resp = self.central_system.get_metric(
                 self.cp_id, self.entity_description.metric_state
             )
+            _LOGGER.info("is on for %s states resp: %s should be in %s , is %s mesurand",self.cp_id, resp, self.entity_description.metric_condition, self.entity_description.metric_state)
             if resp in self.entity_description.metric_condition:
                 self._state = True
             else:
