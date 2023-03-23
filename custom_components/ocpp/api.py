@@ -241,7 +241,7 @@ class CentralSystem:
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
-        _LOGGER.debug(f"get_metric: {cp_id} measurand: {measurand}")
+        # _LOGGER.debug(f"get_metric: {cp_id} measurand: {measurand}")
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].value
         else:
@@ -1103,7 +1103,7 @@ class ChargePoint(cp):
             sw_version=boot_info.get(om.firmware_version.name, None),
         )
 
-    def process_phases(self, data):
+    def process_phases(self, data, connector_id: int):
         """Process phase data from meter values payload."""
 
         def average_of_nonzero(values):
@@ -1125,10 +1125,10 @@ class ChargePoint(cp):
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
-                self._metrics[measurand].unit = unit
-                self._metrics[measurand].extra_attr[om.unit.value] = unit
-                self._metrics[measurand].extra_attr[phase] = float(value)
-                self._metrics[measurand].extra_attr[om.context.value] = context
+                self.get_connector(connector_id)._metrics[measurand].unit = unit
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[om.unit.value] = unit
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[phase] = float(value)
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[om.context.value] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
@@ -1174,14 +1174,14 @@ class ChargePoint(cp):
                     metric_unit,
                 )
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[metric].value = float(metric_value) / 1000
-                    self._metrics[metric].unit = HA_POWER_UNIT
+                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value) / 1000
+                    self.get_connector(connector_id)._metrics[metric].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[metric].value = float(metric_value) / 1000
-                    self._metrics[metric].unit = HA_ENERGY_UNIT
+                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value) / 1000
+                    self.get_connector(connector_id)._metrics[metric].unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[metric].value = float(metric_value)
-                    self._metrics[metric].unit = metric_unit
+                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value)
+                    self.get_connector(connector_id)._metrics[metric].unit = metric_unit
 
     def get_connector(self, connector_id: int = 1):
         """Get the connector with id connector_id"""
@@ -1261,7 +1261,7 @@ class ChargePoint(cp):
             _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
 
             if unprocessed is not None:
-                self.process_phases(unprocessed)
+                self.process_phases(unprocessed, connector_id)
 
         if csess.meter_start.value not in self.get_connector(connector_id)._metrics:
             self.get_connector(connector_id)._metrics[

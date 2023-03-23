@@ -81,6 +81,24 @@ get_configuration:
       required: true
       advanced: true
       example: "WebSocketPingInterval"
+
+get_meter_value:
+  name: Get meter value for charger or connector
+  description: Get supported Ocpp v1.6 meterValues
+  fields:
+    meter_value:
+      name: MeterValue key name 
+      description: MeterValue name supported 
+      required: true
+      advanced: true
+      example: "WebSocketPingInterval"
+    connector_id:
+      name: Connector id 
+      description: Connector id of charger 
+      required: false
+      advanced: true
+      example: 1
+      default: 0
       
 get_diagnostics:
   name: Request diagnostic data from charger
