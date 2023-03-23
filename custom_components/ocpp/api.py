@@ -129,6 +129,12 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("ocpp_key"): cv.string,
     }
 )
+GMETERVALUE_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("meter_value"): cv.string,
+        vol.Optional("connector_id"): cv.positive_int,
+    }
+)
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("upload_url"): cv.string,
@@ -235,7 +241,7 @@ class CentralSystem:
 
     def get_metric(self, cp_id: str, measurand: str):
         """Return last known value for given measurand."""
-        # _LOGGER.debug(f"get_metric: {cp_id} measurand: {measurand}")
+        _LOGGER.debug(f"get_metric: {cp_id} measurand: {measurand}")
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].value
         else:
@@ -468,6 +474,15 @@ class ChargePoint(cp):
                 return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
+        
+        async def handle_get_mater_values(call):
+            """Handle the get meter values call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            meter_value = call.data.get("meter_value")
+            connector_id = int(call.data.get("connector_id", 1))
+            await self.get_meter_value(meter_value, connector_id)
 
         async def handle_get_diagnostics(call):
             """Handle the get get diagnostics service call."""
@@ -527,6 +542,12 @@ class ChargePoint(cp):
                 csvcs.service_get_configuration.value,
                 handle_get_configuration,
                 GCONF_SERVICE_DATA_SCHEMA,
+            )
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_get_meter_value.value,
+                handle_get_mater_values,
+                GMETERVALUE_SERVICE_DATA_SCHEMA,
             )
             self.hass.services.async_register(
                 DOMAIN,
@@ -890,6 +911,19 @@ class ChargePoint(cp):
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
 
+    async def get_meter_value(self, meter_value: str, connector_id: int = 1):
+        """Get Meter Value of charger for supported keys else return None."""
+        req = call.MeterValuesPayload(meter_value=[meter_value], connector_id=connector_id)
+        resp = await self.call(req)
+        _LOGGER.debug("Get Meter Value for %s: response: %s", meter_value, resp)
+        if resp.configuration_key is not None:
+            _LOGGER.debug("Get Meter Value  for %s", meter_value)
+            # return value
+        if resp.unknown_key is not None:
+            _LOGGER.warning("Get Meter Value returned unknown key for: %s", meter_value)
+            await self.notify_ha(f"Warning: charger reports {meter_value} is unknown")
+            return None
+        
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
 
@@ -1156,7 +1190,7 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
-
+        _LOGGER.debug("MeterValues: selfId:%s, connector_id: %d, values: %s kwargs: %s", self.id, connector_id, meter_value, kwargs)
         transaction_id: int = kwargs.get(om.transaction_id.name, 0)
 
         transaction_matches: bool = False
@@ -1424,6 +1458,7 @@ class ChargePoint(cp):
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
+        _LOGGER.debug("GetAuth received for tag %s from %s:",id_tag, self.id)
         # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         # get the default authorization status. Use accept if not configured
@@ -1454,6 +1489,7 @@ class ChargePoint(cp):
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):
         """Handle an Authorization request."""
+        _LOGGER.debug("Auth received from %s: %s", self.id, kwargs)
         self._metrics[cstat.id_tag.value].value = id_tag
         auth_status = self.get_authorization_status(id_tag)
         return call_result.AuthorizePayload(id_tag_info={om.status.value: auth_status})
@@ -1461,7 +1497,7 @@ class ChargePoint(cp):
     @on(Action.StartTransaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
-
+        _LOGGER.debug("StartTransaction received from %s: %s", self.id, kwargs)
         auth_status = self.get_authorization_status(id_tag)
         if auth_status == AuthorizationStatus.accepted.value:
             self.get_connector(connector_id).active_transaction_id = int(time.time())
@@ -1488,6 +1524,7 @@ class ChargePoint(cp):
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
         """Stop the current transaction."""
 
+        _LOGGER.debug("StopTransaction received from %s: %s", self.id, kwargs)
         _active_transaction_connector: int = -1
 
         for connector_no in range(1, self._no_of_connectors + 1):
@@ -1575,6 +1612,7 @@ class ChargePoint(cp):
     @on(Action.Heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
+        _LOGGER.debug("Heartbeat received from %s: %s", self.id, kwargs)
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
