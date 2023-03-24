@@ -13,7 +13,7 @@ from ocpp.v16.enums import AuthorizationStatus
 
 from .api import CentralSystem
 from .const import (
-	CONF_AUTH_LIST,
+    CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
     CONF_CONN_PREFIX,
     CONF_CPID,

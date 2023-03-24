@@ -59,15 +59,15 @@ async def async_setup_entry(hass, entry, async_add_devices):
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
     conn_prefix = entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)
-    number_of_connectors = entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS)
+    number_of_connectors = entry.data.get(
+        CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS
+    )
     max_current = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
 
     entities = []
 
     for ent in NUMBERS:
-        for conn_no in range(
-            1, number_of_connectors + 1
-        ):
+        for conn_no in range(1, number_of_connectors + 1):
             if ent.key == "maximum_current":
                 ent.initial_value = max_current
                 ent.native_max_value = max_current

@@ -274,7 +274,9 @@ class CentralSystem:
         else:
             for key, charge_point in self.charge_points.items():
                 if cp_id in charge_point._connectors:
-                    return charge_point._connectors[cp_id]._metrics[measurand].extra_attr
+                    return (
+                        charge_point._connectors[cp_id]._metrics[measurand].extra_attr
+                    )
         return None
 
     def get_available(self, cp_id: str):
@@ -352,7 +354,9 @@ class CentralSystem:
         dr = device_registry.async_get(self.hass)
 
         if connector_id > 0:
-            identifiers = {(DOMAIN, self.charge_points[cp_id].get_connector(connector_id).id)}
+            identifiers = {
+                (DOMAIN, self.charge_points[cp_id].get_connector(connector_id).id)
+            }
         else:
             identifiers = {(DOMAIN, cp_id)}
 
@@ -468,7 +472,7 @@ class ChargePoint(cp):
                 return
             key = call.data.get("ocpp_key")
             await self.get_configuration(key)
-        
+
         async def handle_get_diagnostics(call):
             """Handle the get get diagnostics service call."""
             if self.status == STATE_UNAVAILABLE:
@@ -563,7 +567,7 @@ class ChargePoint(cp):
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
                 await self.trigger_status_notification()
-        except (NotImplementedError) as e:
+        except NotImplementedError as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
     async def get_supported_features(self):
@@ -889,7 +893,7 @@ class ChargePoint(cp):
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
-        
+
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
 
@@ -1092,9 +1096,15 @@ class ChargePoint(cp):
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = float(value)
                 self.get_connector(connector_id)._metrics[measurand].unit = unit
-                self.get_connector(connector_id)._metrics[measurand].extra_attr[om.unit.value] = unit
-                self.get_connector(connector_id)._metrics[measurand].extra_attr[phase] = float(value)
-                self.get_connector(connector_id)._metrics[measurand].extra_attr[om.context.value] = context
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[
+                    om.unit.value
+                ] = unit
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[
+                    phase
+                ] = float(value)
+                self.get_connector(connector_id)._metrics[measurand].extra_attr[
+                    om.context.value
+                ] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
@@ -1140,13 +1150,23 @@ class ChargePoint(cp):
                     metric_unit,
                 )
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value) / 1000
-                    self.get_connector(connector_id)._metrics[metric].unit = HA_POWER_UNIT
+                    self.get_connector(connector_id)._metrics[metric].value = (
+                        float(metric_value) / 1000
+                    )
+                    self.get_connector(connector_id)._metrics[
+                        metric
+                    ].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value) / 1000
-                    self.get_connector(connector_id)._metrics[metric].unit = HA_ENERGY_UNIT
+                    self.get_connector(connector_id)._metrics[metric].value = (
+                        float(metric_value) / 1000
+                    )
+                    self.get_connector(connector_id)._metrics[
+                        metric
+                    ].unit = HA_ENERGY_UNIT
                 else:
-                    self.get_connector(connector_id)._metrics[metric].value = float(metric_value)
+                    self.get_connector(connector_id)._metrics[metric].value = float(
+                        metric_value
+                    )
                     self.get_connector(connector_id)._metrics[metric].unit = metric_unit
 
     def get_connector(self, connector_id: int = 1):
@@ -1156,7 +1176,13 @@ class ChargePoint(cp):
     @on(Action.MeterValues)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
-        _LOGGER.debug("MeterValues: selfId:%s, connector_id: %d, values: %s kwargs: %s", self.id, connector_id, meter_value, kwargs)
+        _LOGGER.debug(
+            "MeterValues: selfId:%s, connector_id: %d, values: %s kwargs: %s",
+            self.id,
+            connector_id,
+            meter_value,
+            kwargs,
+        )
         transaction_id: int = kwargs.get(om.transaction_id.name, 0)
 
         transaction_matches: bool = False
@@ -1277,7 +1303,9 @@ class ChargePoint(cp):
                 ].extra_attr[cstat.id_tag.name] = (
                     self.get_connector(connector_id)._metrics[cstat.id_tag.value].value
                 )
-        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
+        self.hass.async_create_task(
+            self.central.update(self.central.cpid, connector_id)
+        )
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -1316,14 +1344,19 @@ class ChargePoint(cp):
         """Handle a status notification."""
 
         _LOGGER.debug(
-            "on_status_notification1, connector_id: %s, error_code: %s, status: %s, kwargs: %s", connector_id, error_code, status, kwargs
+            "on_status_notification1, connector_id: %s, error_code: %s, status: %s, kwargs: %s",
+            connector_id,
+            error_code,
+            status,
+            kwargs,
         )
 
         if connector_id == 0 or connector_id is None:
             self._metrics[cstat.status.value].value = status
             self._metrics[cstat.error_code.value].value = error_code
             _LOGGER.debug(
-                "on_status_notification2, self._metrics[cstat.status.value].value: %s", self._metrics[cstat.status.value].value
+                "on_status_notification2, self._metrics[cstat.status.value].value: %s",
+                self._metrics[cstat.status.value].value,
             )
 
         else:
@@ -1333,7 +1366,8 @@ class ChargePoint(cp):
             ].value = error_code
 
             _LOGGER.debug(
-                "on_status_notification3, self.get_connector(connector_id)._metrics[cstat.status.value].value: %s", self.get_connector(connector_id)._metrics[cstat.status.value].value
+                "on_status_notification3, self.get_connector(connector_id)._metrics[cstat.status.value].value: %s",
+                self.get_connector(connector_id)._metrics[cstat.status.value].value,
             )
 
             self.get_connector(connector_id)._metrics[
@@ -1388,7 +1422,9 @@ class ChargePoint(cp):
                 self.get_connector(connector_id)._metrics[
                     Measurand.power_reactive_export.value
                 ].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
+        self.hass.async_create_task(
+            self.central.update(self.central.cpid, connector_id)
+        )
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
@@ -1424,7 +1460,7 @@ class ChargePoint(cp):
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
-        _LOGGER.debug("GetAuth received for tag %s from %s:",id_tag, self.id)
+        _LOGGER.debug("GetAuth received for tag %s from %s:", id_tag, self.id)
         # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         # get the default authorization status. Use accept if not configured
@@ -1468,7 +1504,9 @@ class ChargePoint(cp):
         if auth_status == AuthorizationStatus.accepted.value:
             self.get_connector(connector_id).active_transaction_id = int(time.time())
             self.get_connector(connector_id)._metrics[cstat.id_tag.value].value = id_tag
-            self.get_connector(connector_id)._metrics[cstat.stop_reason.value].value = ""
+            self.get_connector(connector_id)._metrics[
+                cstat.stop_reason.value
+            ].value = ""
             self.get_connector(connector_id)._metrics[
                 csess.transaction_id.value
             ].value = self.get_connector(connector_id).active_transaction_id
@@ -1483,7 +1521,9 @@ class ChargePoint(cp):
             result = call_result.StartTransactionPayload(
                 id_tag_info={om.status.value: auth_status}, transaction_id=connector_id
             )
-        self.hass.async_create_task(self.central.update(self.central.cpid, connector_id))
+        self.hass.async_create_task(
+            self.central.update(self.central.cpid, connector_id)
+        )
         return result
 
     @on(Action.StopTransaction)
@@ -1562,7 +1602,9 @@ class ChargePoint(cp):
                 self.get_connector(_active_transaction_connector)._metrics[
                     Measurand.power_reactive_export.value
                 ].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid, _active_transaction_connector))
+        self.hass.async_create_task(
+            self.central.update(self.central.cpid, _active_transaction_connector)
+        )
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1692,6 +1734,7 @@ class Connector:
             blocking=False,
         )
         return True
+
 
 class Metric:
     """Metric class."""

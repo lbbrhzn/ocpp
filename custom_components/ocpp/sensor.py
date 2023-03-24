@@ -40,6 +40,7 @@ from .enums import (
     HAConnectorStatuses,
 )
 import logging
+
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
@@ -56,7 +57,9 @@ async def async_setup_entry(hass, entry, async_add_devices):
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
     conn_prefix = entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)
-    number_of_connectors = entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS)
+    number_of_connectors = entry.data.get(
+        CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS
+    )
     entities = []
     SENSORS = []
     for metric in list(
@@ -85,9 +88,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
             or ent.metric in list(HAConnectorSession)
             or ent.metric in list(HAConnectorStatuses)
         ):
-            for conn_no in range(
-                1, number_of_connectors + 1
-            ):
+            for conn_no in range(1, number_of_connectors + 1):
                 entities.append(
                     ChargePointMetric(
                         hass,

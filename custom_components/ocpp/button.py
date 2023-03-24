@@ -20,7 +20,7 @@ from .const import (
     DEFAULT_CONN_PREFIX,
     CONF_NO_OF_CONNECTORS,
     DEFAULT_NO_OF_CONNECTORS,
-    DOMAIN
+    DOMAIN,
 )
 from .enums import HAChargerServices
 
@@ -56,15 +56,15 @@ async def async_setup_entry(hass, entry, async_add_devices):
     central_system = hass.data[DOMAIN][entry.entry_id]
     cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
     conn_prefix = entry.data.get(CONF_CONN_PREFIX, DEFAULT_CONN_PREFIX)
-    number_of_connectors = entry.data.get(CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS)
+    number_of_connectors = entry.data.get(
+        CONF_NO_OF_CONNECTORS, DEFAULT_NO_OF_CONNECTORS
+    )
 
     entities = []
 
     for ent in BUTTONS:
         if ent.key == "unlock":
-            for conn_no in range(
-                1, number_of_connectors + 1
-            ):
+            for conn_no in range(1, number_of_connectors + 1):
                 entities.append(
                     ChargePointButton(
                         central_system,
