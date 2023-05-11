@@ -8,6 +8,8 @@
                     "host": "Central system host address",
                     "port": "Central system port number",
                     "ssl": "Secure connection",
+                    "ssl_certfile_path": "Path to SSL certificate or (None)",
+                    "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
                     "cpid": "Charge point identity",
                     "no_of_connectors": "Number of connectors",

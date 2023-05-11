@@ -1,4 +1,6 @@
 """Define constants for OCPP integration."""
+import pathlib
+
 import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
@@ -27,6 +29,8 @@ CONF_PORT = ha.CONF_PORT
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
+CONF_SSL_CERTFILE_PATH = "ssl_certfile_path"
+CONF_SSL_KEYFILE_PATH = "ssl_keyfile_path"
 CONF_STEP = input_number.CONF_STEP
 CONF_SUBPROTOCOL = "subprotocol"
 CONF_UNIT_OF_MEASUREMENT = ha.CONF_UNIT_OF_MEASUREMENT
@@ -46,6 +50,8 @@ DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
 DEFAULT_FORCE_SMART_CHARGING = False
 DEFAULT_SSL = False
+DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
+DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
 DEFAULT_METER_INTERVAL = 60
 DEFAULT_IDLE_INTERVAL = 900
