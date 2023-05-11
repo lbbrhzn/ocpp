@@ -20,9 +20,20 @@ Installation
 ![image](https://user-images.githubusercontent.com/8673442/129494723-80e2e402-7564-4e86-b599-b87f32987ac0.png)
 
 ## Configure the Central System
+### Host address and port
 - The default host address '0.0.0.0' will listen to all interfaces on your home assistant server.
+- The default port number is 9000 but can be changed for your needs.
+<img width="580" src="https://user-images.githubusercontent.com/25015949/229121761-6a0f4a71-9282-4c44-a06d-cecdc2f832da.png">
 
-![image](https://user-images.githubusercontent.com/8673442/129494762-08052152-f057-4563-93b5-5aae810dfbfc.png)
+
+### Secure Connection
+If using [Let’s Encrypt](https://github.com/home-assistant/addons/tree/master/letsencrypt), [Duck DNS](https://www.home-assistant.io/integrations/duckdns/) or other add-ons that enables HTTPS you can get a secure WWS connection for OCPP. For more information on how to generate keys [see this blog post](https://www.home-assistant.io/blog/2017/09/27/effortless-encryption-with-lets-encrypt-and-duckdns/).
+- The option secure connection enables connection thru WSS (HTTPS). With the option disabled the connection will be WS (HTTP).
+- If enabled provide pathways to SSL certificate and key files. The pathways will be ignored if secure connection is disabled.
+<img width="576" src="https://user-images.githubusercontent.com/25015949/229125441-210554ee-8edf-4c3f-bb27-02c4634f2c6b.png">
+
+
+### Measurands
 - Select which measurands you would like to become available as sensor entities.
 - Most chargers only support a subset of all possible measurands. This depends most on the Feature profiles that are supported by the charger.
 
