@@ -504,7 +504,7 @@ class ChargePoint(cp):
             _LOGGER.warning("Force Smart Charging feature profile")
             self._attr_supported_features |= prof.SMART
         for item in feature_list:
-            item = item.strip()
+            item = item.strip().replace(" ", "")
             if item == om.feature_profile_core.value:
                 self._attr_supported_features |= prof.CORE
             elif item == om.feature_profile_firmware.value:
