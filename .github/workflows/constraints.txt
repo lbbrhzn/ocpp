@@ -3,7 +3,7 @@ pip>=21.0,<22.4
 pre-commit==3.3.3
 bandit==1.7.5
 black==23.7.0
-flake8==6.0.0
+flake8==6.1.0
 isort==5.12.0
 pre-comit-hooks==4.1.0
 pyupgrade==3.10.1
