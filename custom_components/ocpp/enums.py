@@ -63,6 +63,8 @@ class HAChargerSession(str, Enum):
 class Profiles(IntFlag):
     """Flags to indicate supported feature profiles."""
 
+    __str__ = Enum.__str__
+
     CORE = auto()  # Core
     FW = auto()  # FirmwareManagement
     SMART = auto()  # SmartCharging
