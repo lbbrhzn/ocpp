@@ -491,9 +491,16 @@ class ChargePoint(cp):
 
     async def get_supported_features(self):
         """Get supported features."""
-        req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
-        resp = await self.call(req)
-        feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+###        req = call.GetConfigurationPayload(key=[ckey.supported_feature_profiles.value])
+###        resp = await self.call(req)
+###        feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+###
+        resp = await self.get_configuration(ckey.supported_feature_profiles.value)
+#        _LOGGER.warning("Feature list is: %s", resp)
+        feature_list = resp.split(',')
+###        
+###        feature_string = "Core,FirmwareManagement"
+###        feature_list = feature_string.split(',')
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
@@ -790,23 +797,34 @@ class ChargePoint(cp):
 
     async def get_configuration(self, key: str = ""):
         """Get Configuration of charger for supported keys else return None."""
-        if key == "":
-            req = call.GetConfigurationPayload()
-        else:
-            req = call.GetConfigurationPayload(key=[key])
+        req = call.GetConfigurationPayload()
         resp = await self.call(req)
+        _LOGGER.debug("Complet get config value is %s", resp)
+
+        if key:
+            # Recherche de la clé spécifiée
+            for config_item in resp.configuration_key:
+                if config_item.get("key") == key:
+                    value = config_item.get("value")
+                    _LOGGER.debug("Get Configuration for %s: %s", key, value)
+                    self._metrics[cdet.config_response.value].value = datetime.now(tz=timezone.utc)
+                    self._metrics[cdet.config_response.value].extra_attr = {key: value}
+                    return value
+
+
         if resp.configuration_key is not None:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
-            self._metrics[cdet.config_response.value].value = datetime.now(
-                tz=timezone.utc
-            )
+            self._metrics[cdet.config_response.value].value = datetime.now(tz=timezone.utc)
             self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
+
         if resp.unknown_key is not None:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
-            return None
+
+        return None
+
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
@@ -818,9 +836,22 @@ class ChargePoint(cp):
         If the key has a different value a ChangeConfiguration request is issued.
 
         """
-        req = call.GetConfigurationPayload(key=[key])
-
+##        req = call.GetConfigurationPayload(key=[key])
+        req = call.GetConfigurationPayload()
         resp = await self.call(req)
+        _LOGGER.debug("Complet get config value is %s", resp)
+
+        if key:
+#            configuration_data = resp.get(key, [])
+            # Rechercher la clé spécifiée
+#            for config_item in configuration_data:
+            for config_item in resp.configuration_key:
+                if config_item.get("key") == key:
+                    value = config_item.get("value")
+                    _LOGGER.debug("Get Configuration for %s: %s", key, value)
+                    self._metrics[cdet.config_response.value].value = datetime.now(tz=timezone.utc)
+                    self._metrics[cdet.config_response.value].extra_attr = {key: value}
+                    return value
 
         if resp.unknown_key is not None:
             if key in resp.unknown_key:
@@ -835,7 +866,7 @@ class ChargePoint(cp):
 
             if key_value.get(om.readonly.name, False):
                 _LOGGER.warning("%s is a read only setting", key)
-                await self.notify_ha(f"Warning: {key} is read-only")
+###                await self.notify_ha(f"Warning: {key} is read-only")
 
         req = call.ChangeConfigurationPayload(key=key, value=value)
 
@@ -846,9 +877,7 @@ class ChargePoint(cp):
             ConfigurationStatus.not_supported,
         ]:
             _LOGGER.warning("%s while setting %s to %s", resp.status, key, value)
-            await self.notify_ha(
-                f"Warning: charger reported {resp.status} while setting {key}={value}"
-            )
+
 
         if resp.status == ConfigurationStatus.reboot_required:
             self._requires_reboot = True
@@ -890,19 +919,20 @@ class ChargePoint(cp):
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms, retry={timeout_counter}",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
             except asyncio.TimeoutError as timeout_exception:
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms, retry={timeout_counter}",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 timeout_counter += 1
-                if timeout_counter > self.central.websocket_ping_tries:
+###                if timeout_counter > self.central.websocket_ping_tries:
+                if timeout_counter > 5:
                     _LOGGER.debug(
                         f"Connection to '{self.id}' timed out after '{self.central.websocket_ping_tries}' ping tries",
                     )
@@ -945,7 +975,7 @@ class ChargePoint(cp):
         self.status = STATE_UNAVAILABLE
         if self._connection.open:
             _LOGGER.debug(f"Closing websocket to '{self.id}'")
-            await self._connection.close()
+###            await self._connection.close()
         for task in self.tasks:
             task.cancel()
 
@@ -967,7 +997,7 @@ class ChargePoint(cp):
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
 
-        _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
+        _LOGGER.debug("7yu7 device info %s: %s", self.central.cpid, boot_info)
         identifiers = {
             (DOMAIN, self.central.cpid),
             (DOMAIN, self.id),
