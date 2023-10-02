@@ -7,6 +7,9 @@
 
 This is a Home Assistant integration for Electric Vehicle chargers that support the Open Charge Point Protocol.
 
+From [lbbrhzn/ocpp](https://github.com/lbbrhzn/ocpp), patched for Grizzl-E Smart charger.
+Tested with the firmware: **GWM-07.013-03_GCW-10.18-05.7**
+
 * based on the [Python OCPP Package](https://github.com/mobilityhouse/ocpp).
 * HACS compliant repository 
 
