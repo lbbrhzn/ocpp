@@ -16,7 +16,7 @@ Tested with the firmware: **GWM-07.013-03_GCW-10.18-05.7**
 
 Documentation can be found here [home-assistant-ocpp.readthedocs.io](https://home-assistant-ocpp.readthedocs.io)
 
-**💡 Tip:** If you like this project consider buying a coffee or a cocktail to lbbrhzn:
+**💡 Tip:** If you like this project consider buying a coffee or a cocktail **to lbbrhzn**:
 
 <a href="https://www.buymeacoffee.com/lbbrhzn" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/default-black.png" alt="Buy A Coffee To lbbrhzn" width="150px">
