@@ -1,6 +1,6 @@
 {
 	"domain": "ocpp",
-	"name": "Open Charge Point Protocol (OCPP)",
+	"name": "Grizzl-E Smart charger (OCPP)",
 	"after_dependencies": [
 		"persistent_notification"
 	],
