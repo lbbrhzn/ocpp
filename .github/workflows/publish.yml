@@ -36,13 +36,13 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         with:
           name: ocpp
-          path: ${{ github.workspace }}/custom_components/ocpp
+          path: ${{ github.workspace }}/custom_components/ocpp_grizzl-e
 
       # Pack the dir as a zip and upload to the release
       - name: 📦 ZIP Dir
         if: ${{ github.event_name == 'release' }}
         run: |
-          cd ${{ github.workspace }}/custom_components/ocpp
+          cd ${{ github.workspace }}/custom_components/ocpp_grizzl-e
           zip ocpp.zip -r ./
 
       - name: 📤 Upload zip to release
