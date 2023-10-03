@@ -1,0 +1,52 @@
+name: Publish
+
+on:
+  release:
+    types:
+      - published
+  push:
+    branches:
+      - main
+
+jobs:
+  release_zip_file:
+    name: Publish zip file asset
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 📥 Checkout the repository
+        uses: actions/checkout@v3
+
+      - name: 🛠️ Set up Python
+        uses: actions/setup-python@v4.7.0
+        with:
+          python-version: "3.x"
+
+      - name: 🔢 Get version
+        id: version
+        uses: home-assistant/actions/helpers/version@master
+
+      - name: 🔢 Set version number
+        run: |
+          python3 ${{ github.workspace }}/manage/update_manifest.py --version ${{ steps.version.outputs.version }}
+
+      - name: 📤 Upload zip to action
+        uses: actions/upload-artifact@v3.1.2
+        if: ${{ github.event_name == 'push' }}
+        with:
+          name: ocpp
+          path: ${{ github.workspace }}/custom_components/ocpp_grizzl-e
+
+      # Pack the dir as a zip and upload to the release
+      - name: 📦 ZIP Dir
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          cd ${{ github.workspace }}/custom_components/ocpp_grizzl-e
+          zip ocpp.zip -r ./
+
+      - name: 📤 Upload zip to release
+        uses: softprops/action-gh-release@v1
+        if: ${{ github.event_name == 'release' }}
+        with:
+          files: ${{ github.workspace }}/custom_components/ocpp/ocpp.zip
