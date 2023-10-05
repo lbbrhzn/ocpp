@@ -11,6 +11,7 @@ from homeassistant.components.switch import (
     SERVICE_TURN_ON,
 )
 from homeassistant.const import ATTR_ENTITY_ID
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
@@ -44,6 +45,7 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
+@pytest.mark.timeout(60)  # Set timeout to 60 seconds for this test
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
