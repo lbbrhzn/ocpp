@@ -1188,7 +1188,7 @@ class ChargePoint(cp):
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
         # update metrics
         self._metrics[cdet.model.value].value = kwargs.get(
-            om.charge_point_model.name, None
+            om.charge_point_model.name[:20], None
         )
         self._metrics[cdet.vendor.value].value = kwargs.get(
             om.charge_point_vendor.name, None
