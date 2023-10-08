@@ -25,7 +25,7 @@
             },
             "measurands": {
                 "title": "Mesurandes OCPP",
-                "description": "Sélectionnez les mesurande(s) à afficher dans Home Assistant.",
+                "description": "Sélectionnez les mesure(s) à afficher dans Home Assistant.",
                 "data": {
                     "Current.Export": "Courant instantané provenant du VE",
                     "Current.Import": "Courant instantané vers le VE",
