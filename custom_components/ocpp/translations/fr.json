@@ -1,0 +1,63 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configuration OCPP",
+                "description": "Si vous avez besoin d'aide avec la configuration, consultez ici : https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "host": "Adresse hôte du système central",
+                    "port": "Numéro de port du système central",
+                    "ssl": "Connexion sécurisée",
+                    "ssl_certfile_path": "Chemin vers le certificat SSL ou (Aucun)",
+                    "ssl_keyfile_path": "Chemin vers la clé SSL ou (Aucun)",
+                    "csid": "Identité du système central",
+                    "cpid": "Identité du point de charge",
+                    "max_current": "Courant de charge maximum",
+                    "meter_interval": "Intervalle d'échantillonnage de charge (secondes)",
+                    "idle_interval": "Intervalle d'échantillonnage au repos du chargeur (secondes)",
+                    "websocket_close_timeout": "Délai d'expiration de fermeture du websocket (secondes)",
+                    "websocket_ping_tries": "Nombre d'essais successifs du websocket pour tenter une connexion avant de fermer",
+                    "websocket_ping_interval": "Intervalle de ping du websocket (secondes)",
+                    "websocket_ping_timeout": "Délai d'expiration du ping du websocket (secondes)",
+                    "skip_schema_validation": "Ignorer la validation du schéma OCPP",
+                    "force_smart_charging": "Forcer le profil de fonctionnalité de charge intelligente"
+                }
+            },
+            "measurands": {
+                "title": "Mesurandes OCPP",
+                "description": "Sélectionnez les mesurande(s) à afficher dans Home Assistant.",
+                "data": {
+                    "Current.Export": "Courant instantané provenant du VE",
+                    "Current.Import": "Courant instantané vers le VE",
+                    "Current.Offered": "Courant maximum offert au VE",
+                    "Energy.Active.Export.Register": "Énergie active exportée vers le réseau",
+                    "Energy.Active.Import.Register": "Énergie active importée du réseau",
+                    "Energy.Reactive.Export.Register": "Énergie réactive exportée vers le réseau",
+                    "Energy.Reactive.Import.Register": "Énergie réactive importée du réseau",
+                    "Energy.Active.Export.Interval": "Énergie active exportée vers le réseau lors du dernier intervalle",
+                    "Energy.Active.Import.Interval": "Énergie active importée du réseau lors du dernier intervalle",
+                    "Energy.Reactive.Export.Interval": "Énergie réactive exportée vers le réseau lors du dernier intervalle",
+                    "Energy.Reactive.Import.Interval": "Énergie réactive importée du réseau lors du dernier intervalle",
+                    "Frequency": "Fréquence du réseau électrique",
+                    "Power.Active.Export": "Puissance active instantanée exportée par le VE",
+                    "Power.Active.Import": "Puissance active instantanée importée par le VE",
+                    "Power.Factor": "Facteur de puissance instantané du flux énergétique total",
+                    "Power.Offered": "Puissance maximale offerte au VE",
+                    "Power.Reactive.Export": "Puissance réactive instantanée exportée par le VE",
+                    "Power.Reactive.Import": "Puissance réactive instantanée importée par le VE",
+                    "RPM": "Vitesse du ventilateur en RPM",
+                    "SoC": "État de charge du VE en pourcentage",
+                    "Temperature": "Température à l'intérieur du point de charge",
+                    "Voltage": "Tension AC RMS instantanée"
+                }
+            }
+        },
+        "error": {
+            "auth": "Nom d'utilisateur/mot de passe est incorrect.",
+            "measurand": "Mesurande inconnu"
+        },
+        "abort": {
+            "single_instance_allowed": "Seule une instance unique est autorisée."
+        }
+    }
+}
