@@ -11,7 +11,7 @@ import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, TIME_MINUTES
+from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
@@ -245,6 +245,12 @@ class CentralSystem:
             return self.charge_points[cp_id]._metrics[measurand].value
         return None
 
+    def del_metric(self, cp_id: str, measurand: str):
+        """Set given measurand to None."""
+        if cp_id in self.charge_points:
+            self.charge_points[cp_id]._metrics[measurand].value = None
+        return None
+
     def get_unit(self, cp_id: str, measurand: str):
         """Return unit of given measurand."""
         if cp_id in self.charge_points:
@@ -353,6 +359,7 @@ class ChargePoint(cp):
         self.received_boot_notification = False
         self.post_connect_success = False
         self.tasks = None
+        self._charger_reports_session_energy = False
         self._metrics = defaultdict(lambda: Metric(None, None))
         self._metrics[cdet.identifier.value].value = id
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
@@ -1103,6 +1110,30 @@ class ChargePoint(cp):
 
         transaction_id: int = kwargs.get(om.transaction_id.name, 0)
 
+        # If missing meter_start or active_transaction_id try to restore from HA states. If HA
+        # does not have values either, generate new ones.
+        if self._metrics[csess.meter_start.value].value is None:
+            value = self.get_ha_metric(csess.meter_start.value)
+            if value is None:
+                value = self._metrics[DEFAULT_MEASURAND].value
+            else:
+                value = float(value)
+                _LOGGER.debug(
+                    f"{csess.meter_start.value} was None, restored value={value} from HA."
+                )
+            self._metrics[csess.meter_start.value].value = value
+        if self._metrics[csess.transaction_id.value].value is None:
+            value = self.get_ha_metric(csess.transaction_id.value)
+            if value is None:
+                value = kwargs.get(om.transaction_id.name)
+            else:
+                value = int(value)
+                _LOGGER.debug(
+                    f"{csess.transaction_id.value} was None, restored value={value} from HA."
+                )
+            self._metrics[csess.transaction_id.value].value = value
+            self.active_transaction_id = value
+
         transaction_matches: bool = False
         # match is also false if no transaction is in progress ie active_transaction_id==transaction_id==0
         if transaction_id == self.active_transaction_id and transaction_id != 0:
@@ -1129,8 +1160,25 @@ class ChargePoint(cp):
                     if unit == DEFAULT_POWER_UNIT:
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_POWER_UNIT
-                    elif unit == DEFAULT_ENERGY_UNIT:
-                        if transaction_matches:
+                    elif unit == DEFAULT_ENERGY_UNIT or "Energy" in str(measurand):
+                        if self._metrics[csess.meter_start.value].value == 0:
+                            # Charger reports Energy.Active.Import.Register directly as Session energy for transactions
+                            self._charger_reports_session_energy = True
+                        if (
+                            transaction_matches
+                            and self._charger_reports_session_energy
+                            and measurand == DEFAULT_MEASURAND
+                            and connector_id
+                        ):
+                            self._metrics[csess.session_energy.value].value = (
+                                float(value) / 1000
+                            )
+                            self._metrics[csess.session_energy.value].extra_attr[
+                                cstat.id_tag.name
+                            ] = self._metrics[cstat.id_tag.value].value
+                        elif (
+                            transaction_matches or self._charger_reports_session_energy
+                        ):
                             self._metrics[measurand].value = float(value) / 1000
                             self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
@@ -1148,15 +1196,6 @@ class ChargePoint(cp):
             # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
             if unprocessed is not None:
                 self.process_phases(unprocessed)
-        if csess.meter_start.value not in self._metrics:
-            self._metrics[csess.meter_start.value].value = self._metrics[
-                DEFAULT_MEASURAND
-            ]
-        if csess.transaction_id.value not in self._metrics:
-            self._metrics[csess.transaction_id.value].value = kwargs.get(
-                om.transaction_id.name
-            )
-            self.active_transaction_id = kwargs.get(om.transaction_id.name)
         if transaction_matches:
             self._metrics[csess.session_time.value].value = round(
                 (
@@ -1166,7 +1205,10 @@ class ChargePoint(cp):
                 / 60
             )
             self._metrics[csess.session_time.value].unit = "min"
-            if self._metrics[csess.meter_start.value].value is not None:
+            if (
+                self._metrics[csess.meter_start.value].value is not None
+                and not self._charger_reports_session_energy
+            ):
                 self._metrics[csess.session_energy.value].value = float(
                     self._metrics[DEFAULT_MEASURAND].value or 0
                 ) - float(self._metrics[csess.meter_start.value].value)
@@ -1343,7 +1385,10 @@ class ChargePoint(cp):
             )
         self.active_transaction_id = 0
         self._metrics[cstat.stop_reason.value].value = kwargs.get(om.reason.name, None)
-        if self._metrics[csess.meter_start.value].value is not None:
+        if (
+            self._metrics[csess.meter_start.value].value is not None
+            and not self._charger_reports_session_energy
+        ):
             self._metrics[csess.session_energy.value].value = int(
                 meter_stop
             ) / 1000 - float(self._metrics[csess.meter_start.value].value)
@@ -1390,6 +1435,20 @@ class ChargePoint(cp):
     def get_metric(self, measurand: str):
         """Return last known value for given measurand."""
         return self._metrics[measurand].value
+
+    def get_ha_metric(self, measurand: str):
+        """Return last known value in HA for given measurand."""
+        entity_id = "sensor." + "_".join(
+            [self.central.cpid.lower(), measurand.lower().replace(".", "_")]
+        )
+        try:
+            value = self.hass.states.get(entity_id).state
+        except Exception as e:
+            _LOGGER.debug(f"An error occurred when getting entity state from HA: {e}")
+            return None
+        if value == STATE_UNAVAILABLE or value == STATE_UNKNOWN:
+            return None
+        return value
 
     def get_extra_attr(self, measurand: str):
         """Return last known extra attributes for given measurand."""
