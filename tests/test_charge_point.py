@@ -308,7 +308,6 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_meter_err_phases(),
                     cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
-                    cp.send_main_meter_clock_data(),
                     # add delay to allow meter data to be processed
                     cp.send_stop_transaction(2),
                 ),
@@ -370,6 +369,9 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         await ws.close()
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
+    assert float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == float(
+        1101.452
+    )
 
     await asyncio.sleep(1)
 
@@ -409,6 +411,33 @@ async def test_cms_responses(hass, socket_enabled):
     assert cs.get_unit("test_cpid", "Energy.Session") == "kWh"
 
     await asyncio.sleep(1)
+
+    # test ocpp messages sent from charger that don't support errata 3.9 with meter values with kWh as energy unit
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_non_er_3.9",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_non_errata_3.9", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_start_transaction(0),
+                    cp.send_meter_energy_kwh(),
+                    cp.send_meter_clock_data(),
+                    # add delay to allow meter data to be processed
+                    cp.send_stop_transaction(2),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        await ws.close()
+
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(1101)
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(11)
+    assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
     # test ocpp rejection messages sent from charger to cms
     cs.charge_points["test_cpid"].received_boot_notification = False
@@ -963,6 +992,31 @@ class ChargePoint(cpclass):
                             "location": "Outlet",
                             "unit": "A",
                             "phase": "L1-N",
+                        },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_energy_kwh(self):
+        """Send periodic energy meter value with kWh unit."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
+                            "unit": "kWh",
+                            "value": "11",
+                            "context": "Sample.Periodic",
+                            "format": "Raw",
+                            "measurand": "Energy.Active.Import.Register",
                         },
                     ],
                 }

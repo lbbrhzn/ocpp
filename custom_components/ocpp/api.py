@@ -1126,29 +1126,40 @@ class ChargePoint(cp):
                     measurand = DEFAULT_MEASURAND
                     unit = DEFAULT_ENERGY_UNIT
 
+                if measurand == DEFAULT_MEASURAND and unit is None:
+                    unit = DEFAULT_ENERGY_UNIT
+
+                if self._metrics[csess.meter_start.value].value == 0:
+                    # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
+                    self._charger_reports_session_energy = True
+
                 if phase is None:
                     if unit == DEFAULT_POWER_UNIT:
                         self._metrics[measurand].value = float(value) / 1000
                         self._metrics[measurand].unit = HA_POWER_UNIT
-                    elif unit == DEFAULT_ENERGY_UNIT or "Energy" in str(measurand):
-                        if self._metrics[csess.meter_start.value].value == 0:
-                            # Charger reports Energy.Active.Import.Register directly as Session energy for transactions
-                            self._charger_reports_session_energy = True
-                        if (
-                            transaction_matches
-                            and self._charger_reports_session_energy
-                            and measurand == DEFAULT_MEASURAND
-                            and connector_id
-                        ):
-                            self._metrics[csess.session_energy.value].value = (
-                                float(value) / 1000
+                    elif (
+                        measurand == DEFAULT_MEASURAND
+                        and self._charger_reports_session_energy
+                    ):
+                        if transaction_matches:
+                            if unit == DEFAULT_ENERGY_UNIT:
+                                value = float(value) / 1000
+                                unit = HA_ENERGY_UNIT
+                            self._metrics[csess.session_energy.value].value = float(
+                                value
                             )
+                            self._metrics[csess.session_energy.value].unit = unit
                             self._metrics[csess.session_energy.value].extra_attr[
                                 cstat.id_tag.name
                             ] = self._metrics[cstat.id_tag.value].value
-                        elif (
-                            transaction_matches or self._charger_reports_session_energy
-                        ):
+                        else:
+                            if unit == DEFAULT_ENERGY_UNIT:
+                                value = float(value) / 1000
+                                unit = HA_ENERGY_UNIT
+                            self._metrics[measurand].value = float(value)
+                            self._metrics[measurand].unit = unit
+                    elif unit == DEFAULT_ENERGY_UNIT:
+                        if transaction_matches:
                             self._metrics[measurand].value = float(value) / 1000
                             self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
