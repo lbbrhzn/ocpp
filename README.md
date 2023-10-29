@@ -15,7 +15,7 @@ Tested with the firmware: **GWM-07.013-03_GCW-10.18-05.7**
 
 Tested with the firmware: **GWM-07.020-03_GCW-10.18-05.7**
 
-- **Before install the integration**, copy de "ocpp" folder of this [OPCC Repertory](https://github.com/mobilityhouse/ocpp) in your "HA Config"/deps/lib/python3.11/site-packages/
+- **Before install the integration**, copy de "ocpp" folder of this [OPCC package](https://github.com/mobilityhouse/ocpp) in your "HA Config"/deps/lib/python3.11/site-packages/
 - Than, you will modify BootNotification.json in folder "HA Config"/deps/lib/python3.11/site-packages/ocpp/v16/schemas/ at line 12 replace "maxLength": 20 by "maxLength": 30
 - After you can do the instalation the integration.
 - When you will add the intégration, check the box of "ignore the validation of the OCPP scheme" like:
