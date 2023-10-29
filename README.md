@@ -24,7 +24,16 @@ Tested with the firmware: **GWM-07.020-03_GCW-10.18-05.7**
 (In french sorry)
 - And, finish the instalation.
 
-
+**OR**
+  
+You can do thew solution of **08jmm3**<br>
+As a proof of concept I modified the firmware (version GWM-07.020-03) and shortened the reported chargePointModel to be within the proper character limit. Upon flashing the modified firmware it appears to be happy.<br>
+Flash using: esptool.py --chip esp32 --baud 921600 write_flash 0x10000 GWM-07.020-03-mod.bin<br>
+Note that this is for a Grizzl-E Smart Connect (v2) and the charger must be power cycled after flashing the update. Use at your own risk. I've also included the unmodified firmware in case you need to revert to the original.<br>
+Firmware WiFi Module: GWM-07.020-03<br>
+Firmware Power Board: GCW-10.18-05.7<br>
+[GWM-07.020-03-mod.zip](https://github.com/lbbrhzn/ocpp/files/13197345/GWM-07.020-03-mod.zip)<br>
+[GWM-07.020-03.zip](https://github.com/lbbrhzn/ocpp/files/13197370/GWM-07.020-03.zip)
 
 All other information is in the documentation you can found here [home-assistant-ocpp.readthedocs.io](https://home-assistant-ocpp.readthedocs.io)
 
