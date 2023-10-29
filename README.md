@@ -20,8 +20,11 @@ Tested with the firmware: **GWM-07.020-03_GCW-10.18-05.7**
 - After you can do the instalation the integration.
 - When you will add the intégration, check the box of "ignore the validation of the OCPP scheme" like:
 <img width="607" alt="image" src="https://github.com/djiesr/ocpp/assets/31359825/cacdfdbf-46e3-47e5-8ca2-9a8294474124">
+
 (In french sorry)
 - And, finish the instalation.
+
+
 
 All other information is in the documentation you can found here [home-assistant-ocpp.readthedocs.io](https://home-assistant-ocpp.readthedocs.io)
 
