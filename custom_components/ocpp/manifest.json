@@ -5,15 +5,16 @@
 		"persistent_notification"
 	],
 	"codeowners": [
-		"@lbbrhzn"
+		"@lbbrhzn",
+		"@drc38"
 	],
 	"config_flow": true,
 	"documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
 	"iot_class": "local_push",
 	"issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
 	"requirements": [
-		"ocpp>=0.14.1",
+		"ocpp>=0.20.0",
 		"websockets>=10.2"
 	],
-	"version": "0.4.36"
+	"version": "0.4.42"
 }

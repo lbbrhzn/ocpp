@@ -11,6 +11,7 @@ from homeassistant.components.switch import (
     SERVICE_TURN_ON,
 )
 from homeassistant.const import ATTR_ENTITY_ID
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
@@ -44,6 +45,7 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
+@pytest.mark.timeout(60)  # Set timeout to 60 seconds for this test
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
@@ -227,6 +229,63 @@ async def test_cms_responses(hass, socket_enabled):
 
     await asyncio.sleep(1)
 
+    # test restore feature of meter_start and active_tranasction_id.
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_res_vals",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_restore_values", ws)
+        cp.active_transactionId = None
+        # send None values
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_meter_periodic_data(),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        # check if None
+        assert cs.get_metric("test_cpid", "Energy.Meter.Start") is None
+        assert cs.get_metric("test_cpid", "Transaction.Id") is None
+        # send new data
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.send_start_transaction(12344),
+                    cp.send_meter_periodic_data(),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        # save for reference the values for meter_start and transaction_id
+        saved_meter_start = int(cs.get_metric("test_cpid", "Energy.Meter.Start"))
+        saved_transactionId = int(cs.get_metric("test_cpid", "Transaction.Id"))
+        # delete current values from api memory
+        cs.del_metric("test_cpid", "Energy.Meter.Start")
+        cs.del_metric("test_cpid", "Transaction.Id")
+        # send new data
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.send_meter_periodic_data(),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        await ws.close()
+
+    # check if restored old values from HA when api have lost the values, i.e. simulated reboot of HA
+    assert int(cs.get_metric("test_cpid", "Energy.Meter.Start")) == saved_meter_start
+    assert int(cs.get_metric("test_cpid", "Transaction.Id")) == saved_transactionId
+
+    await asyncio.sleep(1)
+
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_norm",
@@ -245,7 +304,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_security_event(),
                     cp.send_firmware_status(),
                     cp.send_data_transfer(),
-                    cp.send_start_transaction(),
+                    cp.send_start_transaction(12345),
                     cp.send_meter_err_phases(),
                     cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
@@ -259,6 +318,9 @@ async def test_cms_responses(hass, socket_enabled):
         await ws.close()
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
+    )
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(
+        (54321 - 12345) / 1000
     )
     assert int(cs.get_metric("test_cpid", "Current.Import")) == int(0)
     assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
@@ -307,8 +369,75 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         await ws.close()
     assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
+    assert float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == float(
+        1101.452
+    )
 
     await asyncio.sleep(1)
+
+    # test ocpp messages sent from charger that don't support errata 3.9
+    # i.e. "Energy.Meter.Start" starts from 0 for each session and "Energy.Active.Import.Register"
+    # reports starting from 0 Wh for every new transaction id. Total main meter values are without transaction id.
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_non_er_3.9",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_non_errata_3.9", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_start_transaction(0),
+                    cp.send_meter_periodic_data(),
+                    cp.send_main_meter_clock_data(),
+                    # add delay to allow meter data to be processed
+                    cp.send_stop_transaction(2),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        await ws.close()
+
+    # Last sent "Energy.Active.Import.Register" value without transaction id should be here.
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
+        67230012 / 1000
+    )
+    assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+
+    # Last sent "Energy.Active.Import.Register" value with transaction id should be here.
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(1305570 / 1000)
+    assert cs.get_unit("test_cpid", "Energy.Session") == "kWh"
+
+    await asyncio.sleep(1)
+
+    # test ocpp messages sent from charger that don't support errata 3.9 with meter values with kWh as energy unit
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_non_er_3.9",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # use a different id for debugging
+        cp = ChargePoint("CP_1_non_errata_3.9", ws)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_start_transaction(0),
+                    cp.send_meter_energy_kwh(),
+                    cp.send_meter_clock_data(),
+                    # add delay to allow meter data to be processed
+                    cp.send_stop_transaction(2),
+                ),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
+        await ws.close()
+
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(1101)
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(11)
+    assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
     # test ocpp rejection messages sent from charger to cms
     cs.charge_points["test_cpid"].received_boot_notification = False
@@ -604,12 +733,12 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp.status == DataTransferStatus.accepted
 
-    async def send_start_transaction(self):
+    async def send_start_transaction(self, meter_start: int = 12345):
         """Send a start transaction notification."""
         request = call.StartTransactionPayload(
             connector_id=1,
             id_tag="test_cp",
-            meter_start=12345,
+            meter_start=meter_start,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
         )
         resp = await self.call(request)
@@ -863,6 +992,55 @@ class ChargePoint(cpclass):
                             "location": "Outlet",
                             "unit": "A",
                             "phase": "L1-N",
+                        },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_meter_energy_kwh(self):
+        """Send periodic energy meter value with kWh unit."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            transaction_id=self.active_transactionId,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
+                            "unit": "kWh",
+                            "value": "11",
+                            "context": "Sample.Periodic",
+                            "format": "Raw",
+                            "measurand": "Energy.Active.Import.Register",
+                        },
+                    ],
+                }
+            ],
+        )
+        resp = await self.call(request)
+        assert resp is not None
+
+    async def send_main_meter_clock_data(self):
+        """Send periodic main meter value. Main meter values dont have transaction_id."""
+        while self.active_transactionId == 0:
+            await asyncio.sleep(1)
+        request = call.MeterValuesPayload(
+            connector_id=1,
+            meter_value=[
+                {
+                    "timestamp": "2021-06-21T16:15:09Z",
+                    "sampledValue": [
+                        {
+                            "value": "67230012",
+                            "context": "Sample.Clock",
+                            "format": "Raw",
+                            "measurand": "Energy.Active.Import.Register",
+                            "location": "Inlet",
                         },
                     ],
                 }
