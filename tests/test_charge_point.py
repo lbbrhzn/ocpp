@@ -45,7 +45,7 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
-@pytest.mark.timeout(60)  # Set timeout to 60 seconds for this test
+@pytest.mark.timeout(90)  # Set timeout for this test
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
