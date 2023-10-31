@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+# Create config dir if not present
+if [[ ! -d "${PWD}/config" ]]; then
+    mkdir -p "${PWD}/config"
+    hass --config "${PWD}/config" --script ensure_config
+fi
+
+# Create custom components dir if not present
+if [[ ! -d "${PWD}/config/custom_components" ]]; then
+    mkdir -p "${PWD}/config/custom_components"
+    hass --config "${PWD}/config" --script ensure_config
+fi
+
+# copy the ocpp integration
+rm -rf $PWD/config/custom_components/ocpp
+cp -r -l $PWD/custom_components/ocpp $PWD/config/custom_components/
+
+# Start Home Assistant
+hass --config "${PWD}/config" --debug

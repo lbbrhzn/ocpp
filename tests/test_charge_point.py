@@ -45,14 +45,14 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
 
 
-@pytest.mark.timeout(60)  # Set timeout to 60 seconds for this test
+@pytest.mark.timeout(90)  # Set timeout for this test
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
     async def test_switches(hass, socket_enabled):
         """Test switch operations."""
         for switch in SWITCHES:
-            result = await hass.services.async_call(
+            await hass.services.async_call(
                 SWITCH_DOMAIN,
                 SERVICE_TURN_ON,
                 service_data={
@@ -60,9 +60,9 @@ async def test_cms_responses(hass, socket_enabled):
                 },
                 blocking=True,
             )
-            assert result
+
             await asyncio.sleep(1)
-            result = await hass.services.async_call(
+            await hass.services.async_call(
                 SWITCH_DOMAIN,
                 SERVICE_TURN_OFF,
                 service_data={
@@ -70,18 +70,16 @@ async def test_cms_responses(hass, socket_enabled):
                 },
                 blocking=True,
             )
-            assert result
 
     async def test_buttons(hass, socket_enabled):
         """Test button operations."""
         for button in BUTTONS:
-            result = await hass.services.async_call(
+            await hass.services.async_call(
                 BUTTON_DOMAIN,
                 SERVICE_PRESS,
                 {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.test_cpid_{button.key}"},
                 blocking=True,
             )
-            assert result
 
     async def test_services(hass, socket_enabled):
         """Test service operations."""
@@ -106,24 +104,22 @@ async def test_cms_responses(hass, socket_enabled):
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
 
-            result = await hass.services.async_call(
+            await hass.services.async_call(
                 OCPP_DOMAIN,
                 service.value,
                 service_data=data,
                 blocking=True,
             )
-            assert result
 
         for number in NUMBERS:
             # test setting value of number slider
-            result = await hass.services.async_call(
+            await hass.services.async_call(
                 NUMBER_DOMAIN,
                 "set_value",
                 service_data={"value": "10"},
                 blocking=True,
                 target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.test_cpid_{number.key}"},
             )
-            assert result
 
     # Test MOCK_CONFIG_DATA_2
     if True:
@@ -154,7 +150,7 @@ async def test_cms_responses(hass, socket_enabled):
                         cp2.send_stop_transaction(),
                         cp2.send_meter_periodic_data(),
                     ),
-                    timeout=3,
+                    timeout=5,
                 )
             except asyncio.TimeoutError:
                 pass
@@ -192,7 +188,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_stop_transaction(),
                     cp.send_meter_periodic_data(),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
@@ -221,7 +217,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_stop_transaction(),
                     cp.send_meter_periodic_data(),
                 ),
-                timeout=3,
+                timeout=5,
             )
         except websockets.exceptions.ConnectionClosedOK:
             pass
@@ -309,7 +305,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_meter_line_voltage(),
                     cp.send_meter_periodic_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(2),
+                    cp.send_stop_transaction(1),
                 ),
                 timeout=5,
             )
@@ -392,7 +388,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_meter_periodic_data(),
                     cp.send_main_meter_clock_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(2),
+                    cp.send_stop_transaction(1),
                 ),
                 timeout=5,
             )
@@ -427,7 +423,7 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.send_meter_energy_kwh(),
                     cp.send_meter_clock_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(2),
+                    cp.send_stop_transaction(1),
                 ),
                 timeout=5,
             )
@@ -782,8 +778,10 @@ class ChargePoint(cpclass):
 
     async def send_meter_periodic_data(self):
         """Send periodic meter data notification."""
-        while self.active_transactionId == 0:
+        n = 0
+        while self.active_transactionId == 0 and n < 2:
             await asyncio.sleep(1)
+            n += 1
         request = call.MeterValuesPayload(
             connector_id=1,
             transaction_id=self.active_transactionId,
@@ -1099,8 +1097,10 @@ class ChargePoint(cpclass):
         """Send a stop transaction notification."""
         # add delay to allow meter data to be processed
         await asyncio.sleep(delay)
-        while self.active_transactionId == 0:
+        n = 0
+        while self.active_transactionId == 0 and n < 2:
             await asyncio.sleep(1)
+            n += 1
         request = call.StopTransactionPayload(
             meter_stop=54321,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),

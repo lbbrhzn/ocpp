@@ -9,7 +9,7 @@ on:
   pull_request:
 
 env:
-  DEFAULT_PYTHON: "3.10"
+  DEFAULT_PYTHON: "3.11.6"
 
 jobs:
   pre-commit:
@@ -72,7 +72,7 @@ jobs:
       - name: Install requirements
         run: |
           pip install --constraint=.github/workflows/constraints.txt pip
-          pip install -r requirements_test.txt --constraint=.github/workflows/constraints.txt
+          pip install -r requirements.txt --constraint=.github/workflows/constraints.txt
       - name: Tests suite
         run: |
           pytest \

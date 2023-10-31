@@ -1,0 +1,71 @@
+# Loads default set of integrations. Do not remove.
+#default_config:
+#automation:
+assist_pipeline:
+backup:
+bluetooth:
+config:
+conversation:
+counter:
+dhcp:
+energy:
+#frontend:
+hardware:
+history:
+homeassistant_alerts:
+image_upload:
+input_boolean:
+input_button:
+input_datetime:
+input_number:
+input_select:
+input_text:
+logbook:
+#logger:
+map:
+my:
+network:
+person:
+schedule:
+#scene:
+#script:
+stream:
+sun:
+system_health:
+tag:
+timer:
+usb:
+webhook:
+zone:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+#automation: !include automations.yaml
+#script: !include scripts.yaml
+#scene: !include scenes.yaml
+
+ocpp:
+  default_authorization_status: 'Invalid'
+  authorization_list:
+    - id_tag: 'pulsar'
+      name: 'My tag'
+      authorization_status : Accepted
+    - id_tag: 'CAFEBABE'
+      name: 'Some other tag'
+      authorization_status: Blocked
+    - id_tag: 'DEADBEEF'
+      name: 'Old tag'
+      status: Expired
+    - id_tag: '12341234'
+      name: 'Invalid tag'
+      authorization_status: Invalid
+
+logger:
+  default: info
+  logs:
+    custom_components.cpps: debug
+
+# If you need to debug uncomment the line below (doc: https://www.home-assistant.io/integrations/debugpy/)
+# debugpy:
