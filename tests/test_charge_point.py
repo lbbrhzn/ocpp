@@ -104,7 +104,7 @@ async def test_cms_responses(hass, socket_enabled):
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
 
-            hass.services.async_call(
+            await hass.services.async_call(
                 OCPP_DOMAIN,
                 service.value,
                 service_data=data,
