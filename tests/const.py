@@ -82,6 +82,13 @@ MOCK_CONFIG_DATA = {
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
 }
 
+# different port
+MOCK_CONFIG_DATA_1 = {
+    **MOCK_CONFIG_DATA,
+    CONF_PORT: 9001,
+    CONF_CPID: "test_cpid_1",
+}
+
 # configuration with skip schema validation enabled
 MOCK_CONFIG_DATA_2 = {
     **MOCK_CONFIG_DATA,

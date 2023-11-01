@@ -11,7 +11,7 @@ from custom_components.ocpp import (
 )
 from custom_components.ocpp.const import DOMAIN
 
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA_1
 
 
 # We can pass fixtures as defined in conftest.py to tell pytest to use the fixture
@@ -23,7 +23,7 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
+        domain=DOMAIN, data=MOCK_CONFIG_DATA_1, entry_id="test_cms1", title="test_cms1"
     )
     config_entry.add_to_hass(hass)
 
