@@ -7,3 +7,4 @@ jsonschema==4.19.2
 pre-commit
 pytest-homeassistant-custom-component==0.13.49
 pytest-cov
+setuptools>=65.5.1 # not directly required, pinned by Snyk to avoid a vulnerability
