@@ -25,6 +25,7 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     config_entry = MockConfigEntry(
         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
     )
+    config_entry.add_to_hass(hass)
 
     # Set up the entry and assert that the values set during setup are where we expect
     # them to be. Because we have patched the ocppDataUpdateCoordinator.async_get_data
@@ -48,6 +49,7 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
 #     config_entry = MockConfigEntry(
 #         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
 #     )
+#     config_entry.add_to_hass(config_entry)
 #
 #     # In this case we are testing the condition where async_setup_entry raises
 #     # ConfigEntryNotReady using the `error_on_get_data` fixture which simulates

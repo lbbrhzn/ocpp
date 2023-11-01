@@ -127,6 +127,8 @@ async def test_cms_responses(hass, socket_enabled):
         config_entry2 = MockConfigEntry(
             domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms2"
         )
+        config_entry2.add_to_hass(hass)
+
         assert await async_setup_entry(hass, config_entry2)
         await hass.async_block_till_done()
 
@@ -163,6 +165,7 @@ async def test_cms_responses(hass, socket_enabled):
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
     )
+    config_entry.add_to_hass(hass)
     assert await async_setup_entry(hass, config_entry)
     await hass.async_block_till_done()
 
