@@ -40,7 +40,8 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
 
     # Unload the entry and verify that the data has been removed
-    assert await async_unload_entry(hass, config_entry)
+    unloaded = await async_unload_entry(hass, config_entry)
+    assert unloaded == True
     assert config_entry.entry_id not in hass.data[DOMAIN]
 
 
