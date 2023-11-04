@@ -125,8 +125,13 @@ async def test_cms_responses(hass, socket_enabled):
     if True:
         # Create a mock entry so we don't have to go through config flow
         config_entry2 = MockConfigEntry(
-            domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA_2, entry_id="test_cms2"
+            domain=OCPP_DOMAIN,
+            data=MOCK_CONFIG_DATA_2,
+            entry_id="test_cms2",
+            title="test_cms2",
         )
+        config_entry2.add_to_hass(hass)
+
         assert await async_setup_entry(hass, config_entry2)
         await hass.async_block_till_done()
 
@@ -161,8 +166,9 @@ async def test_cms_responses(hass, socket_enabled):
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms"
+        domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms", title="test_cms"
     )
+    config_entry.add_to_hass(hass)
     assert await async_setup_entry(hass, config_entry)
     await hass.async_block_till_done()
 

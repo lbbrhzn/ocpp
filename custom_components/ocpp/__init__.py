@@ -1,6 +1,5 @@
 """Custom integration for Chargers that support the Open Charge Point Protocol."""
 
-import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -106,14 +105,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     central_sys._server.close()
     await central_sys._server.wait_closed()
 
-    unloaded = all(
-        await asyncio.gather(
-            *(
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            )
-        )
-    )
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id)
 

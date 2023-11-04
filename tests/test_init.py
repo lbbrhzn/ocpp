@@ -11,7 +11,7 @@ from custom_components.ocpp import (
 )
 from custom_components.ocpp.const import DOMAIN
 
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA_1
 
 
 # We can pass fixtures as defined in conftest.py to tell pytest to use the fixture
@@ -23,13 +23,17 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
+        domain=DOMAIN, data=MOCK_CONFIG_DATA_1, entry_id="test_cms1", title="test_cms1"
     )
+    # config_entry.add_to_hass(hass);
+    hass.config_entries._entries[config_entry.entry_id] = config_entry
 
     # Set up the entry and assert that the values set during setup are where we expect
     # them to be. Because we have patched the ocppDataUpdateCoordinator.async_get_data
     # call, no code from custom_components/ocpp/api.py actually runs.
     assert await async_setup_entry(hass, config_entry)
+    await hass.async_block_till_done()
+
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
 
@@ -39,7 +43,8 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
 
     # Unload the entry and verify that the data has been removed
-    assert await async_unload_entry(hass, config_entry)
+    unloaded = await async_unload_entry(hass, config_entry)
+    assert unloaded
     assert config_entry.entry_id not in hass.data[DOMAIN]
 
 
@@ -48,6 +53,7 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
 #     config_entry = MockConfigEntry(
 #         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
 #     )
+#     config_entry.add_to_hass(config_entry)
 #
 #     # In this case we are testing the condition where async_setup_entry raises
 #     # ConfigEntryNotReady using the `error_on_get_data` fixture which simulates
