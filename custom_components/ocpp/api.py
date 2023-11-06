@@ -441,7 +441,7 @@ class ChargePoint(cp):
                 _LOGGER.debug(f"'{self.id}' trying measurand '{measurand}'")
                 req = call.ChangeConfigurationPayload(key=key, value=measurand)
                 resp = await self.call(req)
-                if resp.status is ConfigurationStatus.accepted:
+                if resp.status == ConfigurationStatus.accepted:
                     _LOGGER.debug(f"'{self.id}' adding measurand '{measurand}'")
                     accepted_measurands.append(measurand)
 
