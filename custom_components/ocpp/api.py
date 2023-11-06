@@ -429,10 +429,31 @@ class ChargePoint(cp):
             resp = await self.get_configuration(ckey.number_of_connectors.value)
             self._metrics[cdet.connectors.value].value = resp
             await self.get_configuration(ckey.heartbeat_interval.value)
+
+            all_measurands = self.entry.data.get(
+                CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
+            )
+
+            accepted_measurands = []
+            key = ckey.meter_values_sampled_data.value
+
+            for measurand in all_measurands.split(","):
+                _LOGGER.debug(f"'{self.id}' trying measurand '{measurand}'")
+                req = call.ChangeConfigurationPayload(key=key, value=measurand)
+                resp = await self.call(req)
+                if resp.status is ConfigurationStatus.accepted:
+                    _LOGGER.debug(f"'{self.id}' adding measurand '{measurand}'")
+                    accepted_measurands.append(measurand)
+
+            accepted_measurands = ",".join(accepted_measurands)
+
+            _LOGGER.debug(f"'{self.id}' allowed measurands '{accepted_measurands}'")
+
             await self.configure(
                 ckey.meter_values_sampled_data.value,
-                self.entry.data.get(CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND),
+                accepted_measurands,
             )
+
             await self.configure(
                 ckey.meter_value_sample_interval.value,
                 str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
