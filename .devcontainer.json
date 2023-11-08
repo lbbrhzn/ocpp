@@ -1,7 +1,7 @@
 {
     "name": "lbbrhzn/ocpp",
     "image": "mcr.microsoft.com/devcontainers/python:3.11-bullseye",
-    "postCreateCommand": "scripts/setup",
+    "onCreateCommand": "scripts/setup",
     "forwardPorts": [
         8123
     ],
