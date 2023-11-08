@@ -1,6 +1,9 @@
 """Test ocpp setup process."""
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
+from typing import AsyncGenerator
+
+from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import (
@@ -19,7 +22,9 @@ from .const import MOCK_CONFIG_DATA_1
 # Home Assistant using the pytest_homeassistant_custom_component plugin.
 # Assertions allow you to verify that the return value of whatever is on the left
 # side of the assertion matches with the right side.
-async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
+async def test_setup_unload_and_reload_entry(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+):
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -35,12 +40,12 @@ async def test_setup_unload_and_reload_entry(hass, bypass_get_data):
     await hass.async_block_till_done()
 
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
-    assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
+    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Reload the entry and assert that the data from above is still there
     assert await async_reload_entry(hass, config_entry) is None
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
-    assert type(hass.data[DOMAIN][config_entry.entry_id]) == CentralSystem
+    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Unload the entry and verify that the data has been removed
     unloaded = await async_unload_entry(hass, config_entry)

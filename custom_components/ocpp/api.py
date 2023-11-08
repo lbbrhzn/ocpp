@@ -370,6 +370,7 @@ class ChargePoint(cp):
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
+
         # Define custom service handles for charge point
         async def handle_clear_profile(call):
             """Handle the clear profile service call."""
@@ -493,7 +494,7 @@ class ChargePoint(cp):
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
                 await self.trigger_status_notification()
-        except (NotImplementedError) as e:
+        except NotImplementedError as e:
             _LOGGER.error("Configuration of the charger failed: %s", e)
 
     async def get_supported_features(self):
