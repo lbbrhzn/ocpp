@@ -8,7 +8,7 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG, MOCK_CONFIG_2, MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG, MOCK_CONFIG_DATA
 
 # from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -47,15 +47,6 @@ async def test_successful_config_flow(hass, bypass_get_data):
     # for password, it would result in this function call
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input=MOCK_CONFIG
-    )
-
-    # Check that the config flow shows the user form as the first step
-    assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
-    assert result["step_id"] == "measurands"
-
-    # Call again for step_id == "measurands" with default measurand
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=MOCK_CONFIG_2
     )
 
     # Check that the config flow is complete and a new entry is created with
