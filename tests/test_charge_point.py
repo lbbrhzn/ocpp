@@ -324,13 +324,13 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(
         (54321 - 12345) / 1000
     )
-    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(0)
-    assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == 0
+    assert int(cs.get_metric("test_cpid", "Voltage")) == 228
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_unit("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_extra_attr("unknown_cpid", "Energy.Active.Import.Register") is None
-    assert int(cs.get_supported_features("unknown_cpid")) == int(0)
+    assert int(cs.get_supported_features("unknown_cpid")) == 0
     assert (
         await asyncio.wait_for(
             cs.set_max_charge_rate_amps("unknown_cpid", 0), timeout=1
@@ -370,9 +370,9 @@ async def test_cms_responses(hass, socket_enabled):
         except asyncio.TimeoutError:
             pass
         await ws.close()
-    assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
-    assert float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == float(
-        1101.452
+    assert int(cs.get_metric("test_cpid", "Frequency")) == 50
+    assert (
+        float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == 1101.452
     )
 
     await asyncio.sleep(1)
@@ -437,8 +437,8 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         await ws.close()
 
-    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(1101)
-    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(11)
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == 1101
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == 11
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
     # test ocpp rejection messages sent from charger to cms

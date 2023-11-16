@@ -1,20 +1,20 @@
 """Test ocpp setup process."""
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import (
-    CentralSystem,
     async_reload_entry,
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.ocpp.const import DOMAIN
+from custom_components.ocpp.api import CentralSystem
+from custom_components.ocpp.const import DEVICE_TYPE_CENTRAL_SYSTEM, DOMAIN
 
-from .const import MOCK_CONFIG_DATA_1
+from .const import MOCK_CENTRAL_DATA, MOCK_CENTRAL_OPTIONS
 
 
 # We can pass fixtures as defined in conftest.py to tell pytest to use the fixture
@@ -28,7 +28,11 @@ async def test_setup_unload_and_reload_entry(
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
-        domain=DOMAIN, data=MOCK_CONFIG_DATA_1, entry_id="test_cms1", title="test_cms1"
+        domain=DOMAIN,
+        data=MOCK_CENTRAL_DATA,
+        options=MOCK_CENTRAL_OPTIONS,
+        entry_id="test_cms1",
+        title="test_cms1",
     )
     # config_entry.add_to_hass(hass);
     hass.config_entries._entries[config_entry.entry_id] = config_entry
@@ -40,17 +44,23 @@ async def test_setup_unload_and_reload_entry(
     await hass.async_block_till_done()
 
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
-    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    assert isinstance(
+        hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM][config_entry.entry_id],
+        CentralSystem,
+    )
 
     # Reload the entry and assert that the data from above is still there
     assert await async_reload_entry(hass, config_entry) is None
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
-    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    assert isinstance(
+        hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM][config_entry.entry_id],
+        CentralSystem,
+    )
 
     # Unload the entry and verify that the data has been removed
     unloaded = await async_unload_entry(hass, config_entry)
     assert unloaded
-    assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert config_entry.entry_id not in hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM]
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):

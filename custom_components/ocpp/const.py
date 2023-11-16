@@ -5,17 +5,19 @@ import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
 
-from ocpp.v16.enums import Measurand, UnitOfMeasure
+from ocpp.v16.enums import AuthorizationStatus, Measurand, UnitOfMeasure
 
+# Configuration parameter names
 CONF_AUTH_LIST = "authorization_list"
 CONF_AUTH_STATUS = "authorization_status"
 CONF_CPI = "charge_point_identity"
-CONF_CPID = "cpid"
-CONF_CSID = "csid"
+CONF_CP_ID = "cpid"
+CONF_CS_ID = "csid"
 CONF_DEFAULT_AUTH_STATUS = "default_authorization_status"
+CONF_DEVICE_TYPE = "device_type"
 CONF_HOST = ha.CONF_HOST
-CONF_ID_TAG = "id_tag"
 CONF_ICON = ha.CONF_ICON
+CONF_ID_TAG = "id_tag"
 CONF_IDLE_INTERVAL = "idle_interval"
 CONF_MAX_CURRENT = "max_current"
 CONF_METER_INTERVAL = "meter_interval"
@@ -38,8 +40,19 @@ CONF_WEBSOCKET_PING_TRIES = "websocket_ping_tries"
 CONF_WEBSOCKET_PING_INTERVAL = "websocket_ping_interval"
 CONF_WEBSOCKET_PING_TIMEOUT = "websocket_ping_timeout"
 DATA_UPDATED = "ocpp_data_updated"
-DEFAULT_CSID = "central"
-DEFAULT_CPID = "charger"
+
+# Device types
+DEVICE_TYPE_CENTRAL_SYSTEM = "central_system"
+DEVICE_TYPE_CHARGE_POINT = "charge_point"
+DEVICE_TYPE_TAG = "tag"
+DEVICE_TYPES = [DEVICE_TYPE_CENTRAL_SYSTEM, DEVICE_TYPE_CHARGE_POINT, DEVICE_TYPE_TAG]
+
+# Default values
+DEFAULT_AUTH_STATUS = AuthorizationStatus.accepted
+DEFAULT_CS_ID = "central"
+DEFAULT_CP_ID = "charger"
+DEFAULT_ID_TAG = "00000000"
+DEFAULT_DEVICE_TYPE = DEVICE_TYPE_CENTRAL_SYSTEM
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_CURRENT = 32
 DEFAULT_PORT = 9000
@@ -49,12 +62,16 @@ DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOL = "ocpp1.6"
+DEFAULT_CS_NAME = "my central"
+DEFAULT_CP_NAME = "my charger"
+DEFAULT_TAG_NAME = "my tag"
 DEFAULT_METER_INTERVAL = 60
 DEFAULT_IDLE_INTERVAL = 900
 DEFAULT_WEBSOCKET_CLOSE_TIMEOUT = 10
 DEFAULT_WEBSOCKET_PING_TRIES = 2
 DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
+
 DOMAIN = "ocpp"
 CONFIG = "config"
 ICON = "mdi:ev-station"
@@ -67,6 +84,7 @@ SWITCH = "switch"
 BUTTON = "button"
 
 PLATFORMS = [SENSOR, SWITCH, NUMBER, BUTTON]
+
 
 # Ocpp supported measurands
 MEASURANDS = [

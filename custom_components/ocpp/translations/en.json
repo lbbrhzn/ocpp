@@ -1,63 +1,107 @@
 {
     "config": {
+        "error": {
+            "charge_point_exists": "There already is a charge point with the same identifier",
+            "tag_exists": "There already is a tag wih the same identifier"
+        },
         "step": {
-            "user": {
-                "title": "OCPP Configuration",
-                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+            "select_device": {
+                "title": "Add device",
+                "data": {
+                    "device_type": "Select the device type:"
+                }
+            },
+            "central_system": {
+                "title": "Central System",
                 "data": {
                     "host": "Central system host address",
                     "port": "Central system port number",
                     "ssl": "Secure connection",
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
-                    "csid": "Central system identity",
-                    "cpid": "Charge point identity",
+                    "websocket_close_timeout": "Websocket close timeout (seconds)",
+                    "websocket_ping_tries": "Websocket successive times to ping before closing",
+                    "websocket_ping_interval": "Websocket ping interval (seconds)",
+                    "websocket_ping_timeout": "Websocket ping timeout (seconds)",
+                    "skip_schema_validation": "Skip OCPP schema validation"
+                }
+            },
+            "charge_point": {
+                "title": "Charge Point",
+                "data": {
+                    "cpid": "Charge point identifier",
+                    "password": "Password",
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
                     "idle_interval": "Charger idle sampling interval (seconds)",
+                    "force_smart_charging": "Force Smart Charging feature profile"
+                }
+            },
+            "tag": {
+                "title": "Tag",
+                "data": {
+                    "id": "Tag identifier",
+                    "authorization_status": "Tag authorization"
+                }
+            }
+        }
+    },
+    "options": {
+        "error": {
+            "charge_point_exists": "There already is a charge point with the same identifier",
+            "tag_exists": "There already is a tag wih the same identifier"
+        },
+        "step": {
+            "central_system": {
+                "title": "Options for {name}",
+                "data": {
+                    "host": "Central system host address",
+                    "port": "Central system port number",
+                    "ssl": "Secure connection",
+                    "ssl_certfile_path": "Path to SSL certificate or (None)",
+                    "ssl_keyfile_path": "Path to SSL key or (None)",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (seconds)",
                     "websocket_ping_timeout": "Websocket ping timeout (seconds)",
-                    "skip_schema_validation": "Skip OCPP schema validation",
+                    "skip_schema_validation": "Skip OCPP schema validation"
+                }
+            },
+            "charge_point": {
+                "title": "Options for {name}",
+                "data": {
+                    "cpid": "Charge point identifier",
+                    "password": "Password",
+                    "max_current": "Maximum charging current",
+                    "meter_interval": "Charging sample interval (seconds)",
+                    "idle_interval": "Charger idle sampling interval (seconds)",
                     "force_smart_charging": "Force Smart Charging feature profile"
                 }
             },
-            "measurands": {
-                "title": "OCPP Measurands",
-                "description": "Select which measurand(s) should be shown in Home Assistant.",
+            "tag": {
+                "title": "Options for {name}",
                 "data": {
-                    "Current.Export": "Instantaneous current flow from EV",
-                    "Current.Import": "Instantaneous current flow to EV",
-                    "Current.Offered": "Maximum current offered to EV",
-                    "Energy.Active.Export.Register": "Active energy exported to the grid",
-                    "Energy.Active.Import.Register": "Active energy imported from the grid",
-                    "Energy.Reactive.Export.Register": "Reactive energy exported to the grid",
-                    "Energy.Reactive.Import.Register": "Reactive energy imported from the grid",
-                    "Energy.Active.Export.Interval": "Active energy exported to the grid during last interval",
-                    "Energy.Active.Import.Interval": "Active energy imported from the grid during last interval",
-                    "Energy.Reactive.Export.Interval": "Reactive energy exported to the grid during last interval",
-                    "Energy.Reactive.Import.Interval": "Reactive energy imported from the grid during last interval",
-                    "Frequency": "Powerline frequency",
-                    "Power.Active.Export": "Instantaneous active power exported by EV",
-                    "Power.Active.Import": "Instantaneous active power imported by EV",
-                    "Power.Factor": "Instantaneous power factor of total energy flow",
-                    "Power.Offered": "Maximum power offered to EV",
-                    "Power.Reactive.Export": "Instantaneous reactive power exported by EV",
-                    "Power.Reactive.Import": "Instantaneous reactive power imported by EV",
-                    "RPM": "Fan speed in RPM",
-                    "SoC": "State of charge of EV in percentage",
-                    "Temperature": "Temperature reading inside Charge Point",
-                    "Voltage": "Instantaneous AC RMS supply voltage"
+                    "id_tag": "Tag identifier",
+                    "authorization_status": "Tag authorization"
                 }
             }
+        }
+    },
+    "selector": {
+        "device_type": {
+            "options": {
+                "central_system": "Central System",
+                "charge_point": "Charge Point",
+                "tag": "Tag"
+            }
         },
-        "error": {
-            "auth": "Username/Password is wrong.",
-            "measurand": "Unknown measurand"
-        },
-        "abort": {
-            "single_instance_allowed": "Only a single instance is allowed."
+        "authorization_status": {
+            "options": {
+                "Accepted": "Accepted",
+                "Blocked": "Blocked",
+                "Expired": "Expired",
+                "Invalid": "Invalid"
+            }
         }
     }
 }

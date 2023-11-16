@@ -17,11 +17,16 @@ from homeassistant.helpers.entity import DeviceInfo
 
 from .api import CentralSystem
 from .const import (
-    CONF_CPID,
+    CONF_CP_ID,
+    CONF_CS_ID,
+    CONF_DEVICE_TYPE,
     CONF_MAX_CURRENT,
     DATA_UPDATED,
-    DEFAULT_CPID,
+    DEFAULT_CP_ID,
+    DEFAULT_CS_ID,
     DEFAULT_MAX_CURRENT,
+    DEVICE_TYPE_CENTRAL_SYSTEM,
+    DEVICE_TYPE_CHARGE_POINT,
     DOMAIN,
     ICON,
 )
@@ -52,18 +57,27 @@ NUMBERS: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
-    central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
+    device_type = entry.data.get(CONF_DEVICE_TYPE)
 
-    entities = []
+    if device_type == DEVICE_TYPE_CHARGE_POINT:
+        cs_id = entry.data.get(CONF_CS_ID, DEFAULT_CS_ID)
+        cp_id = entry.data.get(CONF_CP_ID, DEFAULT_CP_ID)
 
-    for ent in NUMBERS:
-        if ent.key == "maximum_current":
-            ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-            ent.native_max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-        entities.append(OcppNumber(hass, central_system, cp_id, ent))
+        central_system = hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM][cs_id]
 
-    async_add_devices(entities, False)
+        entities = []
+
+        for ent in NUMBERS:
+            if ent.key == "maximum_current":
+                ent.initial_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+                ent.native_max_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+                entities.append(OcppNumber(hass, central_system, cp_id, ent))
+
+        async_add_devices(entities, False)
 
 
 class OcppNumber(RestoreNumber, NumberEntity):
@@ -90,7 +104,7 @@ class OcppNumber(RestoreNumber, NumberEntity):
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
-            via_device=(DOMAIN, self.central_system.id),
+            via_device=(DOMAIN, self.central_system.cs_id),
         )
         self._attr_native_value = self.entity_description.initial_value
         self._attr_should_poll = False

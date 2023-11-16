@@ -46,21 +46,12 @@ frontend:
 #script: !include scripts.yaml
 #scene: !include scenes.yaml
 
-ocpp:
-  default_authorization_status: 'Invalid'
-  authorization_list:
-    - id_tag: 'pulsar'
-      name: 'My tag'
-      authorization_status : Accepted
-    - id_tag: 'CAFEBABE'
-      name: 'Some other tag'
-      authorization_status: Blocked
-    - id_tag: 'DEADBEEF'
-      name: 'Old tag'
-      status: Expired
-    - id_tag: '12341234'
-      name: 'Invalid tag'
-      authorization_status: Invalid
+# allow reverse proxy from local host
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1
 
 logger:
   default: info

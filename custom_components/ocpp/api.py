@@ -1,4 +1,4 @@
-"""Representation of a OCCP Entities."""
+"""Representation of OCCP Entities."""
 from __future__ import annotations
 
 import asyncio
@@ -49,14 +49,10 @@ from ocpp.v16.enums import (
 )
 
 from .const import (
-    CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
-    CONF_CPID,
-    CONF_CSID,
-    CONF_DEFAULT_AUTH_STATUS,
+    CONF_CS_ID,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
-    CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
@@ -70,9 +66,8 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
-    CONFIG,
-    DEFAULT_CPID,
-    DEFAULT_CSID,
+    DEFAULT_AUTH_STATUS,
+    DEFAULT_CS_ID,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
@@ -90,6 +85,9 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
+    DEVICE_TYPE_CENTRAL_SYSTEM,
+    DEVICE_TYPE_CHARGE_POINT,
+    DEVICE_TYPE_TAG,
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
@@ -149,29 +147,27 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self.hass = hass
         self.entry = entry
-        self.host = entry.data.get(CONF_HOST, DEFAULT_HOST)
-        self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-        self.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
-        self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
-        self.websocket_close_timeout = entry.data.get(
+        self.config = entry.options
+        self.host = self.config.get(CONF_HOST, DEFAULT_HOST)
+        self.port = self.config.get(CONF_PORT, DEFAULT_PORT)
+        self.cs_id = self.config.get(CONF_CS_ID, DEFAULT_CS_ID)
+        self.websocket_close_timeout = self.config.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         )
-        self.websocket_ping_tries = entry.data.get(
+        self.websocket_ping_tries = self.config.get(
             CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
         )
-        self.websocket_ping_interval = entry.data.get(
+        self.websocket_ping_interval = self.config.get(
             CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
         )
-        self.websocket_ping_timeout = entry.data.get(
+        self.websocket_ping_timeout = self.config.get(
             CONF_WEBSOCKET_PING_TIMEOUT, DEFAULT_WEBSOCKET_PING_TIMEOUT
         )
 
-        self.subprotocol = entry.data.get(CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL)
+        self.subprotocol = self.config.get(CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL)
         self._server = None
-        self.config = entry.data
-        self.id = entry.entry_id
         self.charge_points = {}
-        if entry.data.get(CONF_SSL, DEFAULT_SSL):
+        if self.config.get(CONF_SSL, DEFAULT_SSL):
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
             localhost_certfile = entry.data.get(
@@ -228,14 +224,22 @@ class CentralSystem:
         _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
-        if self.cpid not in self.charge_points:
-            _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
-            charge_point = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
-            self.charge_points[self.cpid] = charge_point
-            await charge_point.start()
+
+        if cp_id not in self.charge_points:
+            if cp_id in self.hass.domain[DOMAIN][DEVICE_TYPE_CHARGE_POINT]:
+                _LOGGER.info(
+                    f"Known charge point {cp_id} connected to {self.host}:{self.port}."
+                )
+                charge_point = self.hass.domain[DOMAIN][DEVICE_TYPE_CHARGE_POINT]
+                self.charge_points[self.cp_id] = charge_point
+                await charge_point.start(websocket)
+            else:
+                _LOGGER.info(
+                    f"Unknown charge point {cp_id} connected to {self.host}:{self.port}."
+                )
         else:
             _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-            charge_point: ChargePoint = self.charge_points[self.cpid]
+            charge_point: ChargePoint = self.charge_points[self.cp_id]
             await charge_point.reconnect(websocket)
         _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
@@ -305,23 +309,10 @@ class CentralSystem:
                 resp = await self.charge_points[cp_id].unlock()
         return resp
 
-    async def update(self, cp_id: str):
-        """Update sensors values in HA."""
-        er = entity_registry.async_get(self.hass)
-        dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cp_id)}
-        dev = dr.async_get_device(identifiers)
-        # _LOGGER.info("Device id: %s updating", dev.name)
-        for ent in entity_registry.async_entries_for_device(er, dev.id):
-            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
-            self.hass.async_create_task(
-                entity_component.async_update_entity(self.hass, ent.entity_id)
-            )
-
     def device_info(self):
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self.id)},
+            "identifiers": {(DOMAIN, f"{DEVICE_TYPE_CENTRAL_SYSTEM}.{self.cs_id}")},
         }
 
 
@@ -330,25 +321,26 @@ class ChargePoint(cp):
 
     def __init__(
         self,
-        id: str,
-        connection: websockets.server.WebSocketServerProtocol,
+        cp_id: str,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        central: CentralSystem,
-        interval_meter_metrics: int = 10,
-        skip_schema_validation: bool = False,
     ):
         """Instantiate a ChargePoint."""
 
-        super().__init__(id, connection)
+        super().__init__(cp_id, None)
 
-        for action in self.route_map:
-            self.route_map[action]["_skip_schema_validation"] = skip_schema_validation
-
-        self.interval_meter_metrics = interval_meter_metrics
         self.hass = hass
         self.entry = entry
-        self.central = central
+        self.config = entry.options
+
+        for action in self.route_map:
+            self.route_map[action]["_skip_schema_validation"] = self.config.get(
+                CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION
+            )
+
+        self.interval_meter_metrics = self.config.get(
+            CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL
+        )
         self.status = "init"
         # Indicates if the charger requires a reboot to apply new
         # configuration.
@@ -361,12 +353,25 @@ class ChargePoint(cp):
         self.tasks = None
         self._charger_reports_session_energy = False
         self._metrics = defaultdict(lambda: Metric(None, None))
-        self._metrics[cdet.identifier.value].value = id
+        self._metrics[cdet.identifier.value].value = cp_id
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
         self._attr_supported_features: int = 0
         self._metrics[cstat.reconnects.value].value: int = 0
+
+    async def update(self):
+        """Update entities in HA."""
+        er = entity_registry.async_get(self.hass)
+        dr = device_registry.async_get(self.hass)
+        identifiers = {(DOMAIN, f"{DEVICE_TYPE_CHARGE_POINT}.{self.cp_id}")}
+        dev = dr.async_get_device(identifiers)
+        # _LOGGER.info("Device id: %s updating", dev.name)
+        for ent in entity_registry.async_entries_for_device(er, dev.id):
+            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
+            self.hass.async_create_task(
+                entity_component.async_update_entity(self.hass, ent.entity_id)
+            )
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -431,7 +436,7 @@ class ChargePoint(cp):
             self._metrics[cdet.connectors.value].value = resp
             await self.get_configuration(ckey.heartbeat_interval.value)
 
-            all_measurands = self.entry.data.get(
+            all_measurands = self.config.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
 
@@ -457,14 +462,14 @@ class ChargePoint(cp):
 
             await self.configure(
                 ckey.meter_value_sample_interval.value,
-                str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
+                str(self.config.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
             )
             await self.configure(
                 ckey.clock_aligned_data_interval.value,
-                str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
+                str(self.config.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
             )
             #            await self.configure(
-            #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
+            #                "StopTxnSampledData", ",".join(self.config[CONF_MONITORED_VARIABLES])
             #            )
             #            await self.start_transaction()
 
@@ -527,9 +532,7 @@ class ChargePoint(cp):
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
-        if self.central.config.get(
-            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
-        ):
+        if self.config.get(CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING):
             _LOGGER.warning("Force Smart Charging feature profile")
             self._attr_supported_features |= prof.SMART
         for item in feature_list:
@@ -688,8 +691,7 @@ class ChargePoint(cp):
             return False
 
     async def start_transaction(self):
-        """
-        Remote start a transaction.
+        """Remote start a transaction.
 
         Check if authorisation enabled, if it is disable it before remote start
         """
@@ -710,8 +712,7 @@ class ChargePoint(cp):
             return False
 
     async def stop_transaction(self):
-        """
-        Request remote stop of current transaction.
+        """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.
         Use reset() to make the charger available again for remote start
@@ -901,39 +902,48 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_pong.value].unit = "ms"
         connection = self._connection
         timeout_counter = 0
+
+        websocket_ping_tries = self.config.get(
+            CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
+        )
+
         while connection.open:
             try:
-                await asyncio.sleep(self.central.websocket_ping_interval)
+                websocket_ping_interval = self.config.get(
+                    CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
+                )
+                websocket_ping_timeout = self.config.get(
+                    CONF_WEBSOCKET_PING_TIMEOUT, DEFAULT_WEBSOCKET_PING_TIMEOUT
+                )
+                await asyncio.sleep(websocket_ping_interval)
                 time0 = time.perf_counter()
-                latency_ping = self.central.websocket_ping_timeout * 1000
+                latency_ping = websocket_ping_timeout * 1000
                 pong_waiter = await asyncio.wait_for(
-                    connection.ping(), timeout=self.central.websocket_ping_timeout
+                    connection.ping(), timeout=websocket_ping_timeout
                 )
                 time1 = time.perf_counter()
                 latency_ping = round(time1 - time0, 3) * 1000
-                latency_pong = self.central.websocket_ping_timeout * 1000
-                await asyncio.wait_for(
-                    pong_waiter, timeout=self.central.websocket_ping_timeout
-                )
+                latency_pong = websocket_ping_timeout * 1000
+                await asyncio.wait_for(pong_waiter, timeout=websocket_ping_timeout)
                 timeout_counter = 0
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.cs_id}' to '{self.cp_id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
             except asyncio.TimeoutError as timeout_exception:
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.cs_id}' to '{self.cp_id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 timeout_counter += 1
-                if timeout_counter > self.central.websocket_ping_tries:
+                if timeout_counter > websocket_ping_tries:
                     _LOGGER.debug(
-                        f"Connection to '{self.id}' timed out after '{self.central.websocket_ping_tries}' ping tries",
+                        f"Connection to '{self.cp_id}' timed out after '{websocket_ping_tries}' ping tries",
                     )
                     raise timeout_exception
                 else:
@@ -946,8 +956,9 @@ class ChargePoint(cp):
             response = msg.create_call_error(e).to_json()
             await self._send(response)
 
-    async def start(self):
+    async def start(self, connection: websockets.server.WebSocketServerProtocol):
         """Start charge point."""
+        self._connection = connection
         await self.run(
             [super().start(), self.post_connect(), self.monitor_connection()]
         )
@@ -996,20 +1007,19 @@ class ChargePoint(cp):
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
 
-        _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
+        _LOGGER.debug("Updating device info %s: %s", self.cp_id, boot_info)
         identifiers = {
-            (DOMAIN, self.central.cpid),
-            (DOMAIN, self.id),
+            (DOMAIN, f"{DEVICE_TYPE_CHARGE_POINT}.{self.cp_id}"),
         }
         serial = boot_info.get(om.charge_point_serial_number.name, None)
         if serial is not None:
-            identifiers.add((DOMAIN, serial))
+            identifiers.add((DOMAIN, f"{DEVICE_TYPE_CHARGE_POINT}.{serial}"))
 
         registry = device_registry.async_get(self.hass)
         registry.async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers=identifiers,
-            name=self.central.cpid,
+            name=self.cp_id,
             manufacturer=boot_info.get(om.charge_point_vendor.name, None),
             model=boot_info.get(om.charge_point_model.name, None),
             suggested_area="Garage",
@@ -1097,7 +1107,9 @@ class ChargePoint(cp):
                     self._metrics[metric].unit = metric_unit
 
     @on(Action.MeterValues)
-    def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
+    def on_meter_values(
+        self, connector_id: int, meter_value: dict, **kwargs
+    ):  # noqa: C901
         """Request handler for MeterValues Calls."""
 
         transaction_id: int = kwargs.get(om.transaction_id.name, 0)
@@ -1218,7 +1230,7 @@ class ChargePoint(cp):
                 self._metrics[csess.session_energy.value].extra_attr[
                     cstat.id_tag.name
                 ] = self._metrics[cstat.id_tag.value].value
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -1246,7 +1258,7 @@ class ChargePoint(cp):
         )
 
         self.hass.async_create_task(self.async_update_device_info(kwargs))
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             self.hass.async_create_task(self.post_connect())
@@ -1285,14 +1297,14 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_export.value].value = 0
             if Measurand.power_reactive_export.value in self._metrics:
                 self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotificationPayload()
 
@@ -1321,32 +1333,12 @@ class ChargePoint(cp):
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
-        # get the domain wide configuration
-        config = self.hass.data[DOMAIN].get(CONFIG, {})
-        # get the default authorization status. Use accept if not configured
-        default_auth_status = config.get(
-            CONF_DEFAULT_AUTH_STATUS, AuthorizationStatus.accepted.value
-        )
-        # get the authorization list
-        auth_list = config.get(CONF_AUTH_LIST, {})
-        # search for the entry, based on the id_tag
-        auth_status = None
-        for auth_entry in auth_list:
-            id_entry = auth_entry.get(CONF_ID_TAG, None)
-            if id_tag == id_entry:
-                # get the authorization status, use the default if not configured
-                auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
-                _LOGGER.debug(
-                    f"id_tag='{id_tag}' found in auth_list, authorization_status='{auth_status}'"
-                )
-                break
-
-        if auth_status is None:
-            auth_status = default_auth_status
-            _LOGGER.debug(
-                f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
-            )
-        return auth_status
+        # find the tag using the id
+        tag = self.hass.data[DOMAIN][DEVICE_TYPE_TAG].get(id_tag, None)
+        if tag:
+            return tag.config.get(CONF_AUTH_STATUS, DEFAULT_AUTH_STATUS)
+        # use the default authorization status of this charge point of the tag was not found
+        return self.config.get(CONF_AUTH_STATUS, DEFAULT_AUTH_STATUS)
 
     @on(Action.Authorize)
     def on_authorize(self, id_tag, **kwargs):
@@ -1374,7 +1366,7 @@ class ChargePoint(cp):
             result = call_result.StartTransactionPayload(
                 id_tag_info={om.status.value: auth_status}, transaction_id=0
             )
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         return result
 
     @on(Action.StopTransaction)
@@ -1407,7 +1399,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_export.value].value = 0
         if Measurand.power_reactive_export.value in self._metrics:
             self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1425,7 +1417,7 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update())
         return call_result.HeartbeatPayload(
             current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ")
         )
@@ -1442,7 +1434,7 @@ class ChargePoint(cp):
     def get_ha_metric(self, measurand: str):
         """Return last known value in HA for given measurand."""
         entity_id = "sensor." + "_".join(
-            [self.central.cpid.lower(), measurand.lower().replace(".", "_")]
+            [self.cp_id.lower(), measurand.lower().replace(".", "_")]
         )
         try:
             value = self.hass.states.get(entity_id).state

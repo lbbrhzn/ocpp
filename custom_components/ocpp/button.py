@@ -13,7 +13,16 @@ from homeassistant.components.button import (
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN
+from .const import (
+    CONF_CP_ID,
+    CONF_CS_ID,
+    CONF_DEVICE_TYPE,
+    DEFAULT_CP_ID,
+    DEFAULT_CS_ID,
+    DEVICE_TYPE_CENTRAL_SYSTEM,
+    DEVICE_TYPE_CHARGE_POINT,
+    DOMAIN,
+)
 from .enums import HAChargerServices
 
 
@@ -44,16 +53,19 @@ BUTTONS: Final = [
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
+    device_type = entry.data.get(CONF_DEVICE_TYPE)
 
-    central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
+    if device_type == DEVICE_TYPE_CHARGE_POINT:
+        cp_id = entry.data.get(CONF_CP_ID, DEFAULT_CP_ID)
+        cs_id = entry.data.get(CONF_CS_ID, DEFAULT_CS_ID)
+        central_system = hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM][cs_id]
 
-    entities = []
+        entities = []
 
-    for ent in BUTTONS:
-        entities.append(ChargePointButton(central_system, cp_id, ent))
+        for ent in BUTTONS:
+            entities.append(ChargePointButton(central_system, cp_id, ent))
 
-    async_add_devices(entities, False)
+        async_add_devices(entities, False)
 
 
 class ChargePointButton(ButtonEntity):
@@ -78,7 +90,7 @@ class ChargePointButton(ButtonEntity):
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
-            via_device=(DOMAIN, self.central_system.id),
+            via_device=(DOMAIN, self.central_system.cs_id),
         )
 
     @property

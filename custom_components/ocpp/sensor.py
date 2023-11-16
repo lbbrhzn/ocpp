@@ -19,10 +19,17 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
 from .const import (
-    CONF_CPID,
+    CONF_CP_ID,
+    CONF_CS_ID,
+    CONF_DEVICE_TYPE,
     DATA_UPDATED,
     DEFAULT_CLASS_UNITS_HA,
-    DEFAULT_CPID,
+    DEFAULT_CP_ID,
+    DEFAULT_CS_ID,
+    DEFAULT_DEVICE_TYPE,
+    DEFAULT_MONITORED_VARIABLES,
+    DEVICE_TYPE_CENTRAL_SYSTEM,
+    DEVICE_TYPE_CHARGE_POINT,
     DOMAIN,
     ICON,
     Measurand,
@@ -40,41 +47,53 @@ class OcppSensorDescription(SensorEntityDescription):
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
-    central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
-    entities = []
-    SENSORS = []
-    for metric in list(
-        set(entry.data[CONF_MONITORED_VARIABLES].split(",") + list(HAChargerSession))
-    ):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
-            )
-        )
-    for metric in list(HAChargerStatuses) + list(HAChargerDetails):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
-                entity_category=EntityCategory.DIAGNOSTIC,
+
+    device_type = entry.data.get(CONF_DEVICE_TYPE, DEFAULT_DEVICE_TYPE)
+
+    if device_type == DEVICE_TYPE_CHARGE_POINT:
+        cs_id = entry.data.get(CONF_CS_ID, DEFAULT_CS_ID)
+        cp_id = entry.data.get(CONF_CP_ID, DEFAULT_CP_ID)
+        central_system = hass.data[DOMAIN][DEVICE_TYPE_CENTRAL_SYSTEM][cs_id]
+        entities = []
+        sensors = []
+        metrics = list(
+            set(
+                entry.data.get(
+                    CONF_MONITORED_VARIABLES, DEFAULT_MONITORED_VARIABLES
+                ).split(",")
+                + list(HAChargerSession)
             )
         )
 
-    for ent in SENSORS:
-        entities.append(
-            ChargePointMetric(
-                hass,
-                central_system,
-                cp_id,
-                ent,
+        for metric in metrics:
+            sensors.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                )
             )
-        )
+        for metric in list(HAChargerStatuses) + list(HAChargerDetails):
+            sensors.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                )
+            )
 
-    async_add_devices(entities, False)
+        for ent in sensors:
+            entities.append(
+                ChargePointMetric(
+                    hass,
+                    central_system,
+                    cp_id,
+                    ent,
+                )
+            )
+
+        async_add_devices(entities, False)
 
 
 class ChargePointMetric(RestoreSensor, SensorEntity):
@@ -103,8 +122,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         )
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cp_id)},
-            via_device=(DOMAIN, self.central_system.id),
+            identifiers={(DOMAIN, f"{DEVICE_TYPE_CHARGE_POINT}.{self.cp_id}")}
         )
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
@@ -163,7 +181,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             Measurand.rpm,
         ] or self.metric.lower().startswith("frequency"):
             device_class = SensorDeviceClass.FREQUENCY
-        elif self.metric.lower().startswith(tuple(["power.a", "power.o", "power.r"])):
+        elif self.metric.lower().startswith(("power.a", "power.o", "power.r")):
             device_class = SensorDeviceClass.POWER
         elif self.metric.lower().startswith("temperature."):
             device_class = SensorDeviceClass.TEMPERATURE

@@ -1,7 +1,8 @@
 """Constants for ocpp tests."""
 from custom_components.ocpp.const import (
-    CONF_CPID,
-    CONF_CSID,
+    CONF_CP_ID,
+    CONF_CS_ID,
+    CONF_DEVICE_TYPE,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
@@ -18,33 +19,36 @@ from custom_components.ocpp.const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_MONITORED_VARIABLES,
+    DEVICE_TYPE_CENTRAL_SYSTEM,
 )
 
-MOCK_CONFIG = {
+MOCK_CENTRAL_INPUT = {
     CONF_HOST: "127.0.0.1",
     CONF_PORT: 9000,
     CONF_SSL: False,
     CONF_SSL_CERTFILE_PATH: "/tests/fullchain.pem",
     CONF_SSL_KEYFILE_PATH: "/tests/privkey.pem",
-    CONF_CPID: "test_cpid",
-    CONF_CSID: "test_csid",
-    CONF_IDLE_INTERVAL: 900,
-    CONF_MAX_CURRENT: 32,
-    CONF_METER_INTERVAL: 60,
-    CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
-    CONF_SKIP_SCHEMA_VALIDATION: False,
-    CONF_FORCE_SMART_CHARGING: True,
-    CONF_WEBSOCKET_CLOSE_TIMEOUT: 1,
-    CONF_WEBSOCKET_PING_TRIES: 0,
-    CONF_WEBSOCKET_PING_INTERVAL: 1,
-    CONF_WEBSOCKET_PING_TIMEOUT: 1,
+    CONF_CS_ID: "test_csid",
+}
+
+MOCK_CENTRAL_DATA = {
+    CONF_DEVICE_TYPE: DEVICE_TYPE_CENTRAL_SYSTEM,
+}
+
+MOCK_CENTRAL_OPTIONS = {
+    CONF_HOST: "127.0.0.1",
+    CONF_PORT: 9000,
+    CONF_SSL: False,
+    CONF_SSL_CERTFILE_PATH: "/tests/fullchain.pem",
+    CONF_SSL_KEYFILE_PATH: "/tests/privkey.pem",
+    CONF_CS_ID: "test_csid",
 }
 
 MOCK_CONFIG_DATA = {
     CONF_HOST: "127.0.0.1",
     CONF_PORT: 9000,
-    CONF_CPID: "test_cpid",
-    CONF_CSID: "test_csid",
+    CONF_CP_ID: "test_cpid",
+    CONF_CS_ID: "test_csid",
     CONF_IDLE_INTERVAL: 900,
     CONF_MAX_CURRENT: 32,
     CONF_METER_INTERVAL: 60,
@@ -64,14 +68,14 @@ MOCK_CONFIG_DATA = {
 MOCK_CONFIG_DATA_1 = {
     **MOCK_CONFIG_DATA,
     CONF_PORT: 9001,
-    CONF_CPID: "test_cpid_1",
+    CONF_CP_ID: "test_cpid_1",
 }
 
 # configuration with skip schema validation enabled
 MOCK_CONFIG_DATA_2 = {
     **MOCK_CONFIG_DATA,
     CONF_PORT: 9002,
-    CONF_CPID: "test_cpid_2",
+    CONF_CP_ID: "test_cpid_2",
     CONF_SKIP_SCHEMA_VALIDATION: True,
 }
 
@@ -79,8 +83,8 @@ MOCK_CONFIG_DATA_2 = {
 MOCK_CONFIG_SWITCH = {
     CONF_HOST: "127.0.0.1",
     CONF_PORT: 9001,
-    CONF_CPID: "test_cpid_2",
-    CONF_CSID: "test_csid_2",
+    CONF_CP_ID: "test_cpid_2",
+    CONF_CS_ID: "test_csid_2",
     CONF_MAX_CURRENT: 32,
     CONF_IDLE_INTERVAL: 900,
     CONF_METER_INTERVAL: 60,
