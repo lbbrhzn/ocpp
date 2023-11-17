@@ -447,7 +447,7 @@ class ChargePoint(cp):
                     accepted_measurands.append(measurand)
 
             accepted_measurands = ",".join(accepted_measurands)
-            updated_entry = self.entry.data
+            updated_entry = {**self.entry.data}
             updated_entry[CONF_MONITORED_VARIABLES] = accepted_measurands
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
