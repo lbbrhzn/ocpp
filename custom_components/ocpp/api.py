@@ -447,6 +447,7 @@ class ChargePoint(cp):
                     accepted_measurands.append(measurand)
 
             accepted_measurands = ",".join(accepted_measurands)
+            self.entry.data[CONF_MONITORED_VARIABLES] = accepted_measurands
 
             _LOGGER.debug(f"'{self.id}' allowed measurands '{accepted_measurands}'")
 
