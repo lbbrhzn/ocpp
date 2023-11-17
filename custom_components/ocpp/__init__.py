@@ -23,6 +23,7 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DOMAIN,
+    EVENT_CHARGER_CONNECTED,
     PLATFORMS,
 )
 
@@ -63,6 +64,9 @@ async def async_setup(hass: HomeAssistant, config: Config):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up this integration from config entry."""
+    def handle_event(event):
+        pass
+
     if hass.data.get(DOMAIN) is None:
         hass.data.setdefault(DOMAIN, {})
         _LOGGER.info(entry.data)
@@ -89,6 +93,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
+
+    try:
+        hass.bus.listen(EVENT_CHARGER_CONNECTED, handle_event)
+    except (asyncio.TimeoutError, TimeoutException) as ex:
+        raise ConfigEntryNotReady(
+            f"Timed out while connecting to {entry.data.get(CONF_CPID, DEFAULT_CPID)}"
+        ) from ex
 
     for platform in PLATFORMS:
         hass.async_create_task(
