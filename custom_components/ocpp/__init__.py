@@ -1,9 +1,11 @@
 """Custom integration for Chargers that support the Open Charge Point Protocol."""
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -64,6 +66,7 @@ async def async_setup(hass: HomeAssistant, config: Config):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up this integration from config entry."""
+
     def handle_event(event):
         pass
 
@@ -96,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     try:
         hass.bus.listen(EVENT_CHARGER_CONNECTED, handle_event)
-    except (asyncio.TimeoutError, TimeoutException) as ex:
+    except asyncio.TimeoutError as ex:
         raise ConfigEntryNotReady(
             f"Timed out while connecting to {entry.data.get(CONF_CPID, DEFAULT_CPID)}"
         ) from ex
