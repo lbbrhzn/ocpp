@@ -98,7 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data[DOMAIN][entry.entry_id] = central_sys
 
     try:
-        hass.bus.listen(EVENT_CHARGER_CONNECTED, handle_event)
+        hass.bus.async_listen_once(EVENT_CHARGER_CONNECTED, handle_event)
     except asyncio.TimeoutError as ex:
         raise ConfigEntryNotReady(
             f"Timed out while connecting to {entry.data.get(CONF_CPID, DEFAULT_CPID)}"
