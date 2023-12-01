@@ -16,6 +16,8 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)  
 (has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 ## [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
+The Wallbox Pulsar Max has been verified. 
+In the OCPP-config, leave the password field empty.
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 ## [V2C Trydan](https://v2charge.com/trydan)
 
