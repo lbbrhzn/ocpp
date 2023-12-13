@@ -20,6 +20,10 @@ The Wallbox Pulsar Max has been verified.
 In the OCPP-config, leave the password field empty.
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 ## [V2C Trydan](https://v2charge.com/trydan)
+## [Etrel - Inch Pro](https://etrel.com/charging-solutions/inch-pro/)
+To allow a custom OCPP server such as HA to set up a transaction ID, it is necessary to set under Users > Charging Authorization the
+authorization type to either `Central system only` or `Charger whitelist and central system` otherwise the OCPP integration won't
+match transactions and it won't report some meter values such as session time.
 
 When a charger is not listed as a supported charger it simply means that it has not been reported to work. Whether it will work or not in practice really depends on whether it is compliant with the OCPP standard. Some vendors claim their device is compliant without bothering to do a compliance test, because that takes time and costs money!
 
