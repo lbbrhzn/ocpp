@@ -1,10 +1,10 @@
 # home assistant
 pip>=21.0,<22.4
-pre-commit==3.5.0
-bandit==1.7.5
-black==23.11.0
+pre-commit==3.6.0
+bandit==1.7.6
+black==23.12.0
 flake8==6.1.0
-isort==5.12.0
+isort==5.13.2
 pre-comit-hooks==4.1.0
 pyupgrade==3.15.0
 reorder-python-imports==3.12.0
