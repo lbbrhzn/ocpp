@@ -28,6 +28,8 @@ match transactions and it won't report some meter values such as session time.
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/) 
 (Ability to configure a custom OCPP server such as HA is being discontinued)
 
+## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
+
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)  
 (has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
