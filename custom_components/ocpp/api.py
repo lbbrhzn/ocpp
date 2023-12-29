@@ -967,8 +967,8 @@ class ChargePoint(cp):
             await asyncio.gather(*self.tasks)
         except asyncio.TimeoutError:
             pass
-###        except websockets.exceptions.WebSocketException as websocket_exception:
-###            _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
+        except websockets.exceptions.WebSocketException as websocket_exception:
+            _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
         except Exception as other_exception:
             _LOGGER.error(
                 f"Unexpected exception in connection to '{self.id}': '{other_exception}'",
@@ -979,7 +979,7 @@ class ChargePoint(cp):
 
     async def stop(self):
         """Close connection and cancel ongoing tasks."""
-###        self.status = STATE_UNAVAILABLE
+        self.status = STATE_UNAVAILABLE
         if self._connection.open:
             _LOGGER.debug(f"Closing websocket to '{self.id}'")
 ###            await self._connection.close()
@@ -1245,7 +1245,8 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
         if self.triggered_boot_notification is False:
-            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+###            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+            _LOGGER.debug(f"Charger '{self.id}' rebooted")
             self.hass.async_create_task(self.post_connect())
         return resp
 
