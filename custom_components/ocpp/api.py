@@ -933,7 +933,7 @@ class ChargePoint(cp):
 
             except asyncio.TimeoutError as timeout_exception:
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms, retry={timeout_counter}",
+                    f"Connection timeout latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms, retry={timeout_counter}",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
@@ -975,7 +975,8 @@ class ChargePoint(cp):
                 exc_info=True,
             )
         finally:
-            await self.stop()
+###            await self.stop()
+            _LOGGER.debug(f"Error: '{self.id}'")
 
     async def stop(self):
         """Close connection and cancel ongoing tasks."""
@@ -1245,8 +1246,12 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.async_update_device_info(kwargs))
         self.hass.async_create_task(self.central.update(self.central.cpid))
         if self.triggered_boot_notification is False:
+<<<<<<< HEAD
+#            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+=======
 ###            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             _LOGGER.debug(f"Charger '{self.id}' rebooted")
+>>>>>>> 1be340240803a9980c5c5f471dd5151c2b5a2dc1
             self.hass.async_create_task(self.post_connect())
         return resp
 
