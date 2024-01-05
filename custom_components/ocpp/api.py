@@ -11,7 +11,7 @@ import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, TIME_MINUTES
+from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfTime.MINUTES as TIME_MINUTES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv

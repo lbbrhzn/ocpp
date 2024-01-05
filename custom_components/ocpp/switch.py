@@ -9,7 +9,7 @@ from homeassistant.components.switch import (
     SwitchEntity,
     SwitchEntityDescription,
 )
-from homeassistant.const import POWER_KILO_WATT
+from homeassistant.const import UnitOfPower.KILO_WATT as POWER_KILO_WATT
 from homeassistant.helpers.entity import DeviceInfo
 
 from ocpp.v16.enums import ChargePointStatus, Measurand
