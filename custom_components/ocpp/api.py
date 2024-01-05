@@ -15,7 +15,7 @@ from homeassistant.const import (
     STATE_OK, 
     STATE_UNAVAILABLE, 
     STATE_UNKNOWN, 
-    UnitOfTime.MINUTES as TIME_MINUTES,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
@@ -115,6 +115,8 @@ logging.getLogger(DOMAIN).setLevel(logging.INFO)
 # Uncomment these when Debugging
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
+
+TIME_MINUTES = UnitOfTime.MINUTES
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
