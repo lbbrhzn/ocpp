@@ -367,7 +367,7 @@ class ChargePoint(cp):
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
-        self._attr_supported_features: int = 0
+        self._attr_supported_features = prof.NONE
         self._metrics[cstat.reconnects.value].value: int = 0
 
     async def post_connect(self):
