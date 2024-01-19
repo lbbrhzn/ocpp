@@ -147,7 +147,7 @@ TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
 CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("limit_amps"): cv.positive_float,
-        vol.Optional("limit_watts"): cv.postive_int,
+        vol.Optional("limit_watts"): cv.positive_int,
         vol.Optional("custom_profile"): cv.string,
     }
 )
