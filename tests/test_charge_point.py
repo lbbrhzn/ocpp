@@ -121,7 +121,7 @@ async def test_cms_responses(hass, socket_enabled):
                 blocking=True,
             )
         
-        data = {"chargingProfileId":8,"stackLevel":6,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16.0}]}}
+        data = {"custom_profile": "{'chargingProfileId':8,'stackLevel':6,'chargingProfileKind':'Relative','chargingProfilePurpose':'ChargePointMaxProfile','chargingSchedule':{'chargingRateUnit':'A','chargingSchedulePeriod':[{'startPeriod':0,'limit':16.0}]}}"}
         await hass.services.async_call(
                 OCPP_DOMAIN,
                 csvcs.service_set_charge_rate,
