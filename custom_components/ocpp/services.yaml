@@ -31,6 +31,12 @@ set_charge_rate:
       advanced: true
       example: 1500
       default: 22000
+    custom_profile:
+      name: Custom profile
+      description: Used to send a custom charge profile to charger (for advanced users only)
+      required: false
+      advanced: true
+      example: "{"chargingProfileId":8,"stackLevel":6,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16.0}]}}"
       
 clear_profile:
   name: Clear charging profiles
