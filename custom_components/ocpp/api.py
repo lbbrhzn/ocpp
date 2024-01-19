@@ -517,7 +517,7 @@ class ChargePoint(cp):
                 DOMAIN,
                 csvcs.service_set_charge_rate.value,
                 handle_set_charge_rate,
-                TRANS_SERVICE_DATA_SCHEMA,
+                CHRGR_SERVICE_DATA_SCHEMA,
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
