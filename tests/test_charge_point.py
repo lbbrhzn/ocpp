@@ -113,21 +113,22 @@ async def test_cms_responses(hass, socket_enabled):
                 service_data=data,
                 blocking=True,
             )
-        # test additional set charge rate options 
+        # test additional set charge rate options
         await hass.services.async_call(
-                OCPP_DOMAIN,
-                csvcs.service_set_charge_rate,
-                service_data={"limit_watts": 3000},
-                blocking=True,
-            )
+            OCPP_DOMAIN,
+            csvcs.service_set_charge_rate,
+            service_data={"limit_watts": 3000},
+            blocking=True,
+        )
         
-        data = {"custom_profile": "{'chargingProfileId':8,'stackLevel':6,'chargingProfileKind':'Relative','chargingProfilePurpose':'ChargePointMaxProfile','chargingSchedule':{'chargingRateUnit':'A','chargingSchedulePeriod':[{'startPeriod':0,'limit':16.0}]}}"}
+        # note double quotes used for json decode
+        data = {"custom_profile": "{"chargingProfileId":8,"stackLevel":6,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16.0}]}}"}
         await hass.services.async_call(
-                OCPP_DOMAIN,
-                csvcs.service_set_charge_rate,
-                service_data=data,
-                blocking=True,
-            )
+            OCPP_DOMAIN,
+            csvcs.service_set_charge_rate,
+            service_data=data,
+            blocking=True,
+        )
 
         for number in NUMBERS:
             # test setting value of number slider
