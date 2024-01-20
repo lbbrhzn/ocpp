@@ -51,7 +51,7 @@ from ocpp.v16.enums import (
 from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
-    CONF_CPID,
+    CONF_CHARGE_POINTS,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_FORCE_SMART_CHARGING,
@@ -71,7 +71,6 @@ from .const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
     CONFIG,
-    DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_FORCE_SMART_CHARGING,
@@ -152,7 +151,6 @@ class CentralSystem:
         self.host = entry.data.get(CONF_HOST, DEFAULT_HOST)
         self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
-        self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
         self.websocket_close_timeout = entry.data.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         )
@@ -228,14 +226,14 @@ class CentralSystem:
         _LOGGER.info(f"Charger websocket path={path}")
         cp_id = path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
-        if self.cpid not in self.charge_points:
+        if cp_id not in self.charge_points:
             _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
             charge_point = ChargePoint(cp_id, websocket, self.hass, self.entry, self)
-            self.charge_points[self.cpid] = charge_point
+            self.charge_points[cp_id] = charge_point
             await charge_point.start()
         else:
             _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-            charge_point: ChargePoint = self.charge_points[self.cpid]
+            charge_point: ChargePoint = self.charge_points[cp_id]
             await charge_point.reconnect(websocket)
         _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
@@ -431,7 +429,7 @@ class ChargePoint(cp):
             self._metrics[cdet.connectors.value].value = resp
             await self.get_configuration(ckey.heartbeat_interval.value)
 
-            all_measurands = self.entry.data.get(
+            all_measurands = self.entry.data.get(CONF_CHARGE_POINTS)[self.id].get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
 
@@ -457,11 +455,19 @@ class ChargePoint(cp):
 
             await self.configure(
                 ckey.meter_value_sample_interval.value,
-                str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
+                str(
+                    self.entry.data.get(CONF_CHARGE_POINTS)[self.id].get(
+                        CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL
+                    )
+                ),
             )
             await self.configure(
                 ckey.clock_aligned_data_interval.value,
-                str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
+                str(
+                    self.entry.data.get(CONF_CHARGE_POINTS)[self.id].get(
+                        CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL
+                    )
+                ),
             )
             #            await self.configure(
             #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
@@ -527,7 +533,7 @@ class ChargePoint(cp):
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
-        if self.central.config.get(
+        if self.entry.data.get(CONF_CHARGE_POINTS)[self.id].get(
             CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
         ):
             _LOGGER.warning("Force Smart Charging feature profile")
@@ -996,9 +1002,8 @@ class ChargePoint(cp):
     async def async_update_device_info(self, boot_info: dict):
         """Update device info asynchronuously."""
 
-        _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
+        _LOGGER.debug("Updating device info %s: %s", self.id, boot_info)
         identifiers = {
-            (DOMAIN, self.central.cpid),
             (DOMAIN, self.id),
         }
         serial = boot_info.get(om.charge_point_serial_number.name, None)
@@ -1009,7 +1014,7 @@ class ChargePoint(cp):
         registry.async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers=identifiers,
-            name=self.central.cpid,
+            name=self.id,
             manufacturer=boot_info.get(om.charge_point_vendor.name, None),
             model=boot_info.get(om.charge_point_model.name, None),
             suggested_area="Garage",
@@ -1218,7 +1223,7 @@ class ChargePoint(cp):
                 self._metrics[csess.session_energy.value].extra_attr[
                     cstat.id_tag.name
                 ] = self._metrics[cstat.id_tag.value].value
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         return call_result.MeterValuesPayload()
 
     @on(Action.BootNotification)
@@ -1246,7 +1251,7 @@ class ChargePoint(cp):
         )
 
         self.hass.async_create_task(self.async_update_device_info(kwargs))
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             self.hass.async_create_task(self.post_connect())
@@ -1285,14 +1290,14 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_export.value].value = 0
             if Measurand.power_reactive_export.value in self._metrics:
                 self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         return call_result.StatusNotificationPayload()
 
     @on(Action.FirmwareStatusNotification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotificationPayload()
 
@@ -1374,7 +1379,7 @@ class ChargePoint(cp):
             result = call_result.StartTransactionPayload(
                 id_tag_info={om.status.value: auth_status}, transaction_id=0
             )
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         return result
 
     @on(Action.StopTransaction)
@@ -1407,7 +1412,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_export.value].value = 0
         if Measurand.power_reactive_export.value in self._metrics:
             self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         return call_result.StopTransactionPayload(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1425,7 +1430,7 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.central.update(self.id))
         return call_result.HeartbeatPayload(
             current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ")
         )
@@ -1442,7 +1447,7 @@ class ChargePoint(cp):
     def get_ha_metric(self, measurand: str):
         """Return last known value in HA for given measurand."""
         entity_id = "sensor." + "_".join(
-            [self.central.cpid.lower(), measurand.lower().replace(".", "_")]
+            [self.id.lower(), measurand.lower().replace(".", "_")]
         )
         try:
             value = self.hass.states.get(entity_id).state

@@ -17,10 +17,9 @@ from homeassistant.helpers.entity import DeviceInfo
 
 from .api import CentralSystem
 from .const import (
-    CONF_CPID,
+    CONF_CHARGE_POINTS,
     CONF_MAX_CURRENT,
     DATA_UPDATED,
-    DEFAULT_CPID,
     DEFAULT_MAX_CURRENT,
     DOMAIN,
     ICON,
@@ -53,15 +52,19 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
     entities = []
 
-    for ent in NUMBERS:
-        if ent.key == "maximum_current":
-            ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-            ent.native_max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-        entities.append(OcppNumber(hass, central_system, cp_id, ent))
+    for cp_id in entry.data[CONF_CHARGE_POINTS]:
+        for ent in NUMBERS:
+            if ent.key == "maximum_current":
+                ent.initial_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+                ent.native_max_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+            entities.append(OcppNumber(hass, central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 

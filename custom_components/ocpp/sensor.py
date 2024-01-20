@@ -19,10 +19,9 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
 from .const import (
-    CONF_CPID,
+    CONF_CHARGE_POINTS,
     DATA_UPDATED,
     DEFAULT_CLASS_UNITS_HA,
-    DEFAULT_CPID,
     DOMAIN,
     ICON,
     Measurand,
@@ -41,38 +40,44 @@ class OcppSensorDescription(SensorEntityDescription):
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
     entities = []
-    SENSORS = []
-    for metric in list(
-        set(entry.data[CONF_MONITORED_VARIABLES].split(",") + list(HAChargerSession))
-    ):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
+    for cp_id in entry.data[CONF_CHARGE_POINTS]:
+        SENSORS = []
+        for metric in list(
+            set(
+                entry.data[CONF_CHARGE_POINTS][cp_id][CONF_MONITORED_VARIABLES].split(
+                    ","
+                )
+                + list(HAChargerSession)
             )
-        )
-    for metric in list(HAChargerStatuses) + list(HAChargerDetails):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
-                entity_category=EntityCategory.DIAGNOSTIC,
+        ):
+            SENSORS.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                )
             )
-        )
 
-    for ent in SENSORS:
-        entities.append(
-            ChargePointMetric(
-                hass,
-                central_system,
-                cp_id,
-                ent,
+        for metric in list(HAChargerStatuses) + list(HAChargerDetails):
+            SENSORS.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                )
             )
-        )
+
+        for ent in SENSORS:
+            entities.append(
+                ChargePointMetric(
+                    hass,
+                    central_system,
+                    cp_id,
+                    ent,
+                )
+            )
 
     async_add_devices(entities, False)
 

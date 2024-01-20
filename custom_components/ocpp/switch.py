@@ -15,7 +15,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from ocpp.v16.enums import ChargePointStatus, Measurand
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
+from .const import CONF_CHARGE_POINTS, DOMAIN, ICON
 from .enums import HAChargerServices, HAChargerStatuses
 
 
@@ -63,12 +63,12 @@ SWITCHES: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
     entities = []
 
-    for ent in SWITCHES:
-        entities.append(ChargePointSwitch(central_system, cp_id, ent))
+    for cp_id in entry.data[CONF_CHARGE_POINTS]:
+        for ent in SWITCHES:
+            entities.append(ChargePointSwitch(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 
