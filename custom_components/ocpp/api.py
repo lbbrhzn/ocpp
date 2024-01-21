@@ -147,6 +147,7 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("limit_amps"): cv.positive_float,
         vol.Optional("limit_watts"): cv.positive_int,
+        vol.Optional("conn_id"): cv.positive_int,
         vol.Optional("custom_profile"): cv.string,
     }
 )
@@ -440,14 +441,15 @@ class ChargePoint(cp):
                 return
             amps = call.data.get("limit_amps", None)
             watts = call.data.get("limit_watts", None)
+            id = call.data.get("conn_id", 0)
             custom_profile = call.data.get("custom_profile", None)
             if custom_profile is not None:
                 custom_profile = custom_profile.replace("'", '"')
-                await self.set_charge_rate(profile=json.loads(custom_profile))
+                await self.set_charge_rate(profile=json.loads(custom_profile), conn_id=id)
             elif watts is not None:
-                await self.set_charge_rate(limit_watts=watts)
+                await self.set_charge_rate(limit_watts=watts, conn_id=id)
             elif amps is not None:
-                await self.set_charge_rate(limit_amps=amps)
+                await self.set_charge_rate(limit_amps=amps, conn_id=id)
 
         try:
             self.status = STATE_OK
@@ -633,12 +635,13 @@ class ChargePoint(cp):
         self,
         limit_amps: int = 32,
         limit_watts: int = 22000,
+        conn_id: int = 0,
         profile: dict | None = None,
     ):
         """Set a charging profile with defined limit."""
         if profile is not None:  # assumes advanced user and correct profile format
             req = call.SetChargingProfilePayload(
-                connector_id=0, cs_charging_profiles=profile
+                connector_id=conn_id, cs_charging_profiles=profile
             )
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
@@ -670,7 +673,7 @@ class ChargePoint(cp):
             )
             stack_level = int(resp)
             req = call.SetChargingProfilePayload(
-                connector_id=0,
+                connector_id=conn_id,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level,
@@ -696,7 +699,7 @@ class ChargePoint(cp):
             )
             # try a lower stack level for chargers where level < maximum, not <=
             req = call.SetChargingProfilePayload(
-                connector_id=0,
+                connector_id=conn_id,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level - 1,

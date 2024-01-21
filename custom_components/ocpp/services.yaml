@@ -31,6 +31,13 @@ set_charge_rate:
       advanced: true
       example: 1500
       default: 22000
+    conn_id:
+      name: Connector identifier 
+      description: 0 = all connectors, 1 is first connector
+      required: false
+      advanced: true
+      example: 0
+      default: 0
     custom_profile:
       name: Custom profile
       description: Used to send a custom charge profile to charger (for advanced users only)
