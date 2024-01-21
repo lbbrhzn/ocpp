@@ -129,7 +129,7 @@ async def test_cms_responses(hass, socket_enabled):
             "chargingProfilePurpose": "ChargePointMaxProfile",
             "chargingSchedule": {
                 "chargingRateUnit": "A",
-                "chargingSchedulePeriod": [{"startPeriod":0,"limit":16.0}],
+                "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16.0}],
             },
         }
         data = {"custom_profile": str(prof)}

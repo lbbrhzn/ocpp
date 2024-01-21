@@ -9,7 +9,6 @@ import logging
 from math import sqrt
 import ssl
 import time
-from typing import Optional
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
@@ -442,8 +441,8 @@ class ChargePoint(cp):
             amps = call.data.get("limit_amps", None)
             watts = call.data.get("limit_watts", None)
             custom_profile = call.data.get("custom_profile", None)
-            custom_profile = custom_profile.replace("'", "\"")
             if custom_profile is not None:
+                custom_profile = custom_profile.replace("'", '"')
                 await self.set_charge_rate(profile=json.loads(custom_profile))
             elif watts is not None:
                 await self.set_charge_rate(limit_watts=watts)
@@ -634,7 +633,7 @@ class ChargePoint(cp):
         self,
         limit_amps: int = 32,
         limit_watts: int = 22000,
-        profile: Optional[dict] = None
+        profile: dict | None = None,
     ):
         """Set a charging profile with defined limit."""
         if profile is not None:  # assumes advanced user and correct profile format
