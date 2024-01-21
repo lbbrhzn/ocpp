@@ -122,7 +122,7 @@ async def test_cms_responses(hass, socket_enabled):
         )
         # test custom charge profile for advanced use
         prof = {
-            'chargingProfileId': 8,
+            "chargingProfileId": 8,
             "stackLevel": 6,
             "chargingProfileKind": "Relative",
             "chargingProfilePurpose": "ChargePointMaxProfile",
