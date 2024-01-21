@@ -120,10 +120,9 @@ async def test_cms_responses(hass, socket_enabled):
             service_data={"limit_watts": 3000},
             blocking=True,
         )
-        
-        # note double quotes used for json decode
+        # test custom charge profile for advanced use
         prof = {
-            "chargingProfileId": 8,
+            'chargingProfileId': 8,
             "stackLevel": 6,
             "chargingProfileKind": "Relative",
             "chargingProfilePurpose": "ChargePointMaxProfile",
