@@ -123,16 +123,14 @@ async def test_cms_responses(hass, socket_enabled):
         
         # note double quotes used for json decode
         prof = {
-            "chargingProfileId":8,
-            "stackLevel":6,
-            "chargingProfileKind":"Relative",
-            "chargingProfilePurpose":"ChargePointMaxProfile",
-            "chargingSchedule":{
-                "chargingRateUnit":"A",
-                "chargingSchedulePeriod":[
-                    {"startPeriod":0,"limit":16.0}
-                ]
-            }
+            "chargingProfileId": 8,
+            "stackLevel": 6,
+            "chargingProfileKind": "Relative",
+            "chargingProfilePurpose": "ChargePointMaxProfile",
+            "chargingSchedule": {
+                "chargingRateUnit": "A",
+                "chargingSchedulePeriod": [{"startPeriod":0,"limit":16.0}],
+            },
         }
         data = {"custom_profile": str(prof)}
         await hass.services.async_call(

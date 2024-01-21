@@ -440,8 +440,9 @@ class ChargePoint(cp):
                 _LOGGER.warning("%s charger is currently unavailable", self.id)
                 return
             amps = call.data.get("limit_amps", None)
-            watts = call.data.get("limit_watts",None)
+            watts = call.data.get("limit_watts", None)
             custom_profile = call.data.get("custom_profile", None)
+            custom_profile = custom_profile.replace("'", "\"")
             if custom_profile is not None:
                 await self.set_charge_rate(profile=json.loads(custom_profile))
             elif watts is not None:
@@ -513,15 +514,15 @@ class ChargePoint(cp):
                 handle_data_transfer,
                 TRANS_SERVICE_DATA_SCHEMA,
             )
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_set_charge_rate.value,
-                handle_set_charge_rate,
-                CHRGR_SERVICE_DATA_SCHEMA,
-            )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
                     DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_set_charge_rate.value,
+                    handle_set_charge_rate,
+                    CHRGR_SERVICE_DATA_SCHEMA,
                 )
             if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(
@@ -629,12 +630,17 @@ class ChargePoint(cp):
             )
             return False
 
-    async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000, profile: Optional[dict] = None):
+    async def set_charge_rate(
+        self,
+        limit_amps: int = 32,
+        limit_watts: int = 22000,
+        profile: Optional[dict] = None
+    ):
         """Set a charging profile with defined limit."""
-        if profile is not None: # assumes advanced user and correct profile format
+        if profile is not None:  # assumes advanced user and correct profile format
             req = call.SetChargingProfilePayload(
-                connector_id=0,
-                cs_charging_profiles=profile)
+                connector_id=0, cs_charging_profiles=profile
+            )
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
                 return True
