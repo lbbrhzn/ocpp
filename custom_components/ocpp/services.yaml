@@ -33,7 +33,7 @@ set_charge_rate:
       default: 22000
     conn_id:
       name: Connector identifier 
-      description: Optional profile 0 = all connectors (default), 1 is first connector
+      description: Optional, 0 = all connectors (default), 1 is first connector
       required: false
       advanced: true
       example: 0
