@@ -148,7 +148,7 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Optional("limit_amps"): cv.positive_float,
         vol.Optional("limit_watts"): cv.positive_int,
         vol.Optional("conn_id"): cv.positive_int,
-        vol.Optional("custom_profile"): cv.string,
+        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
     }
 )
 
@@ -444,9 +444,11 @@ class ChargePoint(cp):
             id = call.data.get("conn_id", 0)
             custom_profile = call.data.get("custom_profile", None)
             if custom_profile is not None:
-                custom_profile = custom_profile.replace("'", '"')
+                if type(custom_profile) is str:
+                    custom_profile = custom_profile.replace("'", '"')
+                    custom_profile = json.loads(custom_profile)
                 await self.set_charge_rate(
-                    profile=json.loads(custom_profile), conn_id=id
+                    profile=custom_profile, conn_id=id
                 )
             elif watts is not None:
                 await self.set_charge_rate(limit_watts=watts, conn_id=id)
