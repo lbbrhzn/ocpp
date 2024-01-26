@@ -447,9 +447,7 @@ class ChargePoint(cp):
                 if type(custom_profile) is str:
                     custom_profile = custom_profile.replace("'", '"')
                     custom_profile = json.loads(custom_profile)
-                await self.set_charge_rate(
-                    profile=custom_profile, conn_id=id
-                )
+                await self.set_charge_rate(profile=custom_profile, conn_id=id)
             elif watts is not None:
                 await self.set_charge_rate(limit_watts=watts, conn_id=id)
             elif amps is not None:
