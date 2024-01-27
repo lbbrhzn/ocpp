@@ -9,7 +9,7 @@ from homeassistant.components.switch import (
     SwitchEntity,
     SwitchEntityDescription,
 )
-from homeassistant.const import POWER_KILO_WATT
+from homeassistant.const import UnitOfPower
 from homeassistant.helpers.entity import DeviceInfo
 
 from ocpp.v16.enums import ChargePointStatus, Measurand
@@ -32,6 +32,8 @@ class OcppSwitchDescription(SwitchEntityDescription):
     metric_condition: str | None = None
     default_state: bool = False
 
+
+POWER_KILO_WATT = UnitOfPower.KILO_WATT
 
 SWITCHES: Final = [
     OcppSwitchDescription(

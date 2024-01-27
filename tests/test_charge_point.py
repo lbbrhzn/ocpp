@@ -90,6 +90,7 @@ async def test_cms_responses(hass, socket_enabled):
             csvcs.service_get_diagnostics,
             csvcs.service_clear_profile,
             csvcs.service_data_transfer,
+            csvcs.service_set_charge_rate,
         ]
         for service in SERVICES:
             data = {}
@@ -103,6 +104,8 @@ async def test_cms_responses(hass, socket_enabled):
                 data = {"upload_url": "https://webhook.site/abc"}
             if service == csvcs.service_data_transfer:
                 data = {"vendor_id": "ABC"}
+            if service == csvcs.service_set_charge_rate:
+                data = {"limit_amps": 30}
 
             await hass.services.async_call(
                 OCPP_DOMAIN,
@@ -110,6 +113,31 @@ async def test_cms_responses(hass, socket_enabled):
                 service_data=data,
                 blocking=True,
             )
+        # test additional set charge rate options
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_set_charge_rate,
+            service_data={"limit_watts": 3000},
+            blocking=True,
+        )
+        # test custom charge profile for advanced use
+        prof = {
+            "chargingProfileId": 8,
+            "stackLevel": 6,
+            "chargingProfileKind": "Relative",
+            "chargingProfilePurpose": "ChargePointMaxProfile",
+            "chargingSchedule": {
+                "chargingRateUnit": "A",
+                "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16.0}],
+            },
+        }
+        data = {"custom_profile": str(prof)}
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_set_charge_rate,
+            service_data=data,
+            blocking=True,
+        )
 
         for number in NUMBERS:
             # test setting value of number slider

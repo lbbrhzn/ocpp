@@ -15,23 +15,36 @@ set_charge_rate:
       # Field name as shown in UI
       name: Limit (A)
       # Description of the field
-      description: Maximum charge rate in Amps
+      description: Maximum charge rate in Amps (optional)
       # Whether or not field is required (default = false)
       required: false
       # Advanced fields are only shown when the advanced mode is enabled for the user (default = false)
-      advanced: true
+      advanced: false
       # Example value that can be passed for this field
       example: 16
       # The default field value
       default: 32
     limit_watts:
       name: Limit (W)
-      description: Maximum charge rate in Watts
+      description: Maximum charge rate in Watts (optional)
       required: false
       advanced: true
       example: 1500
       default: 22000
-      
+    conn_id:
+      name: Connector identifier 
+      description: Optional, 0 = all connectors (default), 1 is first connector
+      required: false
+      advanced: true
+      example: 0
+      default: 0
+    custom_profile:
+      name: Custom profile
+      description: Used to send a custom charge profile to charger (for advanced users only use >- or '' to ensure profile is a string variable)
+      required: false
+      advanced: true
+      example: '{"chargingProfileId":8,"stackLevel":0,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16}]}}'
+
 clear_profile:
   name: Clear charging profiles
   description: Clears all charging profiles (limits) set (dependent on charger support)
