@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import json
 import logging
 from math import sqrt
 import ssl
@@ -11,7 +12,7 @@ import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, TIME_MINUTES
+from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
@@ -112,6 +113,8 @@ logging.getLogger(DOMAIN).setLevel(logging.INFO)
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
 
+TIME_MINUTES = UnitOfTime.MINUTES
+
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("firmware_url"): cv.string,
@@ -139,6 +142,14 @@ TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("vendor_id"): cv.string,
         vol.Optional("message_id"): cv.string,
         vol.Optional("data"): cv.string,
+    }
+)
+CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("limit_amps"): cv.positive_float,
+        vol.Optional("limit_watts"): cv.positive_int,
+        vol.Optional("conn_id"): cv.positive_int,
+        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
     }
 )
 
@@ -366,7 +377,7 @@ class ChargePoint(cp):
         self._metrics[csess.session_time.value].unit = TIME_MINUTES
         self._metrics[csess.session_energy.value].unit = UnitOfMeasure.kwh.value
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
-        self._attr_supported_features: int = 0
+        self._attr_supported_features = prof.NONE
         self._metrics[cstat.reconnects.value].value: int = 0
 
     async def post_connect(self):
@@ -423,6 +434,25 @@ class ChargePoint(cp):
             message = call.data.get("message_id", "")
             data = call.data.get("data", "")
             await self.data_transfer(vendor, message, data)
+
+        async def handle_set_charge_rate(call):
+            """Handle the data transfer service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            amps = call.data.get("limit_amps", None)
+            watts = call.data.get("limit_watts", None)
+            id = call.data.get("conn_id", 0)
+            custom_profile = call.data.get("custom_profile", None)
+            if custom_profile is not None:
+                if type(custom_profile) is str:
+                    custom_profile = custom_profile.replace("'", '"')
+                    custom_profile = json.loads(custom_profile)
+                await self.set_charge_rate(profile=custom_profile, conn_id=id)
+            elif watts is not None:
+                await self.set_charge_rate(limit_watts=watts, conn_id=id)
+            elif amps is not None:
+                await self.set_charge_rate(limit_amps=amps, conn_id=id)
 
         try:
             self.status = STATE_OK
@@ -494,6 +524,12 @@ class ChargePoint(cp):
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
                     DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_set_charge_rate.value,
+                    handle_set_charge_rate,
+                    CHRGR_SERVICE_DATA_SCHEMA,
                 )
             if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(
@@ -603,8 +639,28 @@ class ChargePoint(cp):
             )
             return False
 
-    async def set_charge_rate(self, limit_amps: int = 32, limit_watts: int = 22000):
+    async def set_charge_rate(
+        self,
+        limit_amps: int = 32,
+        limit_watts: int = 22000,
+        conn_id: int = 0,
+        profile: dict | None = None,
+    ):
         """Set a charging profile with defined limit."""
+        if profile is not None:  # assumes advanced user and correct profile format
+            req = call.SetChargingProfilePayload(
+                connector_id=conn_id, cs_charging_profiles=profile
+            )
+            resp = await self.call(req)
+            if resp.status == ChargingProfileStatus.accepted:
+                return True
+            else:
+                _LOGGER.warning("Failed with response: %s", resp.status)
+                await self.notify_ha(
+                    f"Warning: Set charging profile failed with response {resp.status}"
+                )
+                return False
+
         if prof.SMART in self._attr_supported_features:
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
@@ -625,7 +681,7 @@ class ChargePoint(cp):
             )
             stack_level = int(resp)
             req = call.SetChargingProfilePayload(
-                connector_id=0,
+                connector_id=conn_id,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level,
@@ -651,7 +707,7 @@ class ChargePoint(cp):
             )
             # try a lower stack level for chargers where level < maximum, not <=
             req = call.SetChargingProfilePayload(
-                connector_id=0,
+                connector_id=conn_id,
                 cs_charging_profiles={
                     om.charging_profile_id.value: 8,
                     om.stack_level.value: stack_level - 1,

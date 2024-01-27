@@ -7,6 +7,8 @@ All OCPP 1.6j compatible devices should be supported, but not every device offer
 
 ## [ABB Terra AC-W11-G5-R-0](https://new.abb.com/products/6AGC082156/tac-w11-g5-r-0)
 
+## [ABB Terra AC-W22-T-0](https://new.abb.com/products/6AGC081279/tac-w22-t-0)
+
 ## [Alfen - Eve Single Pro-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 
 ## [Alfen - Eve Single S-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
@@ -25,6 +27,10 @@ match transactions and it won't report some meter values such as session time.
 
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/) 
 (Ability to configure a custom OCPP server such as HA is being discontinued)
+
+## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
+
+## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)  
 (has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
