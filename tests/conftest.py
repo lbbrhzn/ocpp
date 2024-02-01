@@ -56,7 +56,7 @@ def error_get_data_fixture():
 def error_get_data_fixture():
     """Simulate error when retrieving data from API."""
     with patch(
-        "custom_components.ocpp.api.ChargePoint.on_connect",
+        "custom_components.ocpp.api.CentralSystem.on_connect",
         side_effect=asyncio.TimeoutError,
     ):
         yield
