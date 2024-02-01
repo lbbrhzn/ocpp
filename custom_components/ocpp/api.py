@@ -92,7 +92,6 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
-    EVENT_CHARGER_CONNECTED,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
@@ -545,7 +544,6 @@ class ChargePoint(cp):
                     GDIAG_SERVICE_DATA_SCHEMA,
                 )
             self.post_connect_success = True
-            self.hass.bus.fire(EVENT_CHARGER_CONNECTED)
             _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
 
             # nice to have, but not needed for integration to function

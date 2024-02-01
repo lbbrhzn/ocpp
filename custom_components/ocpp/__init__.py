@@ -1,11 +1,9 @@
 """Custom integration for Chargers that support the Open Charge Point Protocol."""
 
-import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -67,10 +65,6 @@ async def async_setup(hass: HomeAssistant, config: Config):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up this integration from config entry."""
 
-    def handle_event(event):
-        """Called when charger successfully connects"""
-        pass
-
     if hass.data.get(DOMAIN) is None:
         hass.data.setdefault(DOMAIN, {})
         _LOGGER.info(entry.data)
@@ -97,8 +91,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
-
-    hass.bus.async_listen_once(EVENT_CHARGER_CONNECTED, handle_event)
 
     for platform in PLATFORMS:
         hass.async_create_task(
