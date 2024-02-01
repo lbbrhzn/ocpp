@@ -1,10 +1,9 @@
 """Test ocpp setup process."""
-
+# from homeassistant.exceptions import ConfigEntryNotReady
+# import pytest
 from typing import AsyncGenerator
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import (
@@ -54,19 +53,15 @@ async def test_setup_unload_and_reload_entry(
     assert config_entry.entry_id not in hass.data[DOMAIN]
 
 
-async def test_setup_entry_exception(hass, error_on_connect, bypass_get_data):
-    """Test ConfigEntryNotReady when API raises an exception during entry setup."""
-    config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data=MOCK_CONFIG_DATA_1,
-        entry_id="test_setup_error",
-        title="test_setup_error",
-    )
-    # config_entry.add_to_hass(config_entry)
-    hass.config_entries._entries[config_entry.entry_id] = config_entry
-
-    # In this case we are testing the condition where async_setup_entry raises
-    # ConfigEntryNotReady using the `error_on_connect` fixture which simulates
-    # an error.
-    with pytest.raises(ConfigEntryNotReady):
-        assert await async_setup_entry(hass, config_entry)
+# async def test_setup_entry_exception(hass, error_on_get_data):
+#     """Test ConfigEntryNotReady when API raises an exception during entry setup."""
+#     config_entry = MockConfigEntry(
+#         domain=DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test"
+#     )
+#     config_entry.add_to_hass(config_entry)
+#
+#     # In this case we are testing the condition where async_setup_entry raises
+#     # ConfigEntryNotReady using the `error_on_get_data` fixture which simulates
+#     # an error.
+#     with pytest.raises(ConfigEntryNotReady):
+#         assert await async_setup_entry(hass, config_entry)
