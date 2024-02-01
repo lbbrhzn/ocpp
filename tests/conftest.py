@@ -59,4 +59,4 @@ def error_get_data_fixture():
         "custom_components.ocpp.api.ChargePoint.on_connect",
         side_effect=asyncio.TimeoutError,
     ):
-    yield
+        yield
