@@ -62,7 +62,8 @@ async def test_setup_entry_exception(hass, error_on_connect):
         entry_id="test_setup_error",
         title="test_setup_error",
     )
-    config_entry.add_to_hass(config_entry)
+    # config_entry.add_to_hass(config_entry)
+    hass.config_entries._entries[config_entry.entry_id] = config_entry
 
     # In this case we are testing the condition where async_setup_entry raises
     # ConfigEntryNotReady using the `error_on_connect` fixture which simulates

@@ -50,6 +50,7 @@ def error_get_data_fixture():
     # ):
     yield
 
+
 # In this fixture, we are forcing calls to on_connect to raise a TimeOut Exception. This is useful
 # for exception handling.
 @pytest.fixture(name="error_on_connect")
