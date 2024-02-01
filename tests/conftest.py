@@ -53,7 +53,7 @@ def error_get_data_fixture():
 # In this fixture, we are forcing calls to on_connect to raise a TimeOut Exception. This is useful
 # for exception handling.
 @pytest.fixture(name="error_on_connect")
-def error_get_data_fixture():
+def error_on_connect():
     """Simulate error when retrieving data from API."""
     with patch(
         "custom_components.ocpp.api.CentralSystem.on_connect",

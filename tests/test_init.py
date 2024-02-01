@@ -1,10 +1,10 @@
 """Test ocpp setup process."""
 
-import pytest
 from typing import AsyncGenerator
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import (
