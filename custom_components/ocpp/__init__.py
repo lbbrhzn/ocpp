@@ -23,7 +23,6 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DOMAIN,
-    EVENT_CHARGER_CONNECTED,
     PLATFORMS,
 )
 
