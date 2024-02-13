@@ -2,7 +2,7 @@
 pip>=21.0,<22.4
 pre-commit==3.6.0
 bandit==1.7.7
-black==24.1.0
+black==24.2.0
 flake8==7.0.0
 isort==5.13.2
 pre-comit-hooks==4.1.0
