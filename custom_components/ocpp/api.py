@@ -486,7 +486,9 @@ class ChargePoint(cp):
                 )
             else:
                 _LOGGER.debug(f"'{self.id}' measurands not configurable by OCPP")
-                resp = await self.get_configuration(ckey.meter_values_sampled_data.value)
+                resp = await self.get_configuration(
+                    ckey.meter_values_sampled_data.value
+                )
                 accepted_measurands = resp
                 _LOGGER.debug(f"'{self.id}' allowed measurands '{accepted_measurands}'")
 
