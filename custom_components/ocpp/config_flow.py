@@ -3,6 +3,8 @@ from homeassistant import config_entries
 import voluptuous as vol
 
 from .const import (
+    CONF_ADD_ANOTHER_CP,
+    CONF_CHARGE_POINTS,
     CONF_CPID,
     CONF_CSID,
     CONF_FORCE_SMART_CHARGING,
@@ -38,9 +40,10 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
+    ERROR_EXISTING_CP,
 )
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+STEP_CS_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
@@ -48,13 +51,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SSL_CERTFILE_PATH, default=DEFAULT_SSL_CERTFILE_PATH): str,
         vol.Required(CONF_SSL_KEYFILE_PATH, default=DEFAULT_SSL_KEYFILE_PATH): str,
         vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
-        vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
-        vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
-        vol.Required(
-            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
-        ): str,
-        vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
-        vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
         vol.Required(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, default=DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         ): int,
@@ -70,9 +66,22 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_SKIP_SCHEMA_VALIDATION, default=DEFAULT_SKIP_SCHEMA_VALIDATION
         ): bool,
+    }
+)
+
+STEP_CP_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
+        vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
+        vol.Required(
+            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
+        ): str,
+        vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
+        vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
         vol.Required(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
+        vol.Required(CONF_ADD_ANOTHER_CP): bool,
     }
 )
 
@@ -94,9 +103,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Todo: validate the user input
             self._data = user_input
-            self._data[CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
-            return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
+            self._data[CONF_CHARGE_POINTS] = {}
+            return await self.async_step_charge()
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="user", data_schema=STEP_CS_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_charge(self, user_input=None):
+        """Handle charge point configuration."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if user_input[CONF_CPID] in self._data[CONF_CHARGE_POINTS]:
+                errors["base"] = ERROR_EXISTING_CP
+
+            if not errors:
+                self._data[CONF_CHARGE_POINTS][user_input[CONF_CPID]] = {
+                    CONF_MAX_CURRENT: user_input[CONF_MAX_CURRENT],
+                    CONF_MONITORED_VARIABLES: user_input[CONF_MONITORED_VARIABLES],
+                    CONF_METER_INTERVAL: user_input[CONF_METER_INTERVAL],
+                    CONF_IDLE_INTERVAL: user_input[CONF_IDLE_INTERVAL],
+                    CONF_FORCE_SMART_CHARGING: user_input[CONF_FORCE_SMART_CHARGING],
+                }
+
+                if user_input.get(CONF_ADD_ANOTHER_CP, False):
+                    return await self.async_step_charge()
+
+                return self.async_create_entry(
+                    title=self._data[CONF_CSID], data=self._data
+                )
+
+        return self.async_show_form(
+            step_id="charge", data_schema=STEP_CP_DATA_SCHEMA, errors=errors
         )

@@ -13,7 +13,7 @@ from homeassistant.components.button import (
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, DEFAULT_CPID, DOMAIN
+from .const import CONF_CHARGE_POINTS, DOMAIN
 from .enums import HAChargerServices
 
 
@@ -46,12 +46,12 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
 
     entities = []
 
-    for ent in BUTTONS:
-        entities.append(ChargePointButton(central_system, cp_id, ent))
+    for cp_id in entry.data[CONF_CHARGE_POINTS]:
+        for ent in BUTTONS:
+            entities.append(ChargePointButton(central_system, cp_id, ent))
 
     async_add_devices(entities, False)
 

@@ -2,7 +2,7 @@
     "config": {
         "step": {
             "user": {
-                "title": "OCPP Configuration",
+                "title": "Central Station Configuration",
                 "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
                 "data": {
                     "host": "Central system host address",
@@ -11,17 +11,23 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
-                    "cpid": "Charge point identity",
-                    "max_current": "Maximum charging current",
-                    "meter_interval": "Charging sample interval (seconds)",
-                    "idle_interval": "Charger idle sampling interval (seconds)",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (seconds)",
                     "websocket_ping_timeout": "Websocket ping timeout (seconds)",
-                    "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Force Smart Charging feature profile"
+                    "skip_schema_validation": "Skip OCPP schema validation"
                 }
+            },
+            "charge": {
+              "title": "Charge Point Configuration",
+              "data": {
+                  "cpid": "Charge point identity",
+                  "max_current": "Maximum charging current",
+                  "meter_interval": "Charging sample interval (seconds)",
+                  "idle_interval": "Charger idle sampling interval (seconds)",
+                  "force_smart_charging": "Force Smart Charging feature profile",
+                  "add_another_cp": "Add another charge point"
+              }
             },
             "measurands": {
                 "title": "OCPP Measurands",
@@ -54,7 +60,8 @@
         },
         "error": {
             "auth": "Username/Password is wrong.",
-            "measurand": "Unknown measurand"
+            "measurand": "Unknown measurand",
+            "cp_add_existing": "Charge point with the same identity already added."
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed."

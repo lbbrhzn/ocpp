@@ -7,8 +7,10 @@ import homeassistant.const as ha
 
 from ocpp.v16.enums import Measurand, UnitOfMeasure
 
+CONF_ADD_ANOTHER_CP = "add_another_cp"
 CONF_AUTH_LIST = "authorization_list"
 CONF_AUTH_STATUS = "authorization_status"
+CONF_CHARGE_POINTS = "charge_points"
 CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CSID = "csid"
@@ -56,6 +58,7 @@ DEFAULT_WEBSOCKET_PING_TRIES = 2
 DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
 DOMAIN = "ocpp"
+ERROR_EXISTING_CP = "cp_add_existing"
 CONFIG = "config"
 ICON = "mdi:ev-station"
 SLEEP_TIME = 60
