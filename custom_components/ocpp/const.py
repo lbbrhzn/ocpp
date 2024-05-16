@@ -118,7 +118,6 @@ UNITS_OCCP_TO_HA = {
     UnitOfMeasure.fahrenheit: ha.UnitOfTemperature.FAHRENHEIT,
     UnitOfMeasure.k: ha.UnitOfTemperature.KELVIN,
     UnitOfMeasure.percent: ha.PERCENTAGE,
-    UnitOfMeasure.hertz: ha.UnitOfFrequency.HERTZ,
 }
 
 # Where an occp unit is not reported and only one possibility assign HA unit on device class
