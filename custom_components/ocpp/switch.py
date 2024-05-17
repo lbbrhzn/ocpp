@@ -140,20 +140,3 @@ class ChargePointSwitch(SwitchEntity):
                 self.cp_id, self.entity_description.off_action
             )
         self._state = not resp
-
-    @property
-    def current_power_w(self) -> Any:
-        """Return the current power usage in W."""
-        if self.entity_description.key == "charge_control":
-            value = self.central_system.get_metric(
-                self.cp_id, Measurand.power_active_import.value
-            )
-            if (
-                self.central_system.get_ha_unit(
-                    self.cp_id, Measurand.power_active_import.value
-                )
-                == POWER_KILO_WATT
-            ):
-                value = value * 1000
-            return value
-        return None
