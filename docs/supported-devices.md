@@ -42,8 +42,8 @@ All basic functions work properly
 
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 
-## [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
-The Wallbox Pulsar Max has been verified.
+## [Wallbox Pulsar & Copper SB](https://wallbox.com/en_uk/wallbox-pulsar)
+The Wallbox Pulsar and Copper SB have been verified.
 In the OCPP-config, leave the password field empty.
 
 ## Others
