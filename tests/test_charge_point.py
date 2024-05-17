@@ -529,7 +529,7 @@ class ChargePoint(cpclass):
         """Handle a get configuration requests."""
         if key[0] == ConfigurationKey.supported_feature_profiles.value:
             if self.accept is True:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[
                         {
                             "key": key[0],
@@ -539,7 +539,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[
                         {
                             "key": key[0],
@@ -549,26 +549,26 @@ class ChargePoint(cpclass):
                     ]
                 )
         if key[0] == ConfigurationKey.heartbeat_interval.value:
-            return call_result.GetConfigurationPayload(
+            return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
             )
         if key[0] == ConfigurationKey.number_of_connectors.value:
-            return call_result.GetConfigurationPayload(
+            return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "1"}]
             )
         if key[0] == ConfigurationKey.web_socket_ping_interval.value:
             if self.accept is True:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[
                         {"key": key[0], "readonly": False, "value": "60"}
                     ]
                 )
             else:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     unknown_key=["WebSocketPingInterval"]
                 )
         if key[0] == ConfigurationKey.meter_values_sampled_data.value:
-            return call_result.GetConfigurationPayload(
+            return call_result.GetConfiguration(
                 configuration_key=[
                     {
                         "key": key[0],
@@ -579,38 +579,38 @@ class ChargePoint(cpclass):
             )
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
             if self.accept is True:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[
                         {"key": key[0], "readonly": False, "value": "60"}
                     ]
                 )
             else:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
                 )
         if (
             key[0]
             == ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value
         ):
-            return call_result.GetConfigurationPayload(
+            return call_result.GetConfiguration(
                 configuration_key=[
                     {"key": key[0], "readonly": False, "value": "Current"}
                 ]
             )
         if key[0] == ConfigurationKey.authorize_remote_tx_requests.value:
             if self.accept is True:
-                return call_result.GetConfigurationPayload(
+                return call_result.GetConfiguration(
                     configuration_key=[
                         {"key": key[0], "readonly": False, "value": "false"}
                     ]
                 )
             else:
-                return call_result.GetConfigurationPayload(unknown_key=[key[0]])
+                return call_result.GetConfiguration(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.charge_profile_max_stack_level.value:
-            return call_result.GetConfigurationPayload(
+            return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "3"}]
             )
-        return call_result.GetConfigurationPayload(
+        return call_result.GetConfiguration(
             configuration_key=[{"key": key[0], "readonly": False, "value": ""}]
         )
 
@@ -618,108 +618,96 @@ class ChargePoint(cpclass):
     def on_change_configuration(self, **kwargs):
         """Handle a get configuration request."""
         if self.accept is True:
-            return call_result.ChangeConfigurationPayload(ConfigurationStatus.accepted)
+            return call_result.ChangeConfiguration(ConfigurationStatus.accepted)
         else:
-            return call_result.ChangeConfigurationPayload(ConfigurationStatus.rejected)
+            return call_result.ChangeConfiguration(ConfigurationStatus.rejected)
 
     @on(Action.ChangeAvailability)
     def on_change_availability(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
-            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.accepted)
+            return call_result.ChangeAvailability(AvailabilityStatus.accepted)
         else:
-            return call_result.ChangeAvailabilityPayload(AvailabilityStatus.rejected)
+            return call_result.ChangeAvailability(AvailabilityStatus.rejected)
 
     @on(Action.UnlockConnector)
     def on_unlock_connector(self, **kwargs):
         """Handle unlock request."""
         if self.accept is True:
-            return call_result.UnlockConnectorPayload(UnlockStatus.unlocked)
+            return call_result.UnlockConnector(UnlockStatus.unlocked)
         else:
-            return call_result.UnlockConnectorPayload(UnlockStatus.unlock_failed)
+            return call_result.UnlockConnector(UnlockStatus.unlock_failed)
 
     @on(Action.Reset)
     def on_reset(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
-            return call_result.ResetPayload(ResetStatus.accepted)
+            return call_result.Reset(ResetStatus.accepted)
         else:
-            return call_result.ResetPayload(ResetStatus.rejected)
+            return call_result.Reset(ResetStatus.rejected)
 
     @on(Action.RemoteStartTransaction)
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         if self.accept is True:
             asyncio.create_task(self.send_start_transaction())
-            return call_result.RemoteStartTransactionPayload(
-                RemoteStartStopStatus.accepted
-            )
+            return call_result.RemoteStartTransaction(RemoteStartStopStatus.accepted)
         else:
-            return call_result.RemoteStopTransactionPayload(
-                RemoteStartStopStatus.rejected
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
     @on(Action.RemoteStopTransaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
         if self.accept is True:
-            return call_result.RemoteStopTransactionPayload(
-                RemoteStartStopStatus.accepted
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.accepted)
         else:
-            return call_result.RemoteStopTransactionPayload(
-                RemoteStartStopStatus.rejected
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
         if self.accept is True:
-            return call_result.SetChargingProfilePayload(ChargingProfileStatus.accepted)
+            return call_result.SetChargingProfile(ChargingProfileStatus.accepted)
         else:
-            return call_result.SetChargingProfilePayload(ChargingProfileStatus.rejected)
+            return call_result.SetChargingProfile(ChargingProfileStatus.rejected)
 
     @on(Action.ClearChargingProfile)
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
         if self.accept is True:
-            return call_result.ClearChargingProfilePayload(
-                ClearChargingProfileStatus.accepted
-            )
+            return call_result.ClearChargingProfile(ClearChargingProfileStatus.accepted)
         else:
-            return call_result.ClearChargingProfilePayload(
-                ClearChargingProfileStatus.unknown
-            )
+            return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
     @on(Action.TriggerMessage)
     def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
         if self.accept is True:
-            return call_result.TriggerMessagePayload(TriggerMessageStatus.accepted)
+            return call_result.TriggerMessage(TriggerMessageStatus.accepted)
         else:
-            return call_result.TriggerMessagePayload(TriggerMessageStatus.rejected)
+            return call_result.TriggerMessage(TriggerMessageStatus.rejected)
 
     @on(Action.UpdateFirmware)
     def on_update_firmware(self, **kwargs):
         """Handle update firmware request."""
-        return call_result.UpdateFirmwarePayload()
+        return call_result.UpdateFirmware()
 
     @on(Action.GetDiagnostics)
     def on_get_diagnostics(self, **kwargs):
         """Handle get diagnostics request."""
-        return call_result.GetDiagnosticsPayload()
+        return call_result.GetDiagnostics()
 
     @on(Action.DataTransfer)
     def on_data_transfer(self, **kwargs):
         """Handle get data transfer request."""
         if self.accept is True:
-            return call_result.DataTransferPayload(DataTransferStatus.accepted)
+            return call_result.DataTransfer(DataTransferStatus.accepted)
         else:
-            return call_result.DataTransferPayload(DataTransferStatus.rejected)
+            return call_result.DataTransfer(DataTransferStatus.rejected)
 
     async def send_boot_notification(self):
         """Send a boot notification."""
-        request = call.BootNotificationPayload(
+        request = call.BootNotification(
             charge_point_model="Optimus", charge_point_vendor="The Mobility House"
         )
         resp = await self.call(request)
@@ -727,35 +715,31 @@ class ChargePoint(cpclass):
 
     async def send_heartbeat(self):
         """Send a heartbeat."""
-        request = call.HeartbeatPayload()
+        request = call.Heartbeat()
         resp = await self.call(request)
         assert len(resp.current_time) > 0
 
     async def send_authorize(self):
         """Send an authorize request."""
-        request = call.AuthorizePayload(id_tag="test_cp")
+        request = call.Authorize(id_tag="test_cp")
         resp = await self.call(request)
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted
 
     async def send_firmware_status(self):
         """Send a firmware status notification."""
-        request = call.FirmwareStatusNotificationPayload(
-            status=FirmwareStatus.downloaded
-        )
+        request = call.FirmwareStatusNotification(status=FirmwareStatus.downloaded)
         resp = await self.call(request)
         assert resp is not None
 
     async def send_diagnostics_status(self):
         """Send a diagnostics status notification."""
-        request = call.DiagnosticsStatusNotificationPayload(
-            status=DiagnosticsStatus.uploaded
-        )
+        request = call.DiagnosticsStatusNotification(status=DiagnosticsStatus.uploaded)
         resp = await self.call(request)
         assert resp is not None
 
     async def send_data_transfer(self):
         """Send a data transfer."""
-        request = call.DataTransferPayload(
+        request = call.DataTransfer(
             vendor_id="The Mobility House",
             message_id="Test123",
             data="Test data transfer",
@@ -765,7 +749,7 @@ class ChargePoint(cpclass):
 
     async def send_start_transaction(self, meter_start: int = 12345):
         """Send a start transaction notification."""
-        request = call.StartTransactionPayload(
+        request = call.StartTransaction(
             connector_id=1,
             id_tag="test_cp",
             meter_start=meter_start,
@@ -777,7 +761,7 @@ class ChargePoint(cpclass):
 
     async def send_status_notification(self):
         """Send a status notification."""
-        request = call.StatusNotificationPayload(
+        request = call.StatusNotification(
             connector_id=0,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.suspended_ev,
@@ -787,7 +771,7 @@ class ChargePoint(cpclass):
             vendor_error_code="Test error",
         )
         resp = await self.call(request)
-        request = call.StatusNotificationPayload(
+        request = call.StatusNotification(
             connector_id=1,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.charging,
@@ -797,7 +781,7 @@ class ChargePoint(cpclass):
             vendor_error_code="Test error",
         )
         resp = await self.call(request)
-        request = call.StatusNotificationPayload(
+        request = call.StatusNotification(
             connector_id=2,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.available,
@@ -816,7 +800,7 @@ class ChargePoint(cpclass):
         while self.active_transactionId == 0 and n < 2:
             await asyncio.sleep(1)
             n += 1
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             transaction_id=self.active_transactionId,
             meter_value=[
@@ -960,7 +944,7 @@ class ChargePoint(cpclass):
         """Send line voltages."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             transaction_id=self.active_transactionId,
             meter_value=[
@@ -1002,7 +986,7 @@ class ChargePoint(cpclass):
         """Send erroneous voltage phase."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             transaction_id=self.active_transactionId,
             meter_value=[
@@ -1036,7 +1020,7 @@ class ChargePoint(cpclass):
         """Send periodic energy meter value with kWh unit."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             transaction_id=self.active_transactionId,
             meter_value=[
@@ -1061,7 +1045,7 @@ class ChargePoint(cpclass):
         """Send periodic main meter value. Main meter values dont have transaction_id."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             meter_value=[
                 {
@@ -1084,7 +1068,7 @@ class ChargePoint(cpclass):
     async def send_meter_clock_data(self):
         """Send periodic meter data notification."""
         self.active_transactionId = 0
-        request = call.MeterValuesPayload(
+        request = call.MeterValues(
             connector_id=1,
             transaction_id=self.active_transactionId,
             meter_value=[
@@ -1135,7 +1119,7 @@ class ChargePoint(cpclass):
         while self.active_transactionId == 0 and n < 2:
             await asyncio.sleep(1)
             n += 1
-        request = call.StopTransactionPayload(
+        request = call.StopTransaction(
             meter_stop=54321,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             transaction_id=self.active_transactionId,
@@ -1147,7 +1131,7 @@ class ChargePoint(cpclass):
 
     async def send_security_event(self):
         """Send a security event notification."""
-        request = call.SecurityEventNotificationPayload(
+        request = call.SecurityEventNotification(
             type="SettingSystemTime",
             timestamp="2022-09-29T20:58:29Z",
             tech_info="BootNotification",
