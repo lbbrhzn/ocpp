@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-import websockets.connection
+import websockets.protocol
 import websockets.server
 
 from ocpp.exceptions import NotImplementedError
