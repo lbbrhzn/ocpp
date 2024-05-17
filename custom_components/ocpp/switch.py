@@ -12,7 +12,7 @@ from homeassistant.components.switch import (
 from homeassistant.const import UnitOfPower
 from homeassistant.helpers.entity import DeviceInfo
 
-from ocpp.v16.enums import ChargePointStatus, Measurand
+from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
