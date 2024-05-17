@@ -62,6 +62,7 @@ jobs:
   tests:
     runs-on: "ubuntu-latest"
     name: Run tests
+    environment: continuous-integration
     steps:
       - name: Check out code from GitHub
         uses: "actions/checkout@v4"
