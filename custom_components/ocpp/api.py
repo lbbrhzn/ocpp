@@ -1163,7 +1163,7 @@ class ChargePoint(cp):
                     self._metrics[metric].value = float(metric_value)
                     self._metrics[metric].unit = metric_unit
 
-    @on(Action.MeterValues)
+    @on(Action.meter_values)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
 
@@ -1288,7 +1288,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.MeterValues()
 
-    @on(Action.BootNotification)
+    @on(Action.boot_notification)
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
         resp = call_result.BootNotification(
@@ -1319,7 +1319,7 @@ class ChargePoint(cp):
             self.hass.async_create_task(self.post_connect())
         return resp
 
-    @on(Action.StatusNotification)
+    @on(Action.status_notification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         """Handle a status notification."""
 
@@ -1355,7 +1355,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.StatusNotification()
 
-    @on(Action.FirmwareStatusNotification)
+    @on(Action.firmware_status_notification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
@@ -1363,7 +1363,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotification()
 
-    @on(Action.DiagnosticsStatusNotification)
+    @on(Action.diagnostics_status_notification)
     def on_diagnostics_status(self, status, **kwargs):
         """Handle diagnostics status notification."""
         _LOGGER.info("Diagnostics upload status: %s", status)
@@ -1372,7 +1372,7 @@ class ChargePoint(cp):
         )
         return call_result.DiagnosticsStatusNotification()
 
-    @on(Action.SecurityEventNotification)
+    @on(Action.security_event_notification)
     def on_security_event(self, type, timestamp, **kwargs):
         """Handle security event notification."""
         _LOGGER.info(
@@ -1415,14 +1415,14 @@ class ChargePoint(cp):
             )
         return auth_status
 
-    @on(Action.Authorize)
+    @on(Action.authorize)
     def on_authorize(self, id_tag, **kwargs):
         """Handle an Authorization request."""
         self._metrics[cstat.id_tag.value].value = id_tag
         auth_status = self.get_authorization_status(id_tag)
         return call_result.Authorize(id_tag_info={om.status.value: auth_status})
 
-    @on(Action.StartTransaction)
+    @on(Action.start_transaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
 
@@ -1444,7 +1444,7 @@ class ChargePoint(cp):
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return result
 
-    @on(Action.StopTransaction)
+    @on(Action.stop_transaction)
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
         """Stop the current transaction."""
 
@@ -1479,7 +1479,7 @@ class ChargePoint(cp):
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
 
-    @on(Action.DataTransfer)
+    @on(Action.data_transfer)
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
@@ -1487,7 +1487,7 @@ class ChargePoint(cp):
         self._metrics[cdet.data_transfer.value].extra_attr = {vendor_id: kwargs}
         return call_result.DataTransfer(status=DataTransferStatus.accepted.value)
 
-    @on(Action.Heartbeat)
+    @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
         now = datetime.now(tz=timezone.utc)
