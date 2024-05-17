@@ -25,14 +25,17 @@ match transactions and it won't report some meter values such as session time.
 
 ## [EVLink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
 
-## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/) 
+## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/)
 (Ability to configure a custom OCPP server such as HA is being discontinued)
 
 ## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
 
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
-## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)  
+## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
+All basic functions work properly
+
+## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)
 (has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
 ## [V2C Trydan](https://v2charge.com/trydan)
@@ -40,7 +43,7 @@ match transactions and it won't report some meter values such as session time.
 ## [Vestel EVC04-AC22SW](https://www.vestel-echarger.com/EVC04_HomeSmart22kW.html)
 
 ## [Wallbox Pulsar](https://wallbox.com/en_uk/wallbox-pulsar)
-The Wallbox Pulsar Max has been verified. 
+The Wallbox Pulsar Max has been verified.
 In the OCPP-config, leave the password field empty.
 
 ## Others
