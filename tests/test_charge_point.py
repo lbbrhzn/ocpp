@@ -651,25 +651,17 @@ class ChargePoint(cpclass):
         """Handle remote start request."""
         if self.accept is True:
             asyncio.create_task(self.send_start_transaction())
-            return call_result.RemoteStartTransaction(
-                RemoteStartStopStatus.accepted
-            )
+            return call_result.RemoteStartTransaction(RemoteStartStopStatus.accepted)
         else:
-            return call_result.RemoteStopTransaction(
-                RemoteStartStopStatus.rejected
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
     @on(Action.RemoteStopTransaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
         if self.accept is True:
-            return call_result.RemoteStopTransaction(
-                RemoteStartStopStatus.accepted
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.accepted)
         else:
-            return call_result.RemoteStopTransaction(
-                RemoteStartStopStatus.rejected
-            )
+            return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
     @on(Action.SetChargingProfile)
     def on_set_charging_profile(self, **kwargs):
@@ -683,13 +675,9 @@ class ChargePoint(cpclass):
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
         if self.accept is True:
-            return call_result.ClearChargingProfile(
-                ClearChargingProfileStatus.accepted
-            )
+            return call_result.ClearChargingProfile(ClearChargingProfileStatus.accepted)
         else:
-            return call_result.ClearChargingProfile(
-                ClearChargingProfileStatus.unknown
-            )
+            return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
     @on(Action.TriggerMessage)
     def on_trigger_message(self, **kwargs):
@@ -739,17 +727,13 @@ class ChargePoint(cpclass):
 
     async def send_firmware_status(self):
         """Send a firmware status notification."""
-        request = call.FirmwareStatusNotification(
-            status=FirmwareStatus.downloaded
-        )
+        request = call.FirmwareStatusNotification(status=FirmwareStatus.downloaded)
         resp = await self.call(request)
         assert resp is not None
 
     async def send_diagnostics_status(self):
         """Send a diagnostics status notification."""
-        request = call.DiagnosticsStatusNotification(
-            status=DiagnosticsStatus.uploaded
-        )
+        request = call.DiagnosticsStatusNotification(status=DiagnosticsStatus.uploaded)
         resp = await self.call(request)
         assert resp is not None
 

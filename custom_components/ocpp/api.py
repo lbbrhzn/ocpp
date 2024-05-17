@@ -603,9 +603,7 @@ class ChargePoint(cp):
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
-        req = call.TriggerMessage(
-            requested_message=MessageTrigger.boot_notification
-        )
+        req = call.TriggerMessage(requested_message=MessageTrigger.boot_notification)
         resp = await self.call(req)
         if resp.status == TriggerMessageStatus.accepted:
             self.triggered_boot_notification = True
@@ -785,9 +783,7 @@ class ChargePoint(cp):
         """
         if self.active_transaction_id == 0:
             return True
-        req = call.RemoteStopTransaction(
-            transaction_id=self.active_transaction_id
-        )
+        req = call.RemoteStopTransaction(transaction_id=self.active_transaction_id)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -860,9 +856,7 @@ class ChargePoint(cp):
 
     async def data_transfer(self, vendor_id: str, message_id: str = "", data: str = ""):
         """Request vendor specific data transfer from charger."""
-        req = call.DataTransfer(
-            vendor_id=vendor_id, message_id=message_id, data=data
-        )
+        req = call.DataTransfer(vendor_id=vendor_id, message_id=message_id, data=data)
         resp = await self.call(req)
         if resp.status == DataTransferStatus.accepted:
             _LOGGER.info(
@@ -1493,9 +1487,7 @@ class ChargePoint(cp):
         now = datetime.now(tz=timezone.utc)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
-        return call_result.Heartbeat(
-            current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
+        return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     @property
     def supported_features(self) -> int:
