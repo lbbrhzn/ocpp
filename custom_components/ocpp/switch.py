@@ -12,7 +12,7 @@ from homeassistant.components.switch import (
 from homeassistant.const import UnitOfPower
 from homeassistant.helpers.entity import DeviceInfo
 
-from ocpp.v16.enums import ChargePointStatus, Measurand
+from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
 from .const import CONF_CPID, DEFAULT_CPID, DOMAIN, ICON
@@ -140,20 +140,3 @@ class ChargePointSwitch(SwitchEntity):
                 self.cp_id, self.entity_description.off_action
             )
         self._state = not resp
-
-    @property
-    def current_power_w(self) -> Any:
-        """Return the current power usage in W."""
-        if self.entity_description.key == "charge_control":
-            value = self.central_system.get_metric(
-                self.cp_id, Measurand.power_active_import.value
-            )
-            if (
-                self.central_system.get_ha_unit(
-                    self.cp_id, Measurand.power_active_import.value
-                )
-                == POWER_KILO_WATT
-            ):
-                value = value * 1000
-            return value
-        return None
