@@ -1002,7 +1002,7 @@ class ChargePoint(cp):
 
     async def _handle_call(self, msg):
         try:
-            await self.hass.async_add_executor_job(super()._handle_call(msg))
+            await self.hass.async_create_task(super()._handle_call(msg))
         except NotImplementedError as e:
             response = msg.create_call_error(e).to_json()
             await self._send(response)
