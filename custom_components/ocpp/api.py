@@ -484,7 +484,9 @@ class ChargePoint(cp):
             accepted_measurands = ",".join(accepted_measurands)
 
             if len(accepted_measurands) > 0:
-                _LOGGER.debug(f"'{self.id}' allowed measurands: '{accepted_measurands}'")
+                _LOGGER.debug(
+                    f"'{self.id}' allowed measurands: '{accepted_measurands}'"
+                )
                 await self.configure(
                     ckey.meter_values_sampled_data.value,
                     accepted_measurands,
