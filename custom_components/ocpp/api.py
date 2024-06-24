@@ -464,33 +464,34 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
+            key = ckey.meter_values_sampled_data.value
+            chgr_measurands = await self.get_configuration(key)
 
             accepted_measurands = []
-            key = ckey.meter_values_sampled_data.value
+            cfg_ok = [
+                ConfigurationStatus.accepted,
+                ConfigurationStatus.reboot_required,
+            ]
 
             for measurand in all_measurands.split(","):
-                _LOGGER.debug(f"'{self.id}' trying measurand '{measurand}'")
+                _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
                 req = call.ChangeConfiguration(key=key, value=measurand)
                 resp = await self.call(req)
-                if resp.status == ConfigurationStatus.accepted:
-                    _LOGGER.debug(f"'{self.id}' adding measurand '{measurand}'")
+                if resp.status in cfg_ok:
+                    _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
                     accepted_measurands.append(measurand)
 
             accepted_measurands = ",".join(accepted_measurands)
 
             if len(accepted_measurands) > 0:
-                _LOGGER.debug(f"'{self.id}' allowed measurands '{accepted_measurands}'")
+                _LOGGER.debug(f"'{self.id}' allowed measurands: '{accepted_measurands}'")
                 await self.configure(
                     ckey.meter_values_sampled_data.value,
                     accepted_measurands,
                 )
             else:
-                _LOGGER.debug(f"'{self.id}' measurands not configurable by OCPP")
-                resp = await self.get_configuration(
-                    ckey.meter_values_sampled_data.value
-                )
-                accepted_measurands = resp
-                _LOGGER.debug(f"'{self.id}' allowed measurands '{accepted_measurands}'")
+                _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
+                _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
 
             updated_entry = {**self.entry.data}
             updated_entry[CONF_MONITORED_VARIABLES] = accepted_measurands
