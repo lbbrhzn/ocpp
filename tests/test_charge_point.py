@@ -183,7 +183,7 @@ async def test_cms_responses(hass, socket_enabled):
                         cp2.send_stop_transaction(),
                         cp2.send_meter_periodic_data(),
                     ),
-                    timeout=10,
+                    timeout=5,
                 )
             except asyncio.TimeoutError:
                 pass
