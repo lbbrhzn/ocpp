@@ -70,28 +70,28 @@ PLATFORMS = [SENSOR, SWITCH, NUMBER, BUTTON]
 
 # Ocpp supported measurands
 MEASURANDS = [
-    Measurand.energy_active_import_register.value,
-    Measurand.energy_reactive_import_register.value,
-    Measurand.energy_active_import_interval.value,
-    Measurand.energy_reactive_import_interval.value,
-    Measurand.power_active_import.value,
-    Measurand.power_reactive_import.value,
-    Measurand.power_offered.value,
-    Measurand.power_factor.value,
+    Measurand.current_export.value,
     Measurand.current_import.value,
     Measurand.current_offered.value,
-    Measurand.voltage.value,
+    Measurand.energy_active_export_interval.value,
+    Measurand.energy_active_export_register.value,
+    Measurand.energy_active_import_interval.value,
+    Measurand.energy_active_import_register.value,
+    Measurand.energy_reactive_export_interval.value,
+    Measurand.energy_reactive_export_register.value,
+    Measurand.energy_reactive_import_interval.value,
+    Measurand.energy_reactive_import_register.value,
     Measurand.frequency.value,
+    Measurand.power_active_export.value,
+    Measurand.power_active_import.value,
+    Measurand.power_factor.value,
+    Measurand.power_offered.value,
+    Measurand.power_reactive_export.value,
+    Measurand.power_reactive_import.value,
     Measurand.rpm.value,
     Measurand.soc.value,
     Measurand.temperature.value,
-    Measurand.current_export.value,
-    Measurand.energy_active_export_register.value,
-    Measurand.energy_reactive_export_register.value,
-    Measurand.energy_active_export_interval.value,
-    Measurand.energy_reactive_export_interval.value,
-    Measurand.power_active_export.value,
-    Measurand.power_reactive_export.value,
+    Measurand.voltage.value,
 ]
 DEFAULT_MEASURAND = Measurand.energy_active_import_register.value
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
@@ -118,7 +118,6 @@ UNITS_OCCP_TO_HA = {
     UnitOfMeasure.fahrenheit: ha.UnitOfTemperature.FAHRENHEIT,
     UnitOfMeasure.k: ha.UnitOfTemperature.KELVIN,
     UnitOfMeasure.percent: ha.PERCENTAGE,
-    UnitOfMeasure.hertz: ha.UnitOfFrequency.HERTZ,
 }
 
 # Where an occp unit is not reported and only one possibility assign HA unit on device class

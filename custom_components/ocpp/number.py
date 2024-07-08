@@ -10,7 +10,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     RestoreNumber,
 )
-from homeassistant.const import ELECTRIC_CURRENT_AMPERE
+from homeassistant.const import UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -34,6 +34,8 @@ class OcppNumberDescription(NumberEntityDescription):
 
     initial_value: float | None = None
 
+
+ELECTRIC_CURRENT_AMPERE = UnitOfElectricCurrent.AMPERE
 
 NUMBERS: Final = [
     OcppNumberDescription(
