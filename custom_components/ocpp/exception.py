@@ -1,7 +1,1 @@
-"""Implement Exceptions."""
-
-
-class ConfigurationError(Exception):
-    """Error used to signal a error while configuring the charger."""
-
-    pass
+""" This file is imported by home assistant, and can be used to define custom exceptions."""

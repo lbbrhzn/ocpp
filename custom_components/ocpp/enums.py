@@ -1,5 +1,5 @@
 """Additional enumerated values to use in home assistant."""
-from enum import Enum, IntFlag, auto
+from enum import Enum, Flag, auto
 
 
 class HAChargerServices(str, Enum):
@@ -60,11 +60,10 @@ class HAChargerSession(str, Enum):
     meter_start = "Energy.Meter.Start"  # in kWh
 
 
-class Profiles(IntFlag):
+class Profiles(Flag):
     """Flags to indicate supported feature profiles."""
 
-    __str__ = Enum.__str__
-
+    NONE = 0
     CORE = auto()  # Core
     FW = auto()  # FirmwareManagement
     SMART = auto()  # SmartCharging
