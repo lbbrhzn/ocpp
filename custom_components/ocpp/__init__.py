@@ -98,15 +98,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle removal of an entry."""
-    central_sys = hass.data[DOMAIN][entry.entry_id]
-
-    central_sys._server.close()
-    await central_sys._server.wait_closed()
-
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-    if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id)
+    unloaded = False
+    if DOMAIN in hass.data:
+        central_sys = hass.data[DOMAIN][entry.entry_id]
+        central_sys._server.close()
+        await central_sys._server.wait_closed()
+        unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        if unloaded:
+            hass.data[DOMAIN].pop(entry.entry_id)
 
     return unloaded
 
