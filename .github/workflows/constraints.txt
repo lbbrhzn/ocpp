@@ -1,6 +1,6 @@
 # home assistant
 pip>=21.0,<24.2
-pre-commit==3.7.1
+pre-commit==3.8.0
 bandit==1.7.9
 black==24.4.2
 flake8==7.1.0
