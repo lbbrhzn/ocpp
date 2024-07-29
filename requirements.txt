@@ -1,5 +1,5 @@
 colorlog==6.8.2
-pip>=21.0,<24.1
+pip>=21.0,<24.3
 ruff==0.5.1
 ocpp==1.0.0
 websockets==12.0
