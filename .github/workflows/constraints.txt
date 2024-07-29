@@ -1,5 +1,5 @@
 # home assistant
-pip>=21.0,<24.2
+pip>=21.0,<24.3
 pre-commit==3.7.1
 bandit==1.7.9
 black==24.4.2
