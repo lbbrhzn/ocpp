@@ -7,3 +7,4 @@ jsonschema==4.22.0
 pre-commit
 pytest-homeassistant-custom-component==0.13.136
 setuptools>=65.5.1 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
