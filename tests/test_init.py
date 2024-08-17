@@ -1,4 +1,4 @@
-"""Test ocpp setup process."""
+d"""Test ocpp setup process."""
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
 from typing import AsyncGenerator
@@ -38,7 +38,7 @@ async def test_setup_unload_and_reload_entry(
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Reload the entry and assert that the data from above is still there
-    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
