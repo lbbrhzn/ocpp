@@ -186,7 +186,7 @@ async def test_cms_responses(hass, socket_enabled):
             except asyncio.TimeoutError:
                 pass
             await ws2.close()
-        await asyncio.sleep(1)            
+        await asyncio.sleep(1)
         if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
             await hass.config_entries.async_remove(entry.entry_id)
             await hass.async_block_till_done()
