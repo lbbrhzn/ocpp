@@ -160,7 +160,7 @@ async def test_cms_responses(hass, socket_enabled):
         )
         config_entry2.add_to_hass(hass)
 
-        assert await async_setup_entry(hass, config_entry2)
+        assert await hass.config_entries.async_setup(config_entry2.entry_id)
         await hass.async_block_till_done()
 
         # no subprotocol
@@ -197,7 +197,7 @@ async def test_cms_responses(hass, socket_enabled):
         domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms", title="test_cms"
     )
     config_entry.add_to_hass(hass)
-    assert await async_setup_entry(hass, config_entry)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
