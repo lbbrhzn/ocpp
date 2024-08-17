@@ -15,7 +15,6 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
-from custom_components.ocpp import async_unload_entry
 from custom_components.ocpp.button import BUTTONS
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
@@ -189,7 +188,7 @@ async def test_cms_responses(hass, socket_enabled):
                 pass
             await ws2.close()
         await asyncio.sleep(1)
-        await async_unload_entry(hass, config_entry2)
+        await hass.config_entries.async_remove(config_entry2)
         await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
@@ -511,7 +510,7 @@ async def test_cms_responses(hass, socket_enabled):
     # test services when charger is unavailable
     await asyncio.sleep(1)
     await test_services(hass, socket_enabled)
-    await async_unload_entry(hass, config_entry)
+    await hass.config_entries.async_remove(config_entry)
     await hass.async_block_till_done()
 
 
