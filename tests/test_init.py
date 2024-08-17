@@ -27,7 +27,7 @@ async def test_setup_unload_and_reload_entry(
     )
     config_entry.add_to_hass(hass)
     await hass.async_block_till_done()
-    
+
     # Set up the entry and assert that the values set during setup are where we expect
     # them to be. Because we have patched the ocppDataUpdateCoordinator.async_get_data
     # call, no code from custom_components/ocpp/api.py actually runs.
