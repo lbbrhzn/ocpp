@@ -1,4 +1,4 @@
-d"""Test ocpp setup process."""
+"""Test ocpp setup process."""
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
 from typing import AsyncGenerator
