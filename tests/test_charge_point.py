@@ -514,6 +514,7 @@ async def test_cms_responses(hass, socket_enabled):
         await hass.config_entries.async_remove(entry.entry_id)
         await hass.async_block_till_done()
 
+
 class ChargePoint(cpclass):
     """Representation of real client Charge Point."""
 
