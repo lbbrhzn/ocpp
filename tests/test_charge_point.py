@@ -158,7 +158,6 @@ async def test_cms_responses(hass, socket_enabled):
             title="test_cms2",
         )
         config_entry2.add_to_hass(hass)
-
         assert await hass.config_entries.async_setup(config_entry2.entry_id)
         await hass.async_block_till_done()
 
@@ -188,8 +187,9 @@ async def test_cms_responses(hass, socket_enabled):
                 pass
             await ws2.close()
         await asyncio.sleep(1)
-        await hass.config_entries.async_remove(config_entry2)
-        await hass.async_block_till_done()
+        if config.entry2 in hass.config_entries:
+            await hass.config_entries.async_remove(config_entry2)
+            await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -510,8 +510,9 @@ async def test_cms_responses(hass, socket_enabled):
     # test services when charger is unavailable
     await asyncio.sleep(1)
     await test_services(hass, socket_enabled)
-    await hass.config_entries.async_remove(config_entry)
-    await hass.async_block_till_done()
+    if config_entry in hass.config_entries:
+        await hass.config_entries.async_remove(config_entry)
+        await hass.async_block_till_done()
 
 
 class ChargePoint(cpclass):
