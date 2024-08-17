@@ -6,10 +6,7 @@ from typing import AsyncGenerator
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocpp import (
-    CentralSystem,
-    async_reload_entry    
-)
+from custom_components.ocpp import CentralSystem
 from custom_components.ocpp.const import DOMAIN
 
 from .const import MOCK_CONFIG_DATA_1
@@ -40,12 +37,12 @@ async def test_setup_unload_and_reload_entry(
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Reload the entry and assert that the data from above is still there
-    assert await async_reload_entry(hass, config_entry) is None
+    assert await hass.config_entries.async_remove(entry.entry_id)
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Unload the entry and verify that the data has been removed
-    await hass.config_entries.async_remove(entry.entry_id)
+    assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
 
