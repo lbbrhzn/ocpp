@@ -187,7 +187,7 @@ async def test_cms_responses(hass, socket_enabled):
                 pass
             await ws2.close()
         await asyncio.sleep(1)
-        if config.entry2 in hass.config_entries:
+        if config_entry2 in hass.config_entries:
             await hass.config_entries.async_remove(config_entry2)
             await hass.async_block_till_done()
 
