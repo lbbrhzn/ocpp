@@ -15,7 +15,6 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
-from custom_components.ocpp import async_setup_entry, async_unload_entry
 from custom_components.ocpp.button import BUTTONS
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
@@ -159,8 +158,7 @@ async def test_cms_responses(hass, socket_enabled):
             title="test_cms2",
         )
         config_entry2.add_to_hass(hass)
-
-        assert await async_setup_entry(hass, config_entry2)
+        assert await hass.config_entries.async_setup(config_entry2.entry_id)
         await hass.async_block_till_done()
 
         # no subprotocol
@@ -189,15 +187,16 @@ async def test_cms_responses(hass, socket_enabled):
                 pass
             await ws2.close()
         await asyncio.sleep(1)
-        await async_unload_entry(hass, config_entry2)
-        await hass.async_block_till_done()
+        if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
+            await hass.config_entries.async_remove(entry.entry_id)
+            await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN, data=MOCK_CONFIG_DATA, entry_id="test_cms", title="test_cms"
     )
     config_entry.add_to_hass(hass)
-    assert await async_setup_entry(hass, config_entry)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
@@ -511,8 +510,9 @@ async def test_cms_responses(hass, socket_enabled):
     # test services when charger is unavailable
     await asyncio.sleep(1)
     await test_services(hass, socket_enabled)
-    await async_unload_entry(hass, config_entry)
-    await hass.async_block_till_done()
+    if entry := hass.config_entries.async_get_entry(config_entry.entry_id):
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
 
 
 class ChargePoint(cpclass):
