@@ -539,7 +539,10 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return {""}  # test for index error 
+                # use to test index error handling
+                return call_result.GetConfiguration(
+                    unknown_key=["SupportedFeatureProfiles"]
+                )
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
