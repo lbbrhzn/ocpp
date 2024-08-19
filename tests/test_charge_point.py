@@ -539,7 +539,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return "" # test for index error 
+                return ""  # test for index error 
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
