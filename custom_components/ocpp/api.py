@@ -575,7 +575,7 @@ class ChargePoint(cp):
         try:
             feature_list = (resp.configuration_key[0][om.value.value]).split(",")
         except IndexError:
-            feature_list[0] = ""
+            feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
