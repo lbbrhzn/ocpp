@@ -671,17 +671,23 @@ class ChargePoint(cp):
             resp = await self.get_configuration(
                 ckey.charging_schedule_allowed_charging_rate_unit.value
             )
-            _LOGGER.info(
-                "Charger supports setting the following units: %s",
-                resp,
-            )
-            _LOGGER.info("If more than one unit supported default unit is Amps")
-            if om.current.value in resp:
+            if resp is not None:
+                _LOGGER.info(
+                    "Charger supports setting the following units: %s",
+                    resp,
+                )
+                _LOGGER.info("If more than one unit supported default unit is Amps")
+                if om.current.value in resp:
+                    lim = limit_amps
+                    units = ChargingRateUnitType.amps.value
+                else:
+                    lim = limit_watts
+                    units = ChargingRateUnitType.watts.value
+            # Some chargers (e.g. Teison) don't support querying charging rate unit
+            else:
+                _LOGGER.warning("Failed to query charging rate unit, assuming Amps")
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
-            else:
-                lim = limit_watts
-                units = ChargingRateUnitType.watts.value
             resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
             )
