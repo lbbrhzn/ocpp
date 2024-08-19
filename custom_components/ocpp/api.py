@@ -574,7 +574,7 @@ class ChargePoint(cp):
         resp = await self.call(req)
         try:
             feature_list = (resp.configuration_key[0][om.value.value]).split(",")
-        except (IndexError, TypeError) as e:
+        except (IndexError, TypeError):
             feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")

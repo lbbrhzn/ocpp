@@ -539,7 +539,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                # use to test index error handling
+                # use to test TypeError handling
                 return call_result.GetConfiguration(
                     unknown_key=["SupportedFeatureProfiles"]
                 )
