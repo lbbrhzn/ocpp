@@ -572,7 +572,10 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
-        feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+        try:
+            feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+        except (IndexError, KeyError, TypeError):
+            feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
