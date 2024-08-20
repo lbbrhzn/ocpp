@@ -539,14 +539,9 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
+                # use to test TypeError handling
                 return call_result.GetConfiguration(
-                    configuration_key=[
-                        {
-                            "key": key[0],
-                            "readonly": False,
-                            "value": "",
-                        }
-                    ]
+                    unknown_key=["SupportedFeatureProfiles"]
                 )
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfiguration(
