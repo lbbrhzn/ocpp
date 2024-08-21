@@ -592,11 +592,14 @@ class ChargePoint(cpclass):
             key[0]
             == ConfigurationKey.charging_schedule_allowed_charging_rate_unit.value
         ):
-            return call_result.GetConfiguration(
-                configuration_key=[
-                    {"key": key[0], "readonly": False, "value": "Current"}
-                ]
-            )
+            if self.accept is True:
+                return call_result.GetConfiguration(
+                    configuration_key=[
+                        {"key": key[0], "readonly": False, "value": "Current"}
+                    ]
+                )
+            else:
+                return call_result.GetConfiguration(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.authorize_remote_tx_requests.value:
             if self.accept is True:
                 return call_result.GetConfiguration(
