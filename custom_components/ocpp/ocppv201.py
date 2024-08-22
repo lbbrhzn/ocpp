@@ -14,7 +14,7 @@ import websockets.server
 from ocpp.routing import on
 from ocpp.v201 import call, call_result
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
-from ocpp.v201.enums import ConnectorStatusType
+from ocpp.v201.enums import ConnectorStatusType, MeasurandType
 
 from .chargepoint import CentralSystemSettings, OcppVersion
 from .chargepoint import ChargePoint as cp
@@ -26,6 +26,7 @@ from .enums import (
 )
 
 from .const import (
+    DEFAULT_METER_INTERVAL,
     DOMAIN,
 )
 
@@ -40,6 +41,7 @@ class InventoryReport:
     smart_charging_available: bool = False
     reservation_available: bool = False
     local_auth_available: bool = False
+    tx_updated_measurands: list[MeasurandType] = []
 
 
 class ChargePoint(cp):
@@ -103,6 +105,39 @@ class ChargePoint(cp):
         """Return number of connectors on this charger."""
         await self._get_inventory()
         return self._inventory.evse_count if self._inventory else 0
+
+    async def set_standard_configuration(self):
+        """Send configuration values to the charger."""
+        req = call.SetVariables(
+            [
+                {
+                    "component": {"name": "SampledDataCtrlr"},
+                    "variable": {"name": "TxUpdatedInterval"},
+                    "attribute_value": str(DEFAULT_METER_INTERVAL),
+                }
+            ]
+        )
+        await self.call(req)
+
+    async def get_supported_measurands(self) -> str:
+        """Get comma-separated list of measurands supported by the charger."""
+        await self._get_inventory()
+        if self._inventory:
+            measurands: str = ",".join(
+                measurand.value for measurand in self._inventory.tx_updated_measurands
+            )
+            req = call.SetVariables(
+                [
+                    {
+                        "component": {"name": "SampledDataCtrlr"},
+                        "variable": {"name": "TxUpdatedMeasurands"},
+                        "attribute_value": measurands,
+                    }
+                ]
+            )
+            await self.call(req)
+            return measurands
+        return ""
 
     async def get_supported_features(self) -> Profiles:
         """Get comma-separated list of measurands supported by the charger."""
@@ -250,6 +285,17 @@ class ChargePoint(cp):
                 self._inventory.evse_count = max(
                     self._inventory.evse_count, component["evse"]["id"]
                 )
+            elif (
+                (component_name == "SampledDataCtrlr")
+                and (variable_name == "TxUpdatedMeasurands")
+                and ("variable_characteristics" in report_data)
+            ):
+                characteristics: dict = report_data["variable_characteristics"]
+                values: str = characteristics.get("values_list", "")
+                self._inventory.tx_updated_measurands = [
+                    MeasurandType(s) for s in values.split(",")
+                ]
+
         if not kwargs.get("tbc", False):
             self._wait_inventory.set()
         return call_result.NotifyReport()
@@ -264,4 +310,5 @@ class ChargePoint(cp):
         self, event_type, timestamp, trigger_reason, seq_no, transaction_info, **kwargs
     ):
         """Perform OCPP callback."""
+        meter_values: list[dict] = kwargs.get("meter_value", [])
         return call_result.TransactionEvent(id_token_info={"status": "Accepted"})
