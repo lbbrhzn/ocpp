@@ -222,9 +222,15 @@ class ChargePoint(cp):
         """Send configuration values to the charger."""
         pass
 
-    async def get_supported_features(self):
+    async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""
-        pass
+        return prof.NONE
+
+    async def fetch_supported_features(self):
+        """Get supported features."""
+        self._attr_supported_features = await self.get_supported_features()
+        self._metrics[cdet.features.value].value = self._attr_supported_features
+        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -305,7 +311,7 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await asyncio.sleep(2)
-            await self.get_supported_features()
+            await self.fetch_supported_features()
             num_connectors: int = await self.get_number_of_connectors()
             self._metrics[cdet.connectors.value].value = num_connectors
             await self.get_heartbeat_interval()
