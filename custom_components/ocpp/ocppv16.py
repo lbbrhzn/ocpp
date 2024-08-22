@@ -21,7 +21,7 @@ import voluptuous as vol
 import websockets.server
 
 from ocpp.routing import on
-from ocpp.v16 import ChargePoint as cp, call, call_result
+from ocpp.v16 import call, call_result
 from ocpp.v16.enums import (
     Action,
     AuthorizationStatus,
@@ -49,7 +49,8 @@ from ocpp.v16.enums import (
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 
-from .chargepoint import CentralSystemSettings, Metric
+from .chargepoint import CentralSystemSettings, Metric, OcppVersion
+from .chargepoint import ChargePoint as cp
 
 from .enums import (
     ConfigurationKey as ckey,
@@ -143,7 +144,7 @@ class ChargePoint(cp):
     ):
         """Instantiate a ChargePoint."""
 
-        super().__init__(id, connection)
+        super().__init__(id, connection, OcppVersion.V16)
 
         for action in self.route_map:
             self.route_map[action]["_skip_schema_validation"] = skip_schema_validation

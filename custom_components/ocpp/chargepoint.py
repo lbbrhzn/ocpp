@@ -1,7 +1,14 @@
 """Common classes for charge points of all OCPP versions."""
 
+from enum import Enum
 from types import MappingProxyType
 from typing import Any
+
+from ocpp.charge_point import ChargePoint as cp
+from ocpp.v16 import call as callv16
+from ocpp.v16 import call_result as call_resultv16
+from ocpp.v201 import call as callv201
+from ocpp.v201 import call_result as call_resultv201
 
 from .const import (
     UNITS_OCCP_TO_HA,
@@ -63,3 +70,27 @@ class Metric:
     def extra_attr(self, extra_attr: dict):
         """Set the unit of the metric."""
         self._extra_attr = extra_attr
+
+
+class OcppVersion(str, Enum):
+    """OCPP version choice."""
+
+    V16 = "1.6"
+    V201 = "2.0.1"
+
+
+class ChargePoint(cp):
+    """Server side representation of a charger."""
+
+    def __init__(self, id, connection, version: OcppVersion):
+        """Instantiate a ChargePoint."""
+
+        super().__init__(id, connection)
+        if version == OcppVersion.V16:
+            self._call = callv16
+            self._call_result = call_resultv16
+            self._ocpp_version = "1.6"
+        elif version == OcppVersion.V201:
+            self._call = callv201
+            self._call_result = call_resultv201
+            self._ocpp_version = "2.0.1"
