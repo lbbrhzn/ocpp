@@ -788,25 +788,9 @@ class ChargePoint(cp):
         )
         self.received_boot_notification = True
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
-        # update metrics
-        self._metrics[cdet.model.value].value = kwargs.get(
-            om.charge_point_model.name, None
-        )
-        self._metrics[cdet.vendor.value].value = kwargs.get(
-            om.charge_point_vendor.name, None
-        )
-        self._metrics[cdet.firmware_version.value].value = kwargs.get(
-            om.firmware_version.name, None
-        )
-        self._metrics[cdet.serial.value].value = kwargs.get(
-            om.charge_point_serial_number.name, None
-        )
 
         self.hass.async_create_task(self.async_update_device_info_v16(kwargs))
-        self.hass.async_create_task(self.update(self.central.cpid))
-        if self.triggered_boot_notification is False:
-            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
-            self.hass.async_create_task(self.post_connect())
+        self._register_boot_notification()
         return resp
 
     @on(Action.status_notification)

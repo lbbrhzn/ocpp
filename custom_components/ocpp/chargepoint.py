@@ -535,6 +535,11 @@ class ChargePoint(cp):
     ):
         """Update device info asynchronuously."""
 
+        self._metrics[cdet.model.value].value = model
+        self._metrics[cdet.vendor.value].value = vendor
+        self._metrics[cdet.firmware_version.value].value = firmware_version
+        self._metrics[cdet.serial.value].value = serial
+
         identifiers = {
             (DOMAIN, self.central.cpid),
             (DOMAIN, self.id),
@@ -552,6 +557,12 @@ class ChargePoint(cp):
             suggested_area="Garage",
             sw_version=firmware_version,
         )
+
+    def _register_boot_notification(self):
+        self.hass.async_create_task(self.update(self.central.cpid))
+        if self.triggered_boot_notification is False:
+            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+            self.hass.async_create_task(self.post_connect())
 
     async def update(self, cp_id: str):
         """Update sensors values in HA."""
