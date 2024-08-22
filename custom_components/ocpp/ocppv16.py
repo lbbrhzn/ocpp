@@ -2,15 +2,13 @@
 
 import asyncio
 from datetime import datetime, timedelta, UTC
-import json
 import logging
+
 from math import sqrt
 import time
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OK, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import websockets.server
 
@@ -39,7 +37,6 @@ from ocpp.v16.enums import (
     TriggerMessageStatus,
     UnlockStatus,
 )
-from ocpp.exceptions import NotImplementedError
 
 from .chargepoint import CentralSystemSettings, OcppVersion
 from .chargepoint import ChargePoint as cp
@@ -47,7 +44,6 @@ from .chargepoint import ChargePoint as cp
 from .enums import (
     ConfigurationKey as ckey,
     HAChargerDetails as cdet,
-    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     OcppMisc as om,
@@ -75,44 +71,6 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-)
-
-UFW_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("firmware_url"): cv.string,
-        vol.Optional("delay_hours"): cv.positive_int,
-    }
-)
-CONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-        vol.Required("value"): cv.string,
-    }
-)
-GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-    }
-)
-GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("upload_url"): cv.string,
-    }
-)
-TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("vendor_id"): cv.string,
-        vol.Optional("message_id"): cv.string,
-        vol.Optional("data"): cv.string,
-    }
-)
-CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional("limit_amps"): cv.positive_float,
-        vol.Optional("limit_watts"): cv.positive_int,
-        vol.Optional("conn_id"): cv.positive_int,
-        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
-    }
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -145,213 +103,83 @@ class ChargePoint(cp):
             skip_schema_validation,
         )
 
-    async def post_connect(self):
-        """Logic to be executed right after a charger connects."""
+    async def get_number_of_connectors(self):
+        """Return number of connectors on this charger."""
+        return await self.get_configuration(ckey.number_of_connectors.value)
 
-        # Define custom service handles for charge point
-        async def handle_clear_profile(call):
-            """Handle the clear profile service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            await self.clear_profile()
+    async def get_heartbeat_interval(self):
+        """Retrieve heartbeat interval from the charger and store it."""
+        await self.get_configuration(ckey.heartbeat_interval.value)
 
-        async def handle_update_firmware(call):
-            """Handle the firmware update service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            url = call.data.get("firmware_url")
-            delay = int(call.data.get("delay_hours", 0))
-            await self.update_firmware(url, delay)
+    async def get_supported_measurands(self) -> str:
+        """Get comma-separated list of measurands supported by the charger."""
+        all_measurands = self.entry.data.get(
+            CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
+        )
+        autodetect_measurands = self.entry.data.get(
+            CONF_MONITORED_VARIABLES_AUTOCONFIG,
+            DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+        )
 
-        async def handle_configure(call):
-            """Handle the configure service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            value = call.data.get("value")
-            await self.configure(key, value)
+        key = ckey.meter_values_sampled_data.value
 
-        async def handle_get_configuration(call):
-            """Handle the get configuration service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            await self.get_configuration(key)
+        if autodetect_measurands:
+            accepted_measurands = []
+            cfg_ok = [
+                ConfigurationStatus.accepted,
+                ConfigurationStatus.reboot_required,
+            ]
 
-        async def handle_get_diagnostics(call):
-            """Handle the get get diagnostics service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            url = call.data.get("upload_url")
-            await self.get_diagnostics(url)
+            for measurand in all_measurands.split(","):
+                _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
+                req = call.ChangeConfiguration(key=key, value=measurand)
+                resp = await self.call(req)
+                if resp.status in cfg_ok:
+                    _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
+                    accepted_measurands.append(measurand)
 
-        async def handle_data_transfer(call):
-            """Handle the data transfer service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            vendor = call.data.get("vendor_id")
-            message = call.data.get("message_id", "")
-            data = call.data.get("data", "")
-            await self.data_transfer(vendor, message, data)
+            accepted_measurands = ",".join(accepted_measurands)
+        else:
+            accepted_measurands = all_measurands
 
-        async def handle_set_charge_rate(call):
-            """Handle the data transfer service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            amps = call.data.get("limit_amps", None)
-            watts = call.data.get("limit_watts", None)
-            id = call.data.get("conn_id", 0)
-            custom_profile = call.data.get("custom_profile", None)
-            if custom_profile is not None:
-                if type(custom_profile) is str:
-                    custom_profile = custom_profile.replace("'", '"')
-                    custom_profile = json.loads(custom_profile)
-                await self.set_charge_rate(profile=custom_profile, conn_id=id)
-            elif watts is not None:
-                await self.set_charge_rate(limit_watts=watts, conn_id=id)
-            elif amps is not None:
-                await self.set_charge_rate(limit_amps=amps, conn_id=id)
-
-        try:
-            self.status = STATE_OK
-            await asyncio.sleep(2)
-            await self.get_supported_features()
-            resp = await self.get_configuration(ckey.number_of_connectors.value)
-            self._metrics[cdet.connectors.value].value = resp
-            await self.get_configuration(ckey.heartbeat_interval.value)
-
-            all_measurands = self.entry.data.get(
-                CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
-            )
-            autodetect_measurands = self.entry.data.get(
-                CONF_MONITORED_VARIABLES_AUTOCONFIG,
-                DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
-            )
-
-            key = ckey.meter_values_sampled_data.value
-
-            if autodetect_measurands:
-                accepted_measurands = []
-                cfg_ok = [
-                    ConfigurationStatus.accepted,
-                    ConfigurationStatus.reboot_required,
-                ]
-
-                for measurand in all_measurands.split(","):
-                    _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
-                    req = call.ChangeConfiguration(key=key, value=measurand)
-                    resp = await self.call(req)
-                    if resp.status in cfg_ok:
-                        _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
-                        accepted_measurands.append(measurand)
-
-                accepted_measurands = ",".join(accepted_measurands)
-            else:
-                accepted_measurands = all_measurands
-
-                # Quirk:
-                # Workaround for a bug on chargers that have invalid MeterValuesSampledData
-                # configuration and reboot while the server requests MeterValuesSampledData.
-                # By setting the configuration directly without checking current configuration
-                # as done when calling self.configure, the server avoids charger reboot.
-                # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
-                if len(accepted_measurands) > 0:
-                    req = call.ChangeConfiguration(key=key, value=accepted_measurands)
-                    resp = await self.call(req)
-                    _LOGGER.debug(
-                        f"'{self.id}' measurands set manually to {accepted_measurands}"
-                    )
-
-            chgr_measurands = await self.get_configuration(key)
-
+            # Quirk:
+            # Workaround for a bug on chargers that have invalid MeterValuesSampledData
+            # configuration and reboot while the server requests MeterValuesSampledData.
+            # By setting the configuration directly without checking current configuration
+            # as done when calling self.configure, the server avoids charger reboot.
+            # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
             if len(accepted_measurands) > 0:
+                req = call.ChangeConfiguration(key=key, value=accepted_measurands)
+                resp = await self.call(req)
                 _LOGGER.debug(
-                    f"'{self.id}' allowed measurands: '{accepted_measurands}'"
+                    f"'{self.id}' measurands set manually to {accepted_measurands}"
                 )
-                await self.configure(key, accepted_measurands)
-            else:
-                _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
-                _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
 
-            updated_entry = {**self.entry.data}
-            updated_entry[CONF_MONITORED_VARIABLES] = accepted_measurands
-            self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
+        chgr_measurands = await self.get_configuration(key)
 
-            await self.configure(
-                ckey.meter_value_sample_interval.value,
-                str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
-            )
-            await self.configure(
-                ckey.clock_aligned_data_interval.value,
-                str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
-            )
-            #            await self.configure(
-            #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
-            #            )
-            #            await self.start_transaction()
+        if len(accepted_measurands) > 0:
+            _LOGGER.debug(f"'{self.id}' allowed measurands: '{accepted_measurands}'")
+            await self.configure(key, accepted_measurands)
+        else:
+            _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
+            _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
 
-            # Register custom services with home assistant
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_configure.value,
-                handle_configure,
-                CONF_SERVICE_DATA_SCHEMA,
-            )
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_get_configuration.value,
-                handle_get_configuration,
-                GCONF_SERVICE_DATA_SCHEMA,
-            )
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_data_transfer.value,
-                handle_data_transfer,
-                TRANS_SERVICE_DATA_SCHEMA,
-            )
-            if prof.SMART in self._attr_supported_features:
-                self.hass.services.async_register(
-                    DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
-                )
-                self.hass.services.async_register(
-                    DOMAIN,
-                    csvcs.service_set_charge_rate.value,
-                    handle_set_charge_rate,
-                    CHRGR_SERVICE_DATA_SCHEMA,
-                )
-            if prof.FW in self._attr_supported_features:
-                self.hass.services.async_register(
-                    DOMAIN,
-                    csvcs.service_update_firmware.value,
-                    handle_update_firmware,
-                    UFW_SERVICE_DATA_SCHEMA,
-                )
-                self.hass.services.async_register(
-                    DOMAIN,
-                    csvcs.service_get_diagnostics.value,
-                    handle_get_diagnostics,
-                    GDIAG_SERVICE_DATA_SCHEMA,
-                )
-            self.post_connect_success = True
-            _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
+        return accepted_measurands
 
-            # nice to have, but not needed for integration to function
-            # and can cause issues with some chargers
-            await self.configure(ckey.web_socket_ping_interval.value, "60")
-            await self.set_availability()
-            if prof.REM in self._attr_supported_features:
-                if self.received_boot_notification is False:
-                    await self.trigger_boot_notification()
-                await self.trigger_status_notification()
-        except NotImplementedError as e:
-            _LOGGER.error("Configuration of the charger failed: %s", e)
+    async def set_standard_configuration(self):
+        """Send configuration values to the charger."""
+        await self.configure(
+            ckey.meter_value_sample_interval.value,
+            str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
+        )
+        await self.configure(
+            ckey.clock_aligned_data_interval.value,
+            str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
+        )
+        #            await self.configure(
+        #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
+        #            )
+        #            await self.start_transaction()
 
     async def get_supported_features(self):
         """Get supported features."""

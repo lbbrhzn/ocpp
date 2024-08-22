@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict
 from enum import Enum
+import json
 import logging
 import secrets
 import string
@@ -16,6 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
 from homeassistant.helpers import device_registry, entity_component, entity_registry
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 import websockets.server
 
 from ocpp.charge_point import ChargePoint as cp
@@ -25,17 +28,59 @@ from ocpp.v16.enums import UnitOfMeasure
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
+from ocpp.exceptions import NotImplementedError
 
 from .enums import (
+    ConfigurationKey as ckey,
     HAChargerDetails as cdet,
+    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     Profiles as prof,
 )
 
 from .const import (
+    CONF_MONITORED_VARIABLES,
     DOMAIN,
     UNITS_OCCP_TO_HA,
+)
+
+UFW_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("firmware_url"): cv.string,
+        vol.Optional("delay_hours"): cv.positive_int,
+    }
+)
+CONF_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("ocpp_key"): cv.string,
+        vol.Required("value"): cv.string,
+    }
+)
+GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("ocpp_key"): cv.string,
+    }
+)
+GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_url"): cv.string,
+    }
+)
+TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("vendor_id"): cv.string,
+        vol.Optional("message_id"): cv.string,
+        vol.Optional("data"): cv.string,
+    }
+)
+CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("limit_amps"): cv.positive_float,
+        vol.Optional("limit_watts"): cv.positive_int,
+        vol.Optional("conn_id"): cv.positive_int,
+        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
+    }
 )
 
 TIME_MINUTES = UnitOfTime.MINUTES
@@ -161,8 +206,218 @@ class ChargePoint(cp):
         alphabet = string.ascii_uppercase + string.digits
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
 
+    async def get_number_of_connectors(self) -> int:
+        """Return number of connectors on this charger."""
+        return 0
+
+    async def get_heartbeat_interval(self):
+        """Retrieve heartbeat interval from the charger and store it."""
+        pass
+
+    async def get_supported_measurands(self) -> str:
+        """Get comma-separated list of measurands supported by the charger."""
+        return ""
+
+    async def set_standard_configuration(self):
+        """Send configuration values to the charger."""
+        pass
+
+    async def get_supported_features(self):
+        """Get features supported by the charger."""
+        pass
+
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
+
+        # Define custom service handles for charge point
+        async def handle_clear_profile(call):
+            """Handle the clear profile service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            await self.clear_profile()
+
+        async def handle_update_firmware(call):
+            """Handle the firmware update service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            url = call.data.get("firmware_url")
+            delay = int(call.data.get("delay_hours", 0))
+            await self.update_firmware(url, delay)
+
+        async def handle_configure(call):
+            """Handle the configure service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            key = call.data.get("ocpp_key")
+            value = call.data.get("value")
+            await self.configure(key, value)
+
+        async def handle_get_configuration(call):
+            """Handle the get configuration service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            key = call.data.get("ocpp_key")
+            await self.get_configuration(key)
+
+        async def handle_get_diagnostics(call):
+            """Handle the get get diagnostics service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            url = call.data.get("upload_url")
+            await self.get_diagnostics(url)
+
+        async def handle_data_transfer(call):
+            """Handle the data transfer service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            vendor = call.data.get("vendor_id")
+            message = call.data.get("message_id", "")
+            data = call.data.get("data", "")
+            await self.data_transfer(vendor, message, data)
+
+        async def handle_set_charge_rate(call):
+            """Handle the data transfer service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            amps = call.data.get("limit_amps", None)
+            watts = call.data.get("limit_watts", None)
+            id = call.data.get("conn_id", 0)
+            custom_profile = call.data.get("custom_profile", None)
+            if custom_profile is not None:
+                if type(custom_profile) is str:
+                    custom_profile = custom_profile.replace("'", '"')
+                    custom_profile = json.loads(custom_profile)
+                await self.set_charge_rate(profile=custom_profile, conn_id=id)
+            elif watts is not None:
+                await self.set_charge_rate(limit_watts=watts, conn_id=id)
+            elif amps is not None:
+                await self.set_charge_rate(limit_amps=amps, conn_id=id)
+
+        """Logic to be executed right after a charger connects."""
+
+        try:
+            self.status = STATE_OK
+            await asyncio.sleep(2)
+            await self.get_supported_features()
+            num_connectors: int = await self.get_number_of_connectors()
+            self._metrics[cdet.connectors.value].value = num_connectors
+            await self.get_heartbeat_interval()
+
+            accepted_measurands: str = await self.get_supported_measurands()
+            updated_entry = {**self.entry.data}
+            updated_entry[CONF_MONITORED_VARIABLES] = accepted_measurands
+            self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
+
+            await self.set_standard_configuration()
+
+            # Register custom services with home assistant
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_configure.value,
+                handle_configure,
+                CONF_SERVICE_DATA_SCHEMA,
+            )
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_get_configuration.value,
+                handle_get_configuration,
+                GCONF_SERVICE_DATA_SCHEMA,
+            )
+            self.hass.services.async_register(
+                DOMAIN,
+                csvcs.service_data_transfer.value,
+                handle_data_transfer,
+                TRANS_SERVICE_DATA_SCHEMA,
+            )
+            if prof.SMART in self._attr_supported_features:
+                self.hass.services.async_register(
+                    DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_set_charge_rate.value,
+                    handle_set_charge_rate,
+                    CHRGR_SERVICE_DATA_SCHEMA,
+                )
+            if prof.FW in self._attr_supported_features:
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_update_firmware.value,
+                    handle_update_firmware,
+                    UFW_SERVICE_DATA_SCHEMA,
+                )
+                self.hass.services.async_register(
+                    DOMAIN,
+                    csvcs.service_get_diagnostics.value,
+                    handle_get_diagnostics,
+                    GDIAG_SERVICE_DATA_SCHEMA,
+                )
+            self.post_connect_success = True
+            _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
+
+            # nice to have, but not needed for integration to function
+            # and can cause issues with some chargers
+            await self.set_availability()
+            if prof.REM in self._attr_supported_features:
+                if self.received_boot_notification is False:
+                    await self.trigger_boot_notification()
+                await self.trigger_status_notification()
+        except NotImplementedError as e:
+            _LOGGER.error("Configuration of the charger failed: %s", e)
+
+    async def trigger_boot_notification(self):
+        """Trigger a boot notification."""
+        pass
+
+    async def trigger_status_notification(self):
+        """Trigger status notifications for all connectors."""
+        pass
+
+    async def clear_profile(self):
+        """Clear all charging profiles."""
+        pass
+
+    async def set_charge_rate(
+        self,
+        limit_amps: int = 32,
+        limit_watts: int = 22000,
+        conn_id: int = 0,
+        profile: dict | None = None,
+    ):
+        """Set a charging profile with defined limit."""
+        pass
+
+    async def set_availability(self, state: bool = True) -> bool:
+        """Change availability."""
+        return False
+
+    async def update_firmware(self, firmware_url: str, wait_time: int = 0):
+        """Update charger with new firmware if available."""
+        """where firmware_url is the http or https url of the new firmware"""
+        """and wait_time is hours from now to wait before install"""
+        pass
+
+    async def get_diagnostics(self, upload_url: str):
+        """Upload diagnostic data to server from charger."""
+        pass
+
+    async def data_transfer(self, vendor_id: str, message_id: str = "", data: str = ""):
+        """Request vendor specific data transfer from charger."""
+        pass
+
+    async def get_configuration(self, key: str = "") -> str | None:
+        """Get Configuration of charger for supported keys else return None."""
+        return None
+
+    async def configure(self, key: str, value: str):
+        """Configure charger by setting the key to target value."""
         pass
 
     async def _get_specific_response(self, unique_id, timeout):
