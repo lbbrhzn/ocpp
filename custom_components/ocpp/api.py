@@ -1,4 +1,4 @@
-"""Representation of a OCCP Entities."""
+"""Representation of a OCPP Entities."""
 
 from __future__ import annotations
 
@@ -8,27 +8,17 @@ import ssl
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry, entity_component, entity_registry
-import homeassistant.helpers.config_validation as cv
 from websockets import Subprotocol
-
-from .ocppv16 import ChargePoint as ChargePointv16
-import voluptuous as vol
 import websockets.protocol
 import websockets.server
 
+from .chargepoint import CentralSystemSettings
+from .ocppv16 import ChargePoint as ChargePointv16
+
 from .const import (
-    CONF_AUTH_LIST,
-    CONF_AUTH_STATUS,
     CONF_CPID,
     CONF_CSID,
-    CONF_DEFAULT_AUTH_STATUS,
-    CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
-    CONF_ID_TAG,
-    CONF_IDLE_INTERVAL,
-    CONF_METER_INTERVAL,
-    CONF_MONITORED_VARIABLES,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -39,17 +29,10 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
-    CONFIG,
     DEFAULT_CPID,
     DEFAULT_CSID,
-    DEFAULT_ENERGY_UNIT,
-    DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
-    DEFAULT_IDLE_INTERVAL,
-    DEFAULT_MEASURAND,
-    DEFAULT_METER_INTERVAL,
     DEFAULT_PORT,
-    DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
@@ -60,8 +43,6 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
-    HA_ENERGY_UNIT,
-    HA_POWER_UNIT,
     OCPP_2_0,
 )
 from .enums import (
@@ -74,44 +55,6 @@ logging.getLogger(DOMAIN).setLevel(logging.INFO)
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
 
-UFW_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("firmware_url"): cv.string,
-        vol.Optional("delay_hours"): cv.positive_int,
-    }
-)
-CONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-        vol.Required("value"): cv.string,
-    }
-)
-GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-    }
-)
-GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("upload_url"): cv.string,
-    }
-)
-TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("vendor_id"): cv.string,
-        vol.Optional("message_id"): cv.string,
-        vol.Optional("data"): cv.string,
-    }
-)
-CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional("limit_amps"): cv.positive_float,
-        vol.Optional("limit_watts"): cv.positive_int,
-        vol.Optional("conn_id"): cv.positive_int,
-        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
-    }
-)
-
 
 class CentralSystem:
     """Server for handling OCPP connections."""
@@ -122,20 +65,24 @@ class CentralSystem:
         self.entry = entry
         self.host = entry.data.get(CONF_HOST, DEFAULT_HOST)
         self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-        self.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
-        self.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
-        self.websocket_close_timeout = entry.data.get(
+
+        self.settings = CentralSystemSettings()
+        self.settings.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
+        self.settings.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
+
+        self.settings.websocket_close_timeout = entry.data.get(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         )
-        self.websocket_ping_tries = entry.data.get(
+        self.settings.websocket_ping_tries = entry.data.get(
             CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
         )
-        self.websocket_ping_interval = entry.data.get(
+        self.settings.websocket_ping_interval = entry.data.get(
             CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
         )
-        self.websocket_ping_timeout = entry.data.get(
+        self.settings.websocket_ping_timeout = entry.data.get(
             CONF_WEBSOCKET_PING_TIMEOUT, DEFAULT_WEBSOCKET_PING_TIMEOUT
         )
+        self.settings.config = entry.data
 
         self.subprotocols: list[Subprotocol] = entry.data.get(
             CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL
@@ -171,7 +118,7 @@ class CentralSystem:
             subprotocols=self.subprotocols,
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
-            close_timeout=self.websocket_close_timeout,
+            close_timeout=self.settings.websocket_close_timeout,
             ssl=self.ssl_context,
         )
         self._server = server
@@ -199,20 +146,20 @@ class CentralSystem:
         _LOGGER.info(f"Charger websocket path={websocket.path}")
         cp_id = websocket.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
-        if self.cpid not in self.charge_points:
+        if self.settings.cpid not in self.charge_points:
             _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
             if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
                 _LOGGER.warning("OCPP 2.0 not implemented")
                 return await websocket.close()
             else:
                 charge_point = ChargePointv16(
-                    cp_id, websocket, self.hass, self.entry, self
+                    cp_id, websocket, self.hass, self.entry, self.settings
                 )
-            self.charge_points[self.cpid] = charge_point
+            self.charge_points[self.settings.cpid] = charge_point
             await charge_point.start()
         else:
             _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-            charge_point = self.charge_points[self.cpid]
+            charge_point = self.charge_points[self.settings.cpid]
             await charge_point.reconnect(websocket)
         _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
 
@@ -281,19 +228,6 @@ class CentralSystem:
             if service_name == csvcs.service_unlock.name:
                 resp = await self.charge_points[cp_id].unlock()
         return resp
-
-    async def update(self, cp_id: str):
-        """Update sensors values in HA."""
-        er = entity_registry.async_get(self.hass)
-        dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cp_id)}
-        dev = dr.async_get_device(identifiers)
-        # _LOGGER.info("Device id: %s updating", dev.name)
-        for ent in entity_registry.async_entries_for_device(er, dev.id):
-            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
-            self.hass.async_create_task(
-                entity_component.async_update_entity(self.hass, ent.entity_id)
-            )
 
     def device_info(self):
         """Return device information."""

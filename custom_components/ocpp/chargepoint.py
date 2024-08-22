@@ -1,6 +1,23 @@
+"""Common classes for charge points of all OCPP versions."""
+
+from types import MappingProxyType
+from typing import Any
+
 from .const import (
     UNITS_OCCP_TO_HA,
 )
+
+
+class CentralSystemSettings:
+    """A subset of CentralSystem properties needed by a ChargePoint."""
+
+    websocket_close_timeout: int
+    websocket_ping_interval: int
+    websocket_ping_timeout: int
+    websocket_ping_tries: int
+    csid: str
+    cpid: str
+    config: MappingProxyType[str, Any]
 
 
 class Metric:

@@ -1,3 +1,5 @@
+"""Representation of a OCPP 1.6 charging station."""
+
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, UTC
@@ -14,8 +16,7 @@ from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
-from ocpp.exceptions import NotImplementedError
-from ocpp.messages import CallError
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import websockets.server
 
@@ -45,8 +46,10 @@ from ocpp.v16.enums import (
     UnitOfMeasure,
     UnlockStatus,
 )
+from ocpp.exceptions import NotImplementedError
+from ocpp.messages import CallError
 
-from .chargepoint import Metric
+from .chargepoint import CentralSystemSettings, Metric
 
 from .enums import (
     ConfigurationKey as ckey,
@@ -61,54 +64,65 @@ from .enums import (
 from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
-    CONF_CPID,
-    CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_FORCE_SMART_CHARGING,
-    CONF_HOST,
     CONF_ID_TAG,
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
-    CONF_PORT,
-    CONF_SKIP_SCHEMA_VALIDATION,
-    CONF_SSL,
-    CONF_SSL_CERTFILE_PATH,
-    CONF_SSL_KEYFILE_PATH,
-    CONF_SUBPROTOCOL,
-    CONF_WEBSOCKET_CLOSE_TIMEOUT,
-    CONF_WEBSOCKET_PING_INTERVAL,
-    CONF_WEBSOCKET_PING_TIMEOUT,
-    CONF_WEBSOCKET_PING_TRIES,
     CONFIG,
-    DEFAULT_CPID,
-    DEFAULT_CSID,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_FORCE_SMART_CHARGING,
-    DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
-    DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
-    DEFAULT_SKIP_SCHEMA_VALIDATION,
-    DEFAULT_SSL,
-    DEFAULT_SSL_CERTFILE_PATH,
-    DEFAULT_SSL_KEYFILE_PATH,
-    DEFAULT_SUBPROTOCOL,
-    DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
-    DEFAULT_WEBSOCKET_PING_INTERVAL,
-    DEFAULT_WEBSOCKET_PING_TIMEOUT,
-    DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
-    OCPP_2_0,
 )
 
 TIME_MINUTES = UnitOfTime.MINUTES
+
+UFW_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("firmware_url"): cv.string,
+        vol.Optional("delay_hours"): cv.positive_int,
+    }
+)
+CONF_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("ocpp_key"): cv.string,
+        vol.Required("value"): cv.string,
+    }
+)
+GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("ocpp_key"): cv.string,
+    }
+)
+GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_url"): cv.string,
+    }
+)
+TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("vendor_id"): cv.string,
+        vol.Optional("message_id"): cv.string,
+        vol.Optional("data"): cv.string,
+    }
+)
+CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("limit_amps"): cv.positive_float,
+        vol.Optional("limit_watts"): cv.positive_int,
+        vol.Optional("conn_id"): cv.positive_int,
+        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
+    }
+)
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
@@ -123,7 +137,7 @@ class ChargePoint(cp):
         connection: websockets.server.WebSocketServerProtocol,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        central,
+        central: CentralSystemSettings,
         interval_meter_metrics: int = 10,
         skip_schema_validation: bool = False,
     ):
@@ -958,6 +972,19 @@ class ChargePoint(cp):
                     self._metrics[metric].value = float(metric_value)
                     self._metrics[metric].unit = metric_unit
 
+    async def update(self, cp_id: str):
+        """Update sensors values in HA."""
+        er = entity_registry.async_get(self.hass)
+        dr = device_registry.async_get(self.hass)
+        identifiers = {(DOMAIN, cp_id)}
+        dev = dr.async_get_device(identifiers)
+        # _LOGGER.info("Device id: %s updating", dev.name)
+        for ent in entity_registry.async_entries_for_device(er, dev.id):
+            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
+            self.hass.async_create_task(
+                entity_component.async_update_entity(self.hass, ent.entity_id)
+            )
+
     @on(Action.meter_values)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
@@ -1083,7 +1110,7 @@ class ChargePoint(cp):
                 self._metrics[csess.session_energy.value].extra_attr[
                     cstat.id_tag.name
                 ] = self._metrics[cstat.id_tag.value].value
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         return call_result.MeterValues()
 
     @on(Action.boot_notification)
@@ -1111,7 +1138,7 @@ class ChargePoint(cp):
         )
 
         self.hass.async_create_task(self.async_update_device_info(kwargs))
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             self.hass.async_create_task(self.post_connect())
@@ -1150,14 +1177,14 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_export.value].value = 0
             if Measurand.power_reactive_export.value in self._metrics:
                 self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         return call_result.StatusNotification()
 
     @on(Action.firmware_status_notification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotification()
 
@@ -1242,7 +1269,7 @@ class ChargePoint(cp):
             result = call_result.StartTransaction(
                 id_tag_info={om.status.value: auth_status}, transaction_id=0
             )
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         return result
 
     @on(Action.stop_transaction)
@@ -1275,7 +1302,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_export.value].value = 0
         if Measurand.power_reactive_export.value in self._metrics:
             self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         return call_result.StopTransaction(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -1293,7 +1320,7 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=UTC)
         self._metrics[cstat.heartbeat.value].value = now
-        self.hass.async_create_task(self.central.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.central.cpid))
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     @property

@@ -373,8 +373,8 @@ async def test_cms_responses(hass, socket_enabled):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
-                    cs.charge_points[cs.cpid].trigger_boot_notification(),
-                    cs.charge_points[cs.cpid].trigger_status_notification(),
+                    cs.charge_points[cs.settings.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.settings.cpid].trigger_status_notification(),
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
@@ -463,8 +463,8 @@ async def test_cms_responses(hass, socket_enabled):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
-                    cs.charge_points[cs.cpid].trigger_boot_notification(),
-                    cs.charge_points[cs.cpid].trigger_status_notification(),
+                    cs.charge_points[cs.settings.cpid].trigger_boot_notification(),
+                    cs.charge_points[cs.settings.cpid].trigger_status_notification(),
                     test_switches(hass, socket_enabled),
                     test_services(hass, socket_enabled),
                     test_buttons(hass, socket_enabled),
@@ -479,7 +479,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     await asyncio.sleep(1)
     # test ping timeout, change cpid to start new connection
-    cs.cpid = "CP_3_test"
+    cs.settings.cpid = "CP_3_test"
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_3",
         subprotocols=["ocpp1.6"],
