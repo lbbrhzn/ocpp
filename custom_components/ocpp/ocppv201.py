@@ -45,6 +45,7 @@ class InventoryReport:
     """Cached full inventory report for a charger."""
 
     evse_count: int = 0
+    connector_count: list[int] = []
     smart_charging_available: bool = False
     reservation_available: bool = False
     local_auth_available: bool = False
@@ -180,6 +181,20 @@ class ChargePoint(cp):
 
         return features
 
+    async def trigger_status_notification(self):
+        """Trigger status notifications for all connectors."""
+        if not self._inventory:
+            return
+        for evse_id in range(1, self._inventory.evse_count + 1):
+            for connector_id in range(
+                1, self._inventory.connector_count[evse_id - 1] + 1
+            ):
+                req = call.TriggerMessage(
+                    "StatusNotification",
+                    evse={"id": evse_id, "connector_id": connector_id},
+                )
+                await self.call(req)
+
     async def set_availability(self, state: bool = True):
         """Change availability."""
         req: call.ChangeAvailability = call.ChangeAvailability(
@@ -312,6 +327,23 @@ class ChargePoint(cp):
             elif (component_name == "EVSE") and ("evse" in component):
                 self._inventory.evse_count = max(
                     self._inventory.evse_count, component["evse"]["id"]
+                )
+                self._inventory.connector_count += [0] * (
+                    self._inventory.evse_count - len(self._inventory.connector_count)
+                )
+            elif (
+                (component_name == "Connector")
+                and ("evse" in component)
+                and ("connector_id" in component["evse"])
+            ):
+                evse_id = component["evse"]["id"]
+                self._inventory.evse_count = max(self._inventory.evse_count, evse_id)
+                self._inventory.connector_count += [0] * (
+                    self._inventory.evse_count - len(self._inventory.connector_count)
+                )
+                self._inventory.connector_count[evse_id - 1] = max(
+                    self._inventory.connector_count[evse_id - 1],
+                    component["evse"]["connector_id"],
                 )
             elif (
                 (component_name == "SampledDataCtrlr")
