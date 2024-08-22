@@ -14,6 +14,7 @@ import websockets.server
 
 from .chargepoint import CentralSystemSettings
 from .ocppv16 import ChargePoint as ChargePointv16
+from .ocppv201 import ChargePoint as ChargePointv201
 
 from .const import (
     CONF_CPID,
@@ -149,8 +150,9 @@ class CentralSystem:
         if self.settings.cpid not in self.charge_points:
             _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
             if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
-                _LOGGER.warning("OCPP 2.0 not implemented")
-                return await websocket.close()
+                charge_point = ChargePointv201(
+                    cp_id, websocket, self.hass, self.entry, self.settings
+                )
             else:
                 charge_point = ChargePointv16(
                     cp_id, websocket, self.hass, self.entry, self.settings
