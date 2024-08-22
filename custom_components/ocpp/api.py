@@ -679,6 +679,10 @@ class ChargePoint(cp):
                 resp,
             )
             _LOGGER.info("If more than one unit supported default unit is Amps")
+            # Some chargers (e.g. Teison) don't support querying charging rate unit
+            if resp is None:
+                _LOGGER.warning("Failed to query charging rate unit, assuming Amps")
+                resp = om.current.value
             if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
