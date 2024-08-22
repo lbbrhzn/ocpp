@@ -9,12 +9,19 @@ from ocpp.exceptions import OCPPError
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 import websockets.server
 
 from ocpp.routing import on
 from ocpp.v201 import call, call_result
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
-from ocpp.v201.enums import ConnectorStatusType, MeasurandType
+from ocpp.v201.enums import (
+    ConnectorStatusType,
+    MeasurandType,
+    OperationalStatusType,
+    ResetType,
+    ResetStatusType,
+)
 
 from .chargepoint import CentralSystemSettings, OcppVersion
 from .chargepoint import ChargePoint as cp
@@ -172,6 +179,27 @@ class ChargePoint(cp):
             _LOGGER.info("TriggerMessage not supported: %s", e)
 
         return features
+
+    async def set_availability(self, state: bool = True):
+        """Change availability."""
+        req: call.ChangeAvailability = call.ChangeAvailability(
+            OperationalStatusType.operative.value
+            if state
+            else OperationalStatusType.inoperative.value
+        )
+        await self.call(req)
+
+    async def reset(self, typ: str = ""):
+        """Hard reset charger unless soft reset requested."""
+        req: call.Reset = call.Reset(ResetType.immediate)
+        resp = await self.call(req)
+        if resp.status != ResetStatusType.accepted.value:
+            status_suffix: str = f": {resp.status_info}" if resp.status_info else ""
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ocpp_call_error",
+                translation_placeholders={"message": resp.status + status_suffix},
+            )
 
     @on("BootNotification")
     def on_boot_notification(self, charging_station, reason, **kwargs):
