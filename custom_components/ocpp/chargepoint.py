@@ -398,6 +398,26 @@ class ChargePoint(cp):
         """Change availability."""
         return False
 
+    async def start_transaction(self) -> bool:
+        """Remote start a transaction."""
+        return False
+
+    async def stop_transaction(self) -> bool:
+        """Request remote stop of current transaction.
+
+        Leaves charger in finishing state until unplugged.
+        Use reset() to make the charger available again for remote start
+        """
+        return False
+
+    async def reset(self, typ: str | None = None) -> bool:
+        """Hard reset charger unless soft reset requested."""
+        return False
+
+    async def unlock(self, connector_id: int = 1) -> bool:
+        """Unlock charger if requested."""
+        return False
+
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
         """Update charger with new firmware if available."""
         """where firmware_url is the http or https url of the new firmware"""
