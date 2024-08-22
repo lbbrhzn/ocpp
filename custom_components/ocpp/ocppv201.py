@@ -13,11 +13,17 @@ import websockets.server
 
 from ocpp.routing import on
 from ocpp.v201 import call, call_result
+from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
+from ocpp.v201.enums import ConnectorStatusType
 
 from .chargepoint import CentralSystemSettings, OcppVersion
 from .chargepoint import ChargePoint as cp
 
 from .enums import Profiles
+
+from .enums import (
+    HAChargerStatuses as cstat,
+)
 
 from .const import (
     DOMAIN,
@@ -41,6 +47,7 @@ class ChargePoint(cp):
 
     _inventory: InventoryReport | None = None
     _wait_inventory: asyncio.Event | None = None
+    _connector_status: list[list[ConnectorStatusType | None]] = []
 
     def __init__(
         self,
@@ -153,6 +160,50 @@ class ChargePoint(cp):
         return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
 
     @on("StatusNotification")
+    def on_status_notification(
+        self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
+    ):
+        """Perform OCPP callback."""
+        if evse_id > len(self._connector_status):
+            self._connector_status += [[]] * (evse_id - len(self._connector_status))
+        if connector_id > len(self._connector_status[evse_id - 1]):
+            self._connector_status[evse_id - 1] += [None] * (
+                connector_id - len(self._connector_status[evse_id - 1])
+            )
+
+        evse: list[ConnectorStatusType] = self._connector_status[evse_id - 1]
+        evse[connector_id - 1] = ConnectorStatusType(connector_status)
+        evse_status: ConnectorStatusType | None = None
+        for status in evse:
+            if status is None:
+                evse_status = status
+                break
+            else:
+                evse_status = status
+                if status != ConnectorStatusType.available:
+                    break
+        evse_status_v16: ChargePointStatusv16 | None
+        if evse_status is None:
+            evse_status_v16 = None
+        elif evse_status == ConnectorStatusType.available:
+            evse_status_v16 = ChargePointStatusv16.available
+        elif evse_status == ConnectorStatusType.faulted:
+            evse_status_v16 = ChargePointStatusv16.faulted
+        elif evse_status == ConnectorStatusType.unavailable:
+            evse_status_v16 = ChargePointStatusv16.unavailable
+        else:
+            evse_status_v16 = ChargePointStatusv16.preparing
+        evse_status_str: str | None = evse_status_v16.value if evse_status_v16 else None
+
+        if evse_id == 1:
+            self._metrics[cstat.status_connector.value].value = evse_status_str
+        else:
+            self._metrics[cstat.status_connector.value].extra_attr[evse_id] = (
+                evse_status_str
+            )
+        self.hass.async_create_task(self.update(self.central.cpid))
+        return call_result.StatusNotification()
+
     @on("FirmwareStatusNotification")
     @on("MeterValues")
     @on("LogStatusNotification")
