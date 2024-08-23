@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta, UTC
 import logging
 
+from homeassistant.const import STATE_UNAVAILABLE
 from math import sqrt
 import time
 
@@ -40,10 +41,12 @@ from ocpp.v16.enums import (
 
 from .chargepoint import CentralSystemSettings, OcppVersion
 from .chargepoint import ChargePoint as cp
+from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
 from .enums import (
     ConfigurationKey as ckey,
     HAChargerDetails as cdet,
+    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     OcppMisc as om,
@@ -180,6 +183,39 @@ class ChargePoint(cp):
         #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
         #            )
         #            await self.start_transaction()
+
+    def register_version_specific_services(self):
+        """Register HA services that differ depending on OCPP version."""
+
+        async def handle_configure(call):
+            """Handle the configure service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            key = call.data.get("ocpp_key")
+            value = call.data.get("value")
+            await self.configure(key, value)
+
+        async def handle_get_configuration(call):
+            """Handle the get configuration service call."""
+            if self.status == STATE_UNAVAILABLE:
+                _LOGGER.warning("%s charger is currently unavailable", self.id)
+                return
+            key = call.data.get("ocpp_key")
+            await self.get_configuration(key)
+
+        self.hass.services.async_register(
+            DOMAIN,
+            csvcs.service_configure.value,
+            handle_configure,
+            CONF_SERVICE_DATA_SCHEMA,
+        )
+        self.hass.services.async_register(
+            DOMAIN,
+            csvcs.service_get_configuration.value,
+            handle_get_configuration,
+            GCONF_SERVICE_DATA_SCHEMA,
+        )
 
     async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""

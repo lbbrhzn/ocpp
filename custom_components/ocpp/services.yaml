@@ -84,9 +84,26 @@ configure:
       advanced: true
       example: "60"
       
+configure_v201:
+  name: Configure charger features
+  description: Change supported Ocpp v2.0.1 configuration values
+  fields:
+    ocpp_key:
+      name: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      description: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      required: true
+      advanced: true
+      example: "OCPPCommCtrlr/WebSocketPingInterval"
+    value:
+      name: Key value
+      description: Value to write to key
+      required: true
+      advanced: true
+      example: "60"
+
 get_configuration:
   name: Get configuration values for charger
-  description: Change supported Ocpp v1.6 configuration values
+  description: Get supported Ocpp v1.6 configuration values
   fields:
     ocpp_key:
       name: Configuration key name 
@@ -95,6 +112,17 @@ get_configuration:
       advanced: true
       example: "WebSocketPingInterval"
       
+get_configuration_v201:
+  name: Get configuration values for charger
+  description: Get supported Ocpp v2.0.1 configuration values
+  fields:
+    ocpp_key:
+      name: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      description: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      required: true
+      advanced: true
+      example: "OCPPCommCtrlr/WebSocketPingInterval"
+
 get_diagnostics:
   name: Request diagnostic data from charger
   description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols

@@ -8,8 +8,8 @@ import ocpp.exceptions
 from ocpp.exceptions import OCPPError
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import HomeAssistant, SupportsResponse, ServiceResponse
+from homeassistant.exceptions import ServiceValidationError, HomeAssistantError
 import websockets.server
 
 from ocpp.routing import on
@@ -17,19 +17,23 @@ from ocpp.v201 import call, call_result
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
 from ocpp.v201.enums import (
     ConnectorStatusType,
+    GetVariableStatusType,
     MeasurandType,
     OperationalStatusType,
     ResetType,
     ResetStatusType,
+    SetVariableStatusType,
 )
 
-from .chargepoint import CentralSystemSettings, OcppVersion
+from .chargepoint import CentralSystemSettings, OcppVersion, SetVariableResult
 from .chargepoint import ChargePoint as cp
+from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
 from .enums import Profiles
 
 from .enums import (
     HAChargerStatuses as cstat,
+    HAChargerServices as csvcs,
 )
 
 from .const import (
@@ -127,6 +131,37 @@ class ChargePoint(cp):
         )
         await self.call(req)
 
+    def register_version_specific_services(self):
+        """Register HA services that differ depending on OCPP version."""
+
+        async def handle_configure(call) -> ServiceResponse:
+            """Handle the configure service call."""
+            key = call.data.get("ocpp_key")
+            value = call.data.get("value")
+            result: SetVariableResult = await self.configure(key, value)
+            return {"reboot_required": result == SetVariableResult.reboot_required}
+
+        async def handle_get_configuration(call) -> ServiceResponse:
+            """Handle the get configuration service call."""
+            key = call.data.get("ocpp_key")
+            value = await self.get_configuration(key)
+            return {"value": value}
+
+        self.hass.services.async_register(
+            DOMAIN,
+            csvcs.service_configure_v201.value,
+            handle_configure,
+            CONF_SERVICE_DATA_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+        self.hass.services.async_register(
+            DOMAIN,
+            csvcs.service_get_configuration_v201.value,
+            handle_get_configuration,
+            GCONF_SERVICE_DATA_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
         await self._get_inventory()
@@ -214,6 +249,76 @@ class ChargePoint(cp):
                 translation_domain=DOMAIN,
                 translation_key="ocpp_call_error",
                 translation_placeholders={"message": resp.status + status_suffix},
+            )
+
+    @staticmethod
+    def _parse_ocpp_key(key: str) -> tuple:
+        try:
+            [c, v] = key.split("/")
+        except ValueError:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_ocpp_key",
+            )
+        [cname, paren, cinstance] = c.partition("(")
+        cinstance = cinstance.partition(")")[0]
+        [vname, paren, vinstance] = v.partition("(")
+        vinstance = vinstance.partition(")")[0]
+        component: dict = {"name": cname}
+        if cinstance:
+            component["instance"] = cinstance
+        variable: dict = {"name": vname}
+        if vinstance:
+            variable["instance"] = vinstance
+        return component, variable
+
+    async def get_configuration(self, key: str = "") -> str | None:
+        """Get Configuration of charger for supported keys else return None."""
+        component, variable = self._parse_ocpp_key(key)
+        req: call.GetVariables = call.GetVariables(
+            [{"component": component, "variable": variable}]
+        )
+        try:
+            resp: call_result.GetVariables = await self.call(req)
+        except Exception as e:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ocpp_call_error",
+                translation_placeholders={"message": str(e)},
+            )
+        result: dict = resp.get_variable_result[0]
+        if result["attribute_status"] != GetVariableStatusType.accepted:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="get_variables_error",
+                translation_placeholders={"message": str(result)},
+            )
+        return result["attribute_value"]
+
+    async def configure(self, key: str, value: str) -> SetVariableResult:
+        """Configure charger by setting the key to target value."""
+        component, variable = self._parse_ocpp_key(key)
+        req: call.SetVariables = call.SetVariables(
+            [{"component": component, "variable": variable, "attribute_value": value}]
+        )
+        try:
+            resp: call_result.SetVariables = await self.call(req)
+        except Exception as e:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ocpp_call_error",
+                translation_placeholders={"message": str(e)},
+            )
+        result: dict = resp.set_variable_result[0]
+        if result["attribute_status"] == SetVariableStatusType.accepted:
+            return SetVariableResult.accepted
+        elif result["attribute_status"] == SetVariableStatusType.reboot_required:
+            return SetVariableResult.reboot_required
+        else:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_variables_error",
+                translation_placeholders={"message": str(result)},
             )
 
     @on("BootNotification")

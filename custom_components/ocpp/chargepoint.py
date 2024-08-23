@@ -31,7 +31,6 @@ from ocpp.messages import CallError
 from ocpp.exceptions import NotImplementedError
 
 from .enums import (
-    ConfigurationKey as ckey,
     HAChargerDetails as cdet,
     HAChargerServices as csvcs,
     HAChargerSession as csess,
@@ -152,6 +151,13 @@ class OcppVersion(str, Enum):
     V201 = "2.0.1"
 
 
+class SetVariableResult(Enum):
+    """A response to successful SetVariable call."""
+
+    accepted = 0
+    reboot_required = 1
+
+
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
@@ -222,6 +228,10 @@ class ChargePoint(cp):
         """Send configuration values to the charger."""
         pass
 
+    def register_version_specific_services(self):
+        """Register HA services that differ depending on OCPP version."""
+        pass
+
     async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""
         return prof.NONE
@@ -251,23 +261,6 @@ class ChargePoint(cp):
             url = call.data.get("firmware_url")
             delay = int(call.data.get("delay_hours", 0))
             await self.update_firmware(url, delay)
-
-        async def handle_configure(call):
-            """Handle the configure service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            value = call.data.get("value")
-            await self.configure(key, value)
-
-        async def handle_get_configuration(call):
-            """Handle the get configuration service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            await self.get_configuration(key)
 
         async def handle_get_diagnostics(call):
             """Handle the get get diagnostics service call."""
@@ -324,18 +317,7 @@ class ChargePoint(cp):
             await self.set_standard_configuration()
 
             # Register custom services with home assistant
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_configure.value,
-                handle_configure,
-                CONF_SERVICE_DATA_SCHEMA,
-            )
-            self.hass.services.async_register(
-                DOMAIN,
-                csvcs.service_get_configuration.value,
-                handle_get_configuration,
-                GCONF_SERVICE_DATA_SCHEMA,
-            )
+            self.register_version_specific_services()
             self.hass.services.async_register(
                 DOMAIN,
                 csvcs.service_data_transfer.value,
@@ -442,9 +424,9 @@ class ChargePoint(cp):
         """Get Configuration of charger for supported keys else return None."""
         return None
 
-    async def configure(self, key: str, value: str):
+    async def configure(self, key: str, value: str) -> SetVariableResult | None:
         """Configure charger by setting the key to target value."""
-        pass
+        return None
 
     async def _get_specific_response(self, unique_id, timeout):
         # The ocpp library silences CallErrors by default. See
