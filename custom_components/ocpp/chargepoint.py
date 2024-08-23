@@ -24,7 +24,7 @@ import websockets.server
 from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
-from ocpp.v16.enums import UnitOfMeasure
+from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
@@ -39,7 +39,12 @@ from .enums import (
 )
 
 from .const import (
+    CONF_AUTH_LIST,
+    CONF_AUTH_STATUS,
+    CONF_DEFAULT_AUTH_STATUS,
+    CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
+    CONFIG,
     DOMAIN,
     UNITS_OCCP_TO_HA,
 )
@@ -584,6 +589,38 @@ class ChargePoint(cp):
             self.hass.async_create_task(
                 entity_component.async_update_entity(self.hass, ent.entity_id)
             )
+
+    def get_authorization_status(self, id_tag):
+        """Get the authorization status for an id_tag."""
+        # authorize if its the tag of this charger used for remote start_transaction
+        if id_tag == self._remote_id_tag:
+            return AuthorizationStatus.accepted.value
+        # get the domain wide configuration
+        config = self.hass.data[DOMAIN].get(CONFIG, {})
+        # get the default authorization status. Use accept if not configured
+        default_auth_status = config.get(
+            CONF_DEFAULT_AUTH_STATUS, AuthorizationStatus.accepted.value
+        )
+        # get the authorization list
+        auth_list = config.get(CONF_AUTH_LIST, {})
+        # search for the entry, based on the id_tag
+        auth_status = None
+        for auth_entry in auth_list:
+            id_entry = auth_entry.get(CONF_ID_TAG, None)
+            if id_tag == id_entry:
+                # get the authorization status, use the default if not configured
+                auth_status = auth_entry.get(CONF_AUTH_STATUS, default_auth_status)
+                _LOGGER.debug(
+                    f"id_tag='{id_tag}' found in auth_list, authorization_status='{auth_status}'"
+                )
+                break
+
+        if auth_status is None:
+            auth_status = default_auth_status
+            _LOGGER.debug(
+                f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
+            )
+        return auth_status
 
     @property
     def supported_features(self) -> int:

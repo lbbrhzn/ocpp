@@ -18,11 +18,13 @@ from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
 from ocpp.v201.enums import (
     ConnectorStatusType,
     GetVariableStatusType,
+    IdTokenType,
     MeasurandType,
     OperationalStatusType,
     ResetType,
     ResetStatusType,
     SetVariableStatusType,
+    AuthorizationStatusType,
 )
 
 from .chargepoint import CentralSystemSettings, OcppVersion, SetVariableResult
@@ -466,9 +468,18 @@ class ChargePoint(cp):
         return call_result.NotifyReport()
 
     @on("Authorize")
-    def on_authorize(self, idToken, **kwargs):
+    def on_authorize(self, id_token: dict, **kwargs):
         """Perform OCPP callback."""
-        return call_result.Authorize(id_token_info={"status": "Accepted"})
+        status: str = AuthorizationStatusType.unknown.value
+        token_type: str = id_token["type"]
+        token: str = id_token["id_token"]
+        if (
+            (token_type == IdTokenType.iso14443)
+            or (token_type == IdTokenType.iso15693)
+            or (token_type == IdTokenType.central)
+        ):
+            status = self.get_authorization_status(token)
+        return call_result.Authorize(id_token_info={"status": status})
 
     @on("TransactionEvent")
     def on_transaction_event(

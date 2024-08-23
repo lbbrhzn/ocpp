@@ -3,6 +3,7 @@
 from homeassistant import config_entries
 import voluptuous as vol
 
+from homeassistant.config_entries import OptionsFlowWithConfigEntry, ConfigFlowResult
 from .const import (
     CONF_CPID,
     CONF_CSID,
