@@ -28,6 +28,7 @@ from ocpp.v201.enums import (
     AuthorizationStatusType,
     TransactionEventType,
     ReadingContextType,
+    ChargingStateType,
 )
 
 from .chargepoint import CentralSystemSettings, OcppVersion, SetVariableResult, Metric
@@ -351,6 +352,17 @@ class ChargePoint(cp):
         """Perform OCPP callback."""
         return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
 
+    def _report_evse_status(self, evse_id: int, evse_status_v16: ChargePointStatusv16):
+        evse_status_str: str = evse_status_v16.value
+
+        if evse_id == 1:
+            self._metrics[cstat.status_connector.value].value = evse_status_str
+        else:
+            self._metrics[cstat.status_connector.value].extra_attr[evse_id] = (
+                evse_status_str
+            )
+        self.hass.async_create_task(self.update(self.central.cpid))
+
     @on("StatusNotification")
     def on_status_notification(
         self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
@@ -385,15 +397,10 @@ class ChargePoint(cp):
             evse_status_v16 = ChargePointStatusv16.unavailable
         else:
             evse_status_v16 = ChargePointStatusv16.preparing
-        evse_status_str: str | None = evse_status_v16.value if evse_status_v16 else None
 
-        if evse_id == 1:
-            self._metrics[cstat.status_connector.value].value = evse_status_str
-        else:
-            self._metrics[cstat.status_connector.value].extra_attr[evse_id] = (
-                evse_status_str
-            )
-        self.hass.async_create_task(self.update(self.central.cpid))
+        if evse_status_v16:
+            self._report_evse_status(evse_id, evse_status_v16)
+
         return call_result.StatusNotification()
 
     @on("FirmwareStatusNotification")
@@ -633,6 +640,23 @@ class ChargePoint(cp):
         meter_values: list[dict] = kwargs.get("meter_value", [])
         self._set_meter_values(event_type, meter_values)
         t = datetime.fromisoformat(timestamp)
+
+        if "charging_state" in transaction_info:
+            state = transaction_info["charging_state"]
+            evse_id: int = kwargs["evse"]["id"] if "evse" in kwargs else 1
+            evse_status_v16: ChargePointStatusv16 | None = None
+            if state == ChargingStateType.idle:
+                evse_status_v16 = ChargePointStatusv16.available
+            elif state == ChargingStateType.ev_connected:
+                evse_status_v16 = ChargePointStatusv16.preparing
+            elif state == ChargingStateType.suspended_evse:
+                evse_status_v16 = ChargePointStatusv16.suspended_evse
+            elif state == ChargingStateType.suspended_ev:
+                evse_status_v16 = ChargePointStatusv16.suspended_ev
+            elif state == ChargingStateType.charging:
+                evse_status_v16 = ChargePointStatusv16.charging
+            if evse_status_v16:
+                self._report_evse_status(evse_id, evse_status_v16)
 
         if event_type == TransactionEventType.started.value:
             self._tx_start_time = t
