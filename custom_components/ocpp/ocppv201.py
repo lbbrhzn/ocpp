@@ -30,6 +30,10 @@ from ocpp.v201.enums import (
     ReadingContextType,
     RequestStartStopStatusType,
     ChargingStateType,
+    ChargingProfilePurposeType,
+    ChargingRateUnitType,
+    ChargingProfileKindType,
+    ChargingProfileStatus,
 )
 
 from .chargepoint import CentralSystemSettings, OcppVersion, SetVariableResult, Metric
@@ -240,6 +244,62 @@ class ChargePoint(cp):
                     evse={"id": evse_id, "connector_id": connector_id},
                 )
                 await self.call(req)
+
+    async def clear_profile(self):
+        """Clear all charging profiles."""
+        req: call.ClearChargingProfile = call.ClearChargingProfile(
+            None,
+            {
+                "charging_profile_Purpose": ChargingProfilePurposeType.charging_station_max_profile.value
+            },
+        )
+        await self.call(req)
+
+    async def set_charge_rate(
+        self,
+        limit_amps: int = 32,
+        limit_watts: int = 22000,
+        conn_id: int = 0,
+        profile: dict | None = None,
+    ):
+        """Set a charging profile with defined limit."""
+        req: call.SetChargingProfile
+        if profile:
+            req = call.SetChargingProfile(0, profile)
+        else:
+            period: dict = {"start_period": 0}
+            schedule: dict = {"id": 1}
+            if limit_amps < 32:
+                period["limit"] = limit_amps
+                schedule["charging_rate_unit"] = ChargingRateUnitType.amps.value
+            elif limit_watts < 22000:
+                period["limit"] = limit_watts
+                schedule["charging_rate_unit"] = ChargingRateUnitType.watts.value
+            else:
+                await self.clear_profile()
+                return
+
+            schedule["charging_schedule_period"] = [period]
+            req = call.SetChargingProfile(
+                0,
+                {
+                    "id": 1,
+                    "stack_level": 0,
+                    "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile,
+                    "charging_profile_kind": ChargingProfileKindType.relative.value,
+                    "charging_schedule": [schedule],
+                },
+            )
+
+        resp: call_result.SetChargingProfile = await self.call(req)
+        if resp.status != ChargingProfileStatus.accepted:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_variables_error",
+                translation_placeholders={
+                    "message": f"{str(resp.status)}: {str(resp.status_info)}"
+                },
+            )
 
     async def set_availability(self, state: bool = True):
         """Change availability."""
