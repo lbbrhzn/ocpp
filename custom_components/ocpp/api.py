@@ -467,7 +467,7 @@ class ChargePoint(cp):
             key = ckey.meter_values_sampled_data.value
             try:
                 chgr_measurands = await self.get_configuration(key)
-            except:
+            except Exception:
                 _LOGGER.debug(
                     f"'{self.id}' had error while returning measurands, ignoring"
                 )
