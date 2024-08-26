@@ -28,6 +28,7 @@ from ocpp.v201.enums import (
     AuthorizationStatusType,
     TransactionEventType,
     ReadingContextType,
+    RequestStartStopStatusType,
     ChargingStateType,
 )
 
@@ -248,6 +249,26 @@ class ChargePoint(cp):
             else OperationalStatusType.inoperative.value
         )
         await self.call(req)
+
+    async def start_transaction(self) -> bool:
+        """Remote start a transaction."""
+        req: call.RequestStartTransaction = call.RequestStartTransaction(
+            id_token={
+                "id_token": self._remote_id_tag,
+                "type": IdTokenType.central.value,
+            },
+            remote_start_id=1,
+        )
+        resp: call_result.RequestStartTransaction = await self.call(req)
+        return resp.status == RequestStartStopStatusType.accepted.value
+
+    async def stop_transaction(self) -> bool:
+        """Request remote stop of current transaction."""
+        req: call.RequestStopTransaction = call.RequestStopTransaction(
+            transaction_id=self._metrics[csess.transaction_id.value].value
+        )
+        resp: call_result.RequestStopTransaction = await self.call(req)
+        return resp.status == RequestStartStopStatusType.accepted.value
 
     async def reset(self, typ: str = ""):
         """Hard reset charger unless soft reset requested."""
