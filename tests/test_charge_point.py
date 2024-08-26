@@ -570,7 +570,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return call_result.GetConfiguration(unknown_key=[key[0]])
+                raise Exception
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
             if self.accept is True:
                 return call_result.GetConfiguration(
