@@ -468,7 +468,9 @@ class ChargePoint(cp):
             try:
                 chgr_measurands = await self.get_configuration(key)
             except:
-                _LOGGER.debug(f"'{self.id}' had error while returning measurands, ignoring")
+                _LOGGER.debug(
+                    f"'{self.id}' had error while returning measurands, ignoring"
+                )
                 chgr_measurands = all_measurands
 
             accepted_measurands = []
