@@ -61,6 +61,7 @@ from .const import (
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -80,6 +81,7 @@ from .const import (
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
@@ -464,24 +466,32 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
+            autodetect_measurands = self.entry.data.get(
+                CONF_MONITORED_VARIABLES_AUTOCONFIG, DEFAULT_MONITORED_VARIABLES_AUTOCONFIG
+            )
+
             key = ckey.meter_values_sampled_data.value
             chgr_measurands = await self.get_configuration(key)
 
-            accepted_measurands = []
-            cfg_ok = [
-                ConfigurationStatus.accepted,
-                ConfigurationStatus.reboot_required,
-            ]
+            if autodetect_measurands:
+                accepted_measurands = []
+                cfg_ok = [
+                    ConfigurationStatus.accepted,
+                    ConfigurationStatus.reboot_required,
+                ]
 
-            for measurand in all_measurands.split(","):
-                _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
-                req = call.ChangeConfiguration(key=key, value=measurand)
-                resp = await self.call(req)
-                if resp.status in cfg_ok:
-                    _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
-                    accepted_measurands.append(measurand)
+                for measurand in all_measurands.split(","):
+                    _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
+                    req = call.ChangeConfiguration(key=key, value=measurand)
+                    resp = await self.call(req)
+                    if resp.status in cfg_ok:
+                        _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
+                        accepted_measurands.append(measurand)
 
-            accepted_measurands = ",".join(accepted_measurands)
+                accepted_measurands = ",".join(accepted_measurands)
+            else:
+                accepted_measurands = all_measurands
+                _LOGGER.debug(f"'{self.id}' measurands set manually to {accepted_measurands}")
 
             if len(accepted_measurands) > 0:
                 _LOGGER.debug(

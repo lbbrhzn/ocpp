@@ -14,6 +14,7 @@
                     "cpid": "Charge point identity",
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
+                    "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",

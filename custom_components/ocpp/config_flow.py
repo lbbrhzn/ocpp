@@ -11,6 +11,7 @@ from .const import (
     CONF_MAX_CURRENT,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -28,6 +29,7 @@ from .const import (
     DEFAULT_MAX_CURRENT,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -53,6 +55,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
         ): str,
+        vol.Required(
+            CONF_MONITORED_VARIABLES_AUTOCONFIG, default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG
+        ): bool,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
         vol.Required(
@@ -94,7 +99,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Todo: validate the user input
             self._data = user_input
-            self._data[CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
