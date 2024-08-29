@@ -40,6 +40,7 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
+    MEASURANDS,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -56,7 +57,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
             CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
         ): str,
         vol.Required(
-            CONF_MONITORED_VARIABLES_AUTOCONFIG, default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG
+            CONF_MONITORED_VARIABLES_AUTOCONFIG,
+            default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
         ): bool,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
@@ -97,8 +99,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Todo: validate the user input
             self._data = user_input
+
+            monitored_by_user = [
+                i.strip() for i in user_input[CONF_MONITORED_VARIABLES].split(",")
+            ]
+            # drop duplicate measurands
+            monitored_by_user = list(dict.fromkeys(monitored_by_user))
+            # check if all requested measurands are available
+            if not set(monitored_by_user).issubset(set(MEASURANDS)):
+                errors["monitored_variables"] = "measurand"
+
+            if errors:
+                return self.async_show_form(
+                    step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+                )
+
+            # update the list using processed measurands
+            self._data[CONF_MONITORED_VARIABLES] = ",".join(monitored_by_user)
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
