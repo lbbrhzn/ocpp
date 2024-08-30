@@ -16,10 +16,6 @@ from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, Unit
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
-import websockets.protocol
-import websockets.server
-
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 from ocpp.routing import on
@@ -48,6 +44,9 @@ from ocpp.v16.enums import (
     UnitOfMeasure,
     UnlockStatus,
 )
+import voluptuous as vol
+import websockets.protocol
+import websockets.server
 
 from .const import (
     CONF_AUTH_LIST,
@@ -467,7 +466,8 @@ class ChargePoint(cp):
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
             autodetect_measurands = self.entry.data.get(
-                CONF_MONITORED_VARIABLES_AUTOCONFIG, DEFAULT_MONITORED_VARIABLES_AUTOCONFIG
+                CONF_MONITORED_VARIABLES_AUTOCONFIG,
+                DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
             )
 
             key = ckey.meter_values_sampled_data.value
@@ -491,7 +491,9 @@ class ChargePoint(cp):
                 accepted_measurands = ",".join(accepted_measurands)
             else:
                 accepted_measurands = all_measurands
-                _LOGGER.debug(f"'{self.id}' measurands set manually to {accepted_measurands}")
+                _LOGGER.debug(
+                    f"'{self.id}' measurands set manually to {accepted_measurands}"
+                )
 
             if len(accepted_measurands) > 0:
                 _LOGGER.debug(
