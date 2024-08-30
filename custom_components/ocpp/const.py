@@ -4,7 +4,6 @@ import pathlib
 import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
-
 from ocpp.v16.enums import Measurand, UnitOfMeasure
 
 CONF_AUTH_LIST = "authorization_list"
@@ -38,6 +37,7 @@ CONF_WEBSOCKET_CLOSE_TIMEOUT = "websocket_close_timeout"
 CONF_WEBSOCKET_PING_TRIES = "websocket_ping_tries"
 CONF_WEBSOCKET_PING_INTERVAL = "websocket_ping_interval"
 CONF_WEBSOCKET_PING_TIMEOUT = "websocket_ping_timeout"
+CONF_QUIRK_MONITORED_TO_CHARGER = "quirk_monitored_to_charger"
 DATA_UPDATED = "ocpp_data_updated"
 DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
@@ -56,6 +56,7 @@ DEFAULT_WEBSOCKET_CLOSE_TIMEOUT = 10
 DEFAULT_WEBSOCKET_PING_TRIES = 2
 DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
+DEFAULT_QUIRK_MONITORED_TO_CHARGER = False
 DOMAIN = "ocpp"
 CONFIG = "config"
 ICON = "mdi:ev-station"
