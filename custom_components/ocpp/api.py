@@ -467,6 +467,7 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
+
             autodetect_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES_AUTOCONFIG,
                 DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
@@ -520,10 +521,7 @@ class ChargePoint(cp):
                 _LOGGER.debug(
                     f"'{self.id}' allowed measurands: '{accepted_measurands}'"
                 )
-                await self.configure(
-                    ckey.meter_values_sampled_data.value,
-                    accepted_measurands,
-                )
+                await self.configure(key, accepted_measurands)
             else:
                 _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
                 _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
