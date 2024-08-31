@@ -467,7 +467,6 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
-
             autodetect_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES_AUTOCONFIG,
                 DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
