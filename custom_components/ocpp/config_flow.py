@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
+    DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
@@ -55,9 +56,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
-        vol.Required(
-            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
-        ): str,
         vol.Required(
             CONF_MONITORED_VARIABLES_AUTOCONFIG,
             default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
@@ -88,6 +86,13 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
+STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
+    {
+        vol.Required(m, default=(True if m == DEFAULT_MEASURAND else False)): bool
+        for m in MEASURANDS
+    }
+)
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
@@ -105,25 +110,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._data = user_input
-
-            monitored_by_user = [
-                i.strip() for i in user_input[CONF_MONITORED_VARIABLES].split(",")
-            ]
-            # drop duplicate measurands
-            monitored_by_user = list(dict.fromkeys(monitored_by_user))
-            # check if all requested measurands are available
-            if not set(monitored_by_user).issubset(set(MEASURANDS)):
-                errors["monitored_variables"] = "measurand"
-
-            if errors:
-                return self.async_show_form(
-                    step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                self._data[CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
+                return self.async_create_entry(
+                    title=self._data[CONF_CSID], data=self._data
                 )
-
-            # update the list using processed measurands
-            self._data[CONF_MONITORED_VARIABLES] = ",".join(monitored_by_user)
-            return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
+            return await self.async_step_measurands()
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_measurands(self, user_input=None):
+        """Select the measurands to be shown."""
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected_measurands = [m for m, value in user_input.items() if value]
+            if set(selected_measurands).issubset(set(MEASURANDS)):
+                self._data[CONF_MONITORED_VARIABLES] = ",".join(selected_measurands)
+                return self.async_create_entry(
+                    title=self._data[CONF_CSID], data=self._data
+                )
+            else:
+                errors["base"] = "measurand"
+        return self.async_show_form(
+            step_id="measurands",
+            data_schema=STEP_USER_MEASURANDS_SCHEMA,
+            errors=errors,
         )
