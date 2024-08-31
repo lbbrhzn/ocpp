@@ -540,9 +540,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 # use to test TypeError handling
-                return call_result.GetConfiguration(
-                    unknown_key=["SupportedFeatureProfiles"]
-                )
+                return call_result.GetConfiguration(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.heartbeat_interval.value:
             return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
@@ -559,19 +557,20 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                return call_result.GetConfiguration(
-                    unknown_key=["WebSocketPingInterval"]
-                )
+                return call_result.GetConfiguration(unknown_key=[key[0]])
         if key[0] == ConfigurationKey.meter_values_sampled_data.value:
-            return call_result.GetConfiguration(
-                configuration_key=[
-                    {
-                        "key": key[0],
-                        "readonly": False,
-                        "value": "Energy.Active.Import.Register",
-                    }
-                ]
-            )
+            if self.accept is True:
+                return call_result.GetConfiguration(
+                    configuration_key=[
+                        {
+                            "key": key[0],
+                            "readonly": False,
+                            "value": "Energy.Active.Import.Register",
+                        }
+                    ]
+                )
+            else:
+                raise Exception
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
             if self.accept is True:
                 return call_result.GetConfiguration(

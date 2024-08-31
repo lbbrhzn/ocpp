@@ -465,7 +465,13 @@ class ChargePoint(cp):
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
             key = ckey.meter_values_sampled_data.value
-            chgr_measurands = await self.get_configuration(key)
+            try:
+                chgr_measurands = await self.get_configuration(key)
+            except Exception:
+                _LOGGER.debug(
+                    f"'{self.id}' had error while returning measurands, ignoring"
+                )
+                chgr_measurands = all_measurands
 
             accepted_measurands = []
             cfg_ok = [
@@ -487,10 +493,7 @@ class ChargePoint(cp):
                 _LOGGER.debug(
                     f"'{self.id}' allowed measurands: '{accepted_measurands}'"
                 )
-                await self.configure(
-                    ckey.meter_values_sampled_data.value,
-                    accepted_measurands,
-                )
+                await self.configure(key, accepted_measurands)
             else:
                 _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
                 _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
