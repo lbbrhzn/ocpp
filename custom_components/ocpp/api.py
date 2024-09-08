@@ -1,9 +1,10 @@
 """Representation of a OCCP Entities."""
+
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 import json
 import logging
 from math import sqrt
@@ -784,8 +785,7 @@ class ChargePoint(cp):
             return False
 
     async def stop_transaction(self):
-        """
-        Request remote stop of current transaction.
+        """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.
         Use reset() to make the charger available again for remote start
@@ -836,9 +836,9 @@ class ChargePoint(cp):
                 url = schema(firmware_url)
             except vol.MultipleInvalid as e:
                 _LOGGER.debug("Failed to parse url: %s", e)
-            update_time = (
-                datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            update_time = (datetime.now(tz=UTC) + timedelta(hours=wait_time)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
             req = call.UpdateFirmware(location=url, retrieve_date=update_time)
             resp = await self.call(req)
             _LOGGER.info("Response: %s", resp)
@@ -875,9 +875,7 @@ class ChargePoint(cp):
                 data,
                 resp.data,
             )
-            self._metrics[cdet.data_response.value].value = datetime.now(
-                tz=timezone.utc
-            )
+            self._metrics[cdet.data_response.value].value = datetime.now(tz=UTC)
             self._metrics[cdet.data_response.value].extra_attr = {message_id: resp.data}
             return True
         else:
@@ -897,9 +895,7 @@ class ChargePoint(cp):
         if resp.configuration_key:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
-            self._metrics[cdet.config_response.value].value = datetime.now(
-                tz=timezone.utc
-            )
+            self._metrics[cdet.config_response.value].value = datetime.now(tz=UTC)
             self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
         if resp.unknown_key:
@@ -994,7 +990,7 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
-            except asyncio.TimeoutError as timeout_exception:
+            except TimeoutError as timeout_exception:
                 _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
@@ -1027,7 +1023,7 @@ class ChargePoint(cp):
         self.tasks = [asyncio.ensure_future(task) for task in tasks]
         try:
             await asyncio.gather(*self.tasks)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except websockets.exceptions.WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
@@ -1258,9 +1254,9 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
                     if location is not None:
-                        self._metrics[measurand].extra_attr[
-                            om.location.value
-                        ] = location
+                        self._metrics[measurand].extra_attr[om.location.value] = (
+                            location
+                        )
                     if context is not None:
                         self._metrics[measurand].extra_attr[om.context.value] = context
                     processed_keys.append(idx)
@@ -1295,7 +1291,7 @@ class ChargePoint(cp):
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
         resp = call_result.BootNotification(
-            current_time=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            current_time=datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
@@ -1333,12 +1329,12 @@ class ChargePoint(cp):
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
         if connector_id >= 1:
-            self._metrics[cstat.status_connector.value].extra_attr[
-                connector_id
-            ] = status
-            self._metrics[cstat.error_code_connector.value].extra_attr[
-                connector_id
-            ] = error_code
+            self._metrics[cstat.status_connector.value].extra_attr[connector_id] = (
+                status
+            )
+            self._metrics[cstat.error_code_connector.value].extra_attr[connector_id] = (
+                error_code
+            )
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
@@ -1489,14 +1485,14 @@ class ChargePoint(cp):
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
-        self._metrics[cdet.data_transfer.value].value = datetime.now(tz=timezone.utc)
+        self._metrics[cdet.data_transfer.value].value = datetime.now(tz=UTC)
         self._metrics[cdet.data_transfer.value].extra_attr = {vendor_id: kwargs}
         return call_result.DataTransfer(status=DataTransferStatus.accepted.value)
 
     @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))

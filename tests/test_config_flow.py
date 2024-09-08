@@ -1,4 +1,5 @@
 """Test ocpp config flow."""
+
 from unittest.mock import patch
 
 from homeassistant import config_entries, data_entry_flow
@@ -19,12 +20,15 @@ from .const import MOCK_CONFIG, MOCK_CONFIG_DATA
 @pytest.fixture(autouse=True)
 def bypass_setup_fixture():
     """Prevent setup."""
-    with patch(
-        "custom_components.ocpp.async_setup",
-        return_value=True,
-    ), patch(
-        "custom_components.ocpp.async_setup_entry",
-        return_value=True,
+    with (
+        patch(
+            "custom_components.ocpp.async_setup",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ocpp.async_setup_entry",
+            return_value=True,
+        ),
     ):
         yield
 

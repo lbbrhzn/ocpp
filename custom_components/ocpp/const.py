@@ -1,4 +1,5 @@
 """Define constants for OCPP integration."""
+
 import pathlib
 
 import homeassistant.components.input_number as input_number
