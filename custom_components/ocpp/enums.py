@@ -1,4 +1,5 @@
 """Additional enumerated values to use in home assistant."""
+
 from enum import Enum, Flag, auto
 
 

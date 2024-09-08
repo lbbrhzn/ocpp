@@ -1,4 +1,5 @@
 """Global fixtures for ocpp integration."""
+
 import asyncio
 from unittest.mock import patch
 
@@ -20,9 +21,11 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 @pytest.fixture(name="skip_notifications", autouse=True)
 def skip_notifications_fixture():
     """Skip notification calls."""
-    with patch("homeassistant.components.persistent_notification.async_create"), patch(
-        "homeassistant.components.persistent_notification.async_dismiss"
-    ), patch("custom_components.ocpp.api.ChargePoint.notify_ha"):
+    with (
+        patch("homeassistant.components.persistent_notification.async_create"),
+        patch("homeassistant.components.persistent_notification.async_dismiss"),
+        patch("custom_components.ocpp.api.ChargePoint.notify_ha"),
+    ):
         yield
 
 
@@ -33,9 +36,11 @@ def bypass_get_data_fixture():
     """Skip calls to get data from API."""
     future = asyncio.Future()
     future.set_result(websockets.WebSocketServer)
-    with patch("websockets.server.serve", return_value=future), patch(
-        "websockets.server.WebSocketServer.close"
-    ), patch("websockets.server.WebSocketServer.wait_closed"):
+    with (
+        patch("websockets.server.serve", return_value=future),
+        patch("websockets.server.WebSocketServer.close"),
+        patch("websockets.server.WebSocketServer.wait_closed"),
+    ):
         yield
 
 

@@ -1,6 +1,9 @@
 {
-  "python.linting.pylintEnabled": true,
   "python.linting.enabled": true,
+  "python.linting.enabledWithoutWorkspace": true,
+  "python.linting.lintOnSave": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.ruffEnabled": true,
   "python.pythonPath": "/usr/local/bin/python",
   "python.analysis.extraPaths": [
     "/usr/local/lib/python3.9/site-packages"

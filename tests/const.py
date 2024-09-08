@@ -1,4 +1,5 @@
 """Constants for ocpp tests."""
+
 from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CSID,
