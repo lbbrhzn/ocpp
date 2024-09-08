@@ -894,7 +894,7 @@ class ChargePoint(cp):
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
-        if resp.configuration_key is not None:
+        if resp.configuration_key:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             self._metrics[cdet.config_response.value].value = datetime.now(
@@ -902,7 +902,7 @@ class ChargePoint(cp):
             )
             self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
-        if resp.unknown_key is not None:
+        if resp.unknown_key:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
