@@ -2,7 +2,7 @@
 
 target-version = "py310"
 
-select = [
+lint.select = [
     "B007", # Loop control variable {name} not used within loop body
     "B014", # Exception handler with duplicate exception
     "C",  # complexity
@@ -12,7 +12,6 @@ select = [
     "ICN001", # import concentions; {name} should be imported as {asname}
     "PGH004",  # Use specific rule codes when using noqa
     "PLC0414", # Useless import alias. Import alias does not rename original package.
-    "SIM105", # Use contextlib.suppress({exception}) instead of try-except-pass
     "SIM117", # Merge with-statements that use the same scope
     "SIM118", # Use {key} in {dict} instead of {key} in {dict}.keys()
     "SIM201", # Use {left} != {right} instead of not {left} == {right}
@@ -26,7 +25,9 @@ select = [
     "W",  # pycodestyle
 ]
 
-ignore = [
+lint.ignore = [
+    "SIM105", # Use contextlib.suppress({exception}) instead of try-except-pass
+    "C901",  # function too complex
     "D202",  # No blank lines allowed after function docstring
     "D203",  # 1 blank line required before class docstring
     "D213",  # Multi-line docstring summary should start at the second line
@@ -38,11 +39,11 @@ ignore = [
     "E731",  # do not assign a lambda expression, use a def
 ]
 
-[flake8-pytest-style]
+[lint.flake8-pytest-style]
 fixture-parentheses = false
 
-[pyupgrade]
+[lint.pyupgrade]
 keep-runtime-typing = true
 
-[mccabe]
+[lint.mccabe]
 max-complexity = 25

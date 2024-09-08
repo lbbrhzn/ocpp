@@ -1,4 +1,5 @@
 """Representation of a OCCP Entities."""
+
 from __future__ import annotations
 
 import asyncio
@@ -784,8 +785,7 @@ class ChargePoint(cp):
             return False
 
     async def stop_transaction(self):
-        """
-        Request remote stop of current transaction.
+        """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.
         Use reset() to make the charger available again for remote start
@@ -1258,9 +1258,9 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
                     if location is not None:
-                        self._metrics[measurand].extra_attr[
-                            om.location.value
-                        ] = location
+                        self._metrics[measurand].extra_attr[om.location.value] = (
+                            location
+                        )
                     if context is not None:
                         self._metrics[measurand].extra_attr[om.context.value] = context
                     processed_keys.append(idx)
@@ -1333,12 +1333,12 @@ class ChargePoint(cp):
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
         if connector_id >= 1:
-            self._metrics[cstat.status_connector.value].extra_attr[
-                connector_id
-            ] = status
-            self._metrics[cstat.error_code_connector.value].extra_attr[
-                connector_id
-            ] = error_code
+            self._metrics[cstat.status_connector.value].extra_attr[connector_id] = (
+                status
+            )
+            self._metrics[cstat.error_code_connector.value].extra_attr[connector_id] = (
+                error_code
+            )
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value

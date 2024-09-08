@@ -1,4 +1,5 @@
 """Implement a test by a simulating a chargepoint."""
+
 import asyncio
 from datetime import datetime, timezone  # timedelta,
 
@@ -42,6 +43,7 @@ from ocpp.v16.enums import (
 )
 
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
+import contextlib
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
@@ -167,7 +169,7 @@ async def test_cms_responses(hass, socket_enabled):
         ) as ws2:
             # use a different id for debugging
             cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
-            try:
+            with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(
                     asyncio.gather(
                         cp2.start(),
@@ -183,8 +185,6 @@ async def test_cms_responses(hass, socket_enabled):
                     ),
                     timeout=5,
                 )
-            except asyncio.TimeoutError:
-                pass
             await ws2.close()
         await asyncio.sleep(1)
         if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
@@ -207,7 +207,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_no_subprotocol", ws)
-        try:
+        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -223,8 +223,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except websockets.exceptions.ConnectionClosedOK:
-            pass
         await ws.close()
 
     await asyncio.sleep(1)
@@ -236,7 +234,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
-        try:
+        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -252,8 +250,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except websockets.exceptions.ConnectionClosedOK:
-            pass
         await ws.close()
 
     await asyncio.sleep(1)
@@ -267,7 +263,7 @@ async def test_cms_responses(hass, socket_enabled):
         cp = ChargePoint("CP_1_restore_values", ws)
         cp.active_transactionId = None
         # send None values
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -275,13 +271,11 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         # check if None
         assert cs.get_metric("test_cpid", "Energy.Meter.Start") is None
         assert cs.get_metric("test_cpid", "Transaction.Id") is None
         # send new data
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.send_start_transaction(12344),
@@ -289,8 +283,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         # save for reference the values for meter_start and transaction_id
         saved_meter_start = int(cs.get_metric("test_cpid", "Energy.Meter.Start"))
         saved_transactionId = int(cs.get_metric("test_cpid", "Transaction.Id"))
@@ -298,15 +290,13 @@ async def test_cms_responses(hass, socket_enabled):
         cs.del_metric("test_cpid", "Energy.Meter.Start")
         cs.del_metric("test_cpid", "Transaction.Id")
         # send new data
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.send_meter_periodic_data(),
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         await ws.close()
 
     # check if restored old values from HA when api have lost the values, i.e. simulated reboot of HA
@@ -351,13 +341,13 @@ async def test_cms_responses(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(
         (54321 - 12345) / 1000
     )
-    assert int(cs.get_metric("test_cpid", "Current.Import")) == int(0)
-    assert int(cs.get_metric("test_cpid", "Voltage")) == int(228)
+    assert int(cs.get_metric("test_cpid", "Current.Import")) == 0
+    assert int(cs.get_metric("test_cpid", "Voltage")) == 228
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
     assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_unit("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_extra_attr("unknown_cpid", "Energy.Active.Import.Register") is None
-    assert int(cs.get_supported_features("unknown_cpid")) == int(0)
+    assert int(cs.get_supported_features("unknown_cpid")) == 0
     assert (
         await asyncio.wait_for(
             cs.set_max_charge_rate_amps("unknown_cpid", 0), timeout=1
@@ -381,7 +371,7 @@ async def test_cms_responses(hass, socket_enabled):
         subprotocols=["ocpp1.6"],
     ) as ws:
         cp = ChargePoint("CP_1_services", ws)
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -394,12 +384,10 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         await ws.close()
-    assert int(cs.get_metric("test_cpid", "Frequency")) == int(50)
-    assert float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == float(
-        1101.452
+    assert int(cs.get_metric("test_cpid", "Frequency")) == 50
+    assert (
+        float(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == 1101.452
     )
 
     await asyncio.sleep(1)
@@ -464,8 +452,8 @@ async def test_cms_responses(hass, socket_enabled):
             pass
         await ws.close()
 
-    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(1101)
-    assert int(cs.get_metric("test_cpid", "Energy.Session")) == int(11)
+    assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == 1101
+    assert int(cs.get_metric("test_cpid", "Energy.Session")) == 11
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
 
     # test ocpp rejection messages sent from charger to cms
@@ -647,7 +635,7 @@ class ChargePoint(cpclass):
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         if self.accept is True:
-            asyncio.create_task(self.send_start_transaction())
+            self.task = asyncio.create_task(self.send_start_transaction())
             return call_result.RemoteStartTransaction(RemoteStartStopStatus.accepted)
         else:
             return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
