@@ -1117,7 +1117,7 @@ class ChargePoint(cp):
                 self._metrics[measurand].extra_attr[phase] = float(value)
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
-        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
+        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
