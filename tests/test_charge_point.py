@@ -312,7 +312,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_normal", ws)
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -332,8 +332,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         await ws.close()
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == int(
         1305570 / 1000
@@ -401,7 +399,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_non_errata_3.9", ws)
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -413,8 +411,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         await ws.close()
 
     # Last sent "Energy.Active.Import.Register" value without transaction id should be here.
@@ -436,7 +432,7 @@ async def test_cms_responses(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_non_errata_3.9", ws)
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
@@ -448,8 +444,6 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
-            pass
         await ws.close()
 
     assert int(cs.get_metric("test_cpid", "Energy.Active.Import.Register")) == 1101
