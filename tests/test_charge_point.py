@@ -1,7 +1,7 @@
 """Implement a test by a simulating a chargepoint."""
 
 import asyncio
-from datetime import datetime, timezone  # timedelta,
+from datetime import datetime, UTC  # timedelta,
 
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button.const import SERVICE_PRESS
@@ -471,7 +471,7 @@ async def test_cms_responses(hass, socket_enabled):
                 ),
                 timeout=3,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except websockets.exceptions.ConnectionClosedOK:
             pass
@@ -732,7 +732,7 @@ class ChargePoint(cpclass):
             connector_id=1,
             id_tag="test_cp",
             meter_start=meter_start,
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            timestamp=datetime.now(tz=UTC).isoformat(),
         )
         resp = await self.call(request)
         self.active_transactionId = resp.transaction_id
@@ -744,7 +744,7 @@ class ChargePoint(cpclass):
             connector_id=0,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.suspended_ev,
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            timestamp=datetime.now(tz=UTC).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
             vendor_error_code="Test error",
@@ -754,7 +754,7 @@ class ChargePoint(cpclass):
             connector_id=1,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.charging,
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            timestamp=datetime.now(tz=UTC).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
             vendor_error_code="Test error",
@@ -764,7 +764,7 @@ class ChargePoint(cpclass):
             connector_id=2,
             error_code=ChargePointErrorCode.no_error,
             status=ChargePointStatus.available,
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            timestamp=datetime.now(tz=UTC).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
             vendor_error_code="Available",
@@ -1100,7 +1100,7 @@ class ChargePoint(cpclass):
             n += 1
         request = call.StopTransaction(
             meter_stop=54321,
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            timestamp=datetime.now(tz=UTC).isoformat(),
             transaction_id=self.active_transactionId,
             reason="EVDisconnected",
             id_tag="test_cp",
