@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 import json
 import logging
 from math import sqrt
+import secrets
 import ssl
+import string
 import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
@@ -378,6 +380,8 @@ class ChargePoint(cp):
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
         self._attr_supported_features = prof.NONE
         self._metrics[cstat.reconnects.value].value: int = 0
+        alphabet = string.ascii_uppercase + string.digits
+        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -766,17 +770,9 @@ class ChargePoint(cp):
             return False
 
     async def start_transaction(self):
-        """
-        Remote start a transaction.
-
-        Check if authorisation enabled, if it is disable it before remote start
-        """
-        resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp is True:
-            await self.configure(ckey.authorize_remote_tx_requests.value, "false")
-        req = call.RemoteStartTransaction(
-            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value[:20]
-        )
+        """Remote start a transaction."""
+        _LOGGER.info("Start transaction with remote ID tag: %s", self._remote_id_tag)
+        req = call.RemoteStartTransaction(connector_id=1, id_tag=self._remote_id_tag)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -1395,6 +1391,9 @@ class ChargePoint(cp):
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
+        # authorize if its the tag of this charger used for remote start_transaction
+        if id_tag == self._remote_id_tag:
+            return AuthorizationStatus.accepted.value
         # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         # get the default authorization status. Use accept if not configured
