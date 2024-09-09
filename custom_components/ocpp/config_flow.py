@@ -12,6 +12,7 @@ from .const import (
     CONF_MAX_CURRENT,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -27,8 +28,10 @@ from .const import (
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
+    DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -39,6 +42,7 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
+    MEASURANDS,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -52,8 +56,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
-            CONF_MONITORED_VARIABLES, default=DEFAULT_MONITORED_VARIABLES
-        ): str,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG,
+            default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+        ): bool,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
         vol.Required(
@@ -77,6 +82,13 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
+STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
+    {
+        vol.Required(m, default=(True if m == DEFAULT_MEASURAND else False)): bool
+        for m in MEASURANDS
+    }
+)
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
@@ -93,11 +105,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Todo: validate the user input
             self._data = user_input
-            self._data[CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
-            return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
+            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                self._data[CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
+                return self.async_create_entry(
+                    title=self._data[CONF_CSID], data=self._data
+                )
+            return await self.async_step_measurands()
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_measurands(self, user_input=None):
+        """Select the measurands to be shown."""
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected_measurands = [m for m, value in user_input.items() if value]
+            if set(selected_measurands).issubset(set(MEASURANDS)):
+                self._data[CONF_MONITORED_VARIABLES] = ",".join(selected_measurands)
+                return self.async_create_entry(
+                    title=self._data[CONF_CSID], data=self._data
+                )
+            else:
+                errors["base"] = "measurand"
+        return self.async_show_form(
+            step_id="measurands",
+            data_schema=STEP_USER_MEASURANDS_SCHEMA,
+            errors=errors,
         )

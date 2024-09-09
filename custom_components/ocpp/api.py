@@ -19,10 +19,6 @@ from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, Unit
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
-import websockets.protocol
-import websockets.server
-
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 from ocpp.routing import on
@@ -51,6 +47,9 @@ from ocpp.v16.enums import (
     UnitOfMeasure,
     UnlockStatus,
 )
+import voluptuous as vol
+import websockets.protocol
+import websockets.server
 
 from .const import (
     CONF_AUTH_LIST,
@@ -64,6 +63,7 @@ from .const import (
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -83,6 +83,7 @@ from .const import (
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
@@ -469,30 +470,46 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
+            autodetect_measurands = self.entry.data.get(
+                CONF_MONITORED_VARIABLES_AUTOCONFIG,
+                DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+            )
+
             key = ckey.meter_values_sampled_data.value
-            try:
-                chgr_measurands = await self.get_configuration(key)
-            except Exception:
-                _LOGGER.debug(
-                    f"'{self.id}' had error while returning measurands, ignoring"
-                )
-                chgr_measurands = all_measurands
 
-            accepted_measurands = []
-            cfg_ok = [
-                ConfigurationStatus.accepted,
-                ConfigurationStatus.reboot_required,
-            ]
+            if autodetect_measurands:
+                accepted_measurands = []
+                cfg_ok = [
+                    ConfigurationStatus.accepted,
+                    ConfigurationStatus.reboot_required,
+                ]
 
-            for measurand in all_measurands.split(","):
-                _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
-                req = call.ChangeConfiguration(key=key, value=measurand)
-                resp = await self.call(req)
-                if resp.status in cfg_ok:
-                    _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
-                    accepted_measurands.append(measurand)
+                for measurand in all_measurands.split(","):
+                    _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
+                    req = call.ChangeConfiguration(key=key, value=measurand)
+                    resp = await self.call(req)
+                    if resp.status in cfg_ok:
+                        _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
+                        accepted_measurands.append(measurand)
 
-            accepted_measurands = ",".join(accepted_measurands)
+                accepted_measurands = ",".join(accepted_measurands)
+            else:
+                accepted_measurands = all_measurands
+
+                # Quirk:
+                # Workaround for a bug on chargers that have invalid MeterValuesSampledData
+                # configuration and reboot while the server requests MeterValuesSampledData.
+                # By setting the configuration directly without checking current configuration
+                # as done when calling self.configure, the server avoids charger reboot.
+                # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
+                if len(accepted_measurands) > 0:
+                    req = call.ChangeConfiguration(key=key, value=accepted_measurands)
+                    resp = await self.call(req)
+                    _LOGGER.debug(
+                        f"'{self.id}' measurands set manually to {accepted_measurands}"
+                    )
+
+            chgr_measurands = await self.get_configuration(key)
 
             if len(accepted_measurands) > 0:
                 _LOGGER.debug(

@@ -41,7 +41,7 @@ If you do not use HTTPS for your Home Assistant instance:
 
 ### Measurands
 - Most chargers only support a subset of all possible measurands. This depends most on the Feature profiles that are supported by the charger.
-- The integration will autodetect the supported measurands when the charger connects.
+- The integration will autodetect the supported measurands when the charger connects. This can be disabled for chargers that do not support autodetection.
 
 ## Add the entities to your Dashboard
 - On the OCPP integration, click on devices to navigate to your Charge Point device.

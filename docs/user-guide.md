@@ -23,6 +23,8 @@ The `Charge point identity` shown above with a default of `charger` is a little 
 
 Measurands (according to OCPP terminology) are actually metrics provided by the charger.  Each charger supports a subset of the available metrics and for each one supported, a sensor entity is available in HA.  Some of these sensor entities will give erroneous readings whilst others give no readings at all.  Sensor entities not supported by the charger will show as `Unknown` if you try to create a sensor entity for them.  Below is a table of the metrics I've found useful for the Wallbox Pulsar Plus.  Tables for other chargers will follow as contributions come in from owners of each supported charger.
 
+OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices.md).
+
 ## Useful Entities for Wallbox Pulsar Plus
 
 ### Metrics
@@ -46,6 +48,16 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
 
+## Useful Entities for ABB Terra AC
+
+### Metrics
+
+* `Current.Import` (instantaneous current flow to EV)
+* `Energy.Active.Import.Register` (active energy imported from the grid)
+* `Power.Active.Import` (instantaneous active power imported by EV)
+* `Voltage` (instantaneous AC RMS supply voltage)
+
+
 ## Useful Entities for EVBox Elvi
 
 ### Metrics
@@ -68,7 +80,7 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 
 ## Useful Entities and Workarounds for United Chargers Grizzl-E
 
-Comments below relate to Grizzl-E firmware version 5.633, tested Oct-Nov 2022. 
+Comments below relate to Grizzl-E firmware version 5.633, tested Oct-Nov 2022.
 
 ### Metrics
 The Grizzl-E updates these metrics every 30s during charging sessions:
@@ -113,6 +125,12 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Reset`
 
 ### OCPP Compatibility Issues
+
+### ABB Terra AC
+
+ABB Terra AC firmware 1.8.21 and earlier versions fail to respond correctly when OCPP measurands are automatically detected by the OCPP integration. As of this writing, ABB has been notified, but no corresponding firmware fix is available. As a result, users must configure measurands manually. See the suggested ABB Terra AC configuration in [supported devices](supported-devices.md).
+
+### Grizzl-E
 
 Grizzl-E firmware has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
 
