@@ -65,7 +65,6 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
-    CONF_QUIRK_MONITORED_TO_CHARGER,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
     CONF_SSL_CERTFILE_PATH,
@@ -87,7 +86,6 @@ from .const import (
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
-    DEFAULT_QUIRK_MONITORED_TO_CHARGER,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
@@ -476,28 +474,8 @@ class ChargePoint(cp):
                 CONF_MONITORED_VARIABLES_AUTOCONFIG,
                 DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
             )
-            quirk_monitored_to_charger = self.entry.data.get(
-                CONF_QUIRK_MONITORED_TO_CHARGER,
-                DEFAULT_QUIRK_MONITORED_TO_CHARGER,
-            )
 
             key = ckey.meter_values_sampled_data.value
-
-            # Quirk:
-            # Workaround for a bug on chargers that have invalid MeterValuesSampledData
-            # configuration. This quirk allows to set it to the user provided list.
-            # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
-            if quirk_monitored_to_charger:
-                _LOGGER.info(
-                    f"'{self.id}' quirk: set OCPP Measurands on charger to '{all_measurands}'"
-                )
-                req = call.ChangeConfiguration(key=key, value=all_measurands)
-                resp = await self.call(req)
-                _LOGGER.info(
-                    f"'{self.id}' quirk: disable setting OCPP measurands via the quirk if your charger does not need it anymore"
-                )
-
-            chgr_measurands = await self.get_configuration(key)
 
             if autodetect_measurands:
                 accepted_measurands = []
@@ -517,9 +495,21 @@ class ChargePoint(cp):
                 accepted_measurands = ",".join(accepted_measurands)
             else:
                 accepted_measurands = all_measurands
-                _LOGGER.debug(
-                    f"'{self.id}' measurands set manually to {accepted_measurands}"
-                )
+
+                # Quirk:
+                # Workaround for a bug on chargers that have invalid MeterValuesSampledData
+                # configuration and reboot while the server requests MeterValuesSampledData.
+                # By setting the configuration directly without checking current configuration
+                # as done when calling self.configure, the server avoids charger reboot.
+                # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
+                if len(accepted_measurands) > 0:
+                    req = call.ChangeConfiguration(key=key, value=accepted_measurands)
+                    resp = await self.call(req)
+                    _LOGGER.debug(
+                        f"'{self.id}' measurands set manually to {accepted_measurands}"
+                    )
+
+            chgr_measurands = await self.get_configuration(key)
 
             if len(accepted_measurands) > 0:
                 _LOGGER.debug(
