@@ -21,7 +21,7 @@ For more details and symptoms, see [Issue #1275](https://github.com/lbbrhzn/ocpp
 
 ### Workaround
 
-Fortunately, it is possible to configure the charger using manual configuration and, if it already has incorrect measurand configuration applied, to restore correct settings.
+Fortunately, it is possible to configure the charger using manual configuration and to restore correct settings.
 
 To use these chargers:
 
@@ -29,12 +29,7 @@ To use these chargers:
    - Note: Automatic detection is enabled by default. Until configuration changes can be made online, you may need to remove the devices from this integration and add them again.
    - If "Automatic detection of OCPP Measurands" is disabled during configuration, you will be presented with a list of possible measurands.
 
-2. If your charger was previously configured using automatic measurand detection:
-   - Enable "Quirk: Set OCPP Measurands on charger to the provided list of measurands" in the configuration.
-   - This quirk will reconfigure the corresponding setting before querying it from the charger, allowing you to bypass the boot loop.
-   - Note: It is suggested to disable this quirk after your charger is no longer affected by the boot loop. You may need to remove and add the devices again for such reconfiguration.
-
-3. When presented with the list of measurands, select only the following:
+2. When presented with the list of measurands, select only the following:
    - `Current.Import`
    - `Current.Offered`
    - `Energy.Active.Import.Register`
