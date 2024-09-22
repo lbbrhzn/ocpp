@@ -17,7 +17,11 @@
                     "websocket_ping_interval": "Websocket-Ping-Intervall (Sekunden)",
                     "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
                     "skip_schema_validation": "Überspringe OCPP-Schemavalidierung",
-                    "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil"
+                    "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil",
+                    "ssl": "Verschlüsselte Verbindung",
+                    "ssl_certfile_path": "Pfad zum SSL Zertifikat",
+                    "ssl_keyfile_path": "Pfad zum SSL Schlüssel",
+                    "monitored_variables_autoconfig": "Automatische Erkennung der OCPP-Messwerte"
                 }
             },
             "measurands": {
