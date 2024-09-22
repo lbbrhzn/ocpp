@@ -72,6 +72,18 @@ match transactions and it won't report some meter values such as session time.
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
+## [Teison Smart MINI Wallbox](https://www.teison.com/ac_smart_mini_ev_wallbox.html)
+Use *My Teison* app to enable webSocket. In the socket URL field enter the address of your Home Assistant server including the port. In the socket port field enter *ocpp1.6* for insecure connection or *socpp1.6* for secure connection with certificates. Once enabled, charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
+
+Even though the device accepts all measurands, the working ones are 
+   - `Current.Import`
+   - `Energy.Active.Import.Register`
+   - `Power.Active.Import`
+   - `Temperature`
+   - `Voltage`
+
+If the devices loses connection to Home Assistant (due to Wi-Fi disconnection or update, for example) it doesn't seem to reconnect automatically. It is necessary to reboot the charger via Bluetooth for it to reconnect.
+     
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)
 (has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
