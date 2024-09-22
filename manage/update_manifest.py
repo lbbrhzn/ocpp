@@ -1,4 +1,5 @@
 """Update the manifest file."""
+
 # https://github.com/hacs/integration/blob/main/manage/update_manifest.py
 import json
 import os

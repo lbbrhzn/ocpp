@@ -1,13 +1,16 @@
 """Representation of a OCCP Entities."""
+
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 import json
 import logging
 from math import sqrt
+import secrets
 import ssl
+import string
 import time
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
@@ -16,10 +19,6 @@ from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN, Unit
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
-import websockets.protocol
-import websockets.server
-
 from ocpp.exceptions import NotImplementedError
 from ocpp.messages import CallError
 from ocpp.routing import on
@@ -48,6 +47,9 @@ from ocpp.v16.enums import (
     UnitOfMeasure,
     UnlockStatus,
 )
+import voluptuous as vol
+import websockets.protocol
+import websockets.server
 
 from .const import (
     CONF_AUTH_LIST,
@@ -61,6 +63,7 @@ from .const import (
     CONF_IDLE_INTERVAL,
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -80,6 +83,7 @@ from .const import (
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_PORT,
     DEFAULT_POWER_UNIT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
@@ -378,6 +382,8 @@ class ChargePoint(cp):
         self._metrics[csess.meter_start.value].unit = UnitOfMeasure.kwh.value
         self._attr_supported_features = prof.NONE
         self._metrics[cstat.reconnects.value].value: int = 0
+        alphabet = string.ascii_uppercase + string.digits
+        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -464,33 +470,52 @@ class ChargePoint(cp):
             all_measurands = self.entry.data.get(
                 CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
             )
+            autodetect_measurands = self.entry.data.get(
+                CONF_MONITORED_VARIABLES_AUTOCONFIG,
+                DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+            )
+
             key = ckey.meter_values_sampled_data.value
+
+            if autodetect_measurands:
+                accepted_measurands = []
+                cfg_ok = [
+                    ConfigurationStatus.accepted,
+                    ConfigurationStatus.reboot_required,
+                ]
+
+                for measurand in all_measurands.split(","):
+                    _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
+                    req = call.ChangeConfiguration(key=key, value=measurand)
+                    resp = await self.call(req)
+                    if resp.status in cfg_ok:
+                        _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
+                        accepted_measurands.append(measurand)
+
+                accepted_measurands = ",".join(accepted_measurands)
+            else:
+                accepted_measurands = all_measurands
+
+                # Quirk:
+                # Workaround for a bug on chargers that have invalid MeterValuesSampledData
+                # configuration and reboot while the server requests MeterValuesSampledData.
+                # By setting the configuration directly without checking current configuration
+                # as done when calling self.configure, the server avoids charger reboot.
+                # Corresponding issue: https://github.com/lbbrhzn/ocpp/issues/1275
+                if len(accepted_measurands) > 0:
+                    req = call.ChangeConfiguration(key=key, value=accepted_measurands)
+                    resp = await self.call(req)
+                    _LOGGER.debug(
+                        f"'{self.id}' measurands set manually to {accepted_measurands}"
+                    )
+
             chgr_measurands = await self.get_configuration(key)
-
-            accepted_measurands = []
-            cfg_ok = [
-                ConfigurationStatus.accepted,
-                ConfigurationStatus.reboot_required,
-            ]
-
-            for measurand in all_measurands.split(","):
-                _LOGGER.debug(f"'{self.id}' trying measurand: '{measurand}'")
-                req = call.ChangeConfiguration(key=key, value=measurand)
-                resp = await self.call(req)
-                if resp.status in cfg_ok:
-                    _LOGGER.debug(f"'{self.id}' adding measurand: '{measurand}'")
-                    accepted_measurands.append(measurand)
-
-            accepted_measurands = ",".join(accepted_measurands)
 
             if len(accepted_measurands) > 0:
                 _LOGGER.debug(
                     f"'{self.id}' allowed measurands: '{accepted_measurands}'"
                 )
-                await self.configure(
-                    ckey.meter_values_sampled_data.value,
-                    accepted_measurands,
-                )
+                await self.configure(key, accepted_measurands)
             else:
                 _LOGGER.debug(f"'{self.id}' measurands not configurable by integration")
                 _LOGGER.debug(f"'{self.id}' allowed measurands: '{chgr_measurands}'")
@@ -572,7 +597,10 @@ class ChargePoint(cp):
         """Get supported features."""
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
-        feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+        try:
+            feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+        except (IndexError, KeyError, TypeError):
+            feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
@@ -676,6 +704,10 @@ class ChargePoint(cp):
                 resp,
             )
             _LOGGER.info("If more than one unit supported default unit is Amps")
+            # Some chargers (e.g. Teison) don't support querying charging rate unit
+            if resp is None:
+                _LOGGER.warning("Failed to query charging rate unit, assuming Amps")
+                resp = om.current.value
             if om.current.value in resp:
                 lim = limit_amps
                 units = ChargingRateUnitType.amps.value
@@ -756,17 +788,9 @@ class ChargePoint(cp):
             return False
 
     async def start_transaction(self):
-        """
-        Remote start a transaction.
-
-        Check if authorisation enabled, if it is disable it before remote start
-        """
-        resp = await self.get_configuration(ckey.authorize_remote_tx_requests.value)
-        if resp is True:
-            await self.configure(ckey.authorize_remote_tx_requests.value, "false")
-        req = call.RemoteStartTransaction(
-            connector_id=1, id_tag=self._metrics[cdet.identifier.value].value[:20]
-        )
+        """Remote start a transaction."""
+        _LOGGER.info("Start transaction with remote ID tag: %s", self._remote_id_tag)
+        req = call.RemoteStartTransaction(connector_id=1, id_tag=self._remote_id_tag)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
@@ -778,8 +802,7 @@ class ChargePoint(cp):
             return False
 
     async def stop_transaction(self):
-        """
-        Request remote stop of current transaction.
+        """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.
         Use reset() to make the charger available again for remote start
@@ -830,9 +853,9 @@ class ChargePoint(cp):
                 url = schema(firmware_url)
             except vol.MultipleInvalid as e:
                 _LOGGER.debug("Failed to parse url: %s", e)
-            update_time = (
-                datetime.now(tz=timezone.utc) + timedelta(hours=wait_time)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            update_time = (datetime.now(tz=UTC) + timedelta(hours=wait_time)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
             req = call.UpdateFirmware(location=url, retrieve_date=update_time)
             resp = await self.call(req)
             _LOGGER.info("Response: %s", resp)
@@ -869,9 +892,7 @@ class ChargePoint(cp):
                 data,
                 resp.data,
             )
-            self._metrics[cdet.data_response.value].value = datetime.now(
-                tz=timezone.utc
-            )
+            self._metrics[cdet.data_response.value].value = datetime.now(tz=UTC)
             self._metrics[cdet.data_response.value].extra_attr = {message_id: resp.data}
             return True
         else:
@@ -888,15 +909,13 @@ class ChargePoint(cp):
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
-        if resp.configuration_key is not None:
+        if resp.configuration_key:
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
-            self._metrics[cdet.config_response.value].value = datetime.now(
-                tz=timezone.utc
-            )
+            self._metrics[cdet.config_response.value].value = datetime.now(tz=UTC)
             self._metrics[cdet.config_response.value].extra_attr = {key: value}
             return value
-        if resp.unknown_key is not None:
+        if resp.unknown_key:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return None
@@ -988,7 +1007,7 @@ class ChargePoint(cp):
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
-            except asyncio.TimeoutError as timeout_exception:
+            except TimeoutError as timeout_exception:
                 _LOGGER.debug(
                     f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
@@ -1021,7 +1040,7 @@ class ChargePoint(cp):
         self.tasks = [asyncio.ensure_future(task) for task in tasks]
         try:
             await asyncio.gather(*self.tasks)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except websockets.exceptions.WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
@@ -1107,7 +1126,7 @@ class ChargePoint(cp):
                 self._metrics[measurand].extra_attr[phase] = float(value)
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
-        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
+        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
@@ -1252,9 +1271,9 @@ class ChargePoint(cp):
                         self._metrics[measurand].value = float(value)
                         self._metrics[measurand].unit = unit
                     if location is not None:
-                        self._metrics[measurand].extra_attr[
-                            om.location.value
-                        ] = location
+                        self._metrics[measurand].extra_attr[om.location.value] = (
+                            location
+                        )
                     if context is not None:
                         self._metrics[measurand].extra_attr[om.context.value] = context
                     processed_keys.append(idx)
@@ -1289,7 +1308,7 @@ class ChargePoint(cp):
     def on_boot_notification(self, **kwargs):
         """Handle a boot notification."""
         resp = call_result.BootNotification(
-            current_time=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            current_time=datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             interval=3600,
             status=RegistrationStatus.accepted.value,
         )
@@ -1327,12 +1346,12 @@ class ChargePoint(cp):
             self._metrics[cstat.status_connector.value].value = status
             self._metrics[cstat.error_code_connector.value].value = error_code
         if connector_id >= 1:
-            self._metrics[cstat.status_connector.value].extra_attr[
-                connector_id
-            ] = status
-            self._metrics[cstat.error_code_connector.value].extra_attr[
-                connector_id
-            ] = error_code
+            self._metrics[cstat.status_connector.value].extra_attr[connector_id] = (
+                status
+            )
+            self._metrics[cstat.error_code_connector.value].extra_attr[connector_id] = (
+                error_code
+            )
         if (
             status == ChargePointStatus.suspended_ev.value
             or status == ChargePointStatus.suspended_evse.value
@@ -1385,6 +1404,9 @@ class ChargePoint(cp):
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
+        # authorize if its the tag of this charger used for remote start_transaction
+        if id_tag == self._remote_id_tag:
+            return AuthorizationStatus.accepted.value
         # get the domain wide configuration
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         # get the default authorization status. Use accept if not configured
@@ -1480,14 +1502,14 @@ class ChargePoint(cp):
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
-        self._metrics[cdet.data_transfer.value].value = datetime.now(tz=timezone.utc)
+        self._metrics[cdet.data_transfer.value].value = datetime.now(tz=UTC)
         self._metrics[cdet.data_transfer.value].extra_attr = {vendor_id: kwargs}
         return call_result.DataTransfer(status=DataTransferStatus.accepted.value)
 
     @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         self._metrics[cstat.heartbeat.value].value = now
         self.hass.async_create_task(self.central.update(self.central.cpid))
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))

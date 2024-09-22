@@ -1,4 +1,5 @@
 """Sensor platform for ocpp."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -162,7 +163,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             Measurand.rpm,
         ] or self.metric.lower().startswith("frequency"):
             device_class = SensorDeviceClass.FREQUENCY
-        elif self.metric.lower().startswith(tuple(["power.a", "power.o", "power.r"])):
+        elif self.metric.lower().startswith(("power.a", "power.o", "power.r")):
             device_class = SensorDeviceClass.POWER
         elif self.metric.lower().startswith("temperature."):
             device_class = SensorDeviceClass.TEMPERATURE

@@ -1,4 +1,5 @@
 """Switch platform for ocpp."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,6 @@ from homeassistant.components.switch import (
 )
 from homeassistant.const import UnitOfPower
 from homeassistant.helpers.entity import DeviceInfo
-
 from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem

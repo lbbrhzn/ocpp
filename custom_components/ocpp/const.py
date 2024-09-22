@@ -1,10 +1,10 @@
 """Define constants for OCPP integration."""
+
 import pathlib
 
 import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
-
 from ocpp.v16.enums import Measurand, UnitOfMeasure
 
 CONF_AUTH_LIST = "authorization_list"
@@ -21,6 +21,7 @@ CONF_MAX_CURRENT = "max_current"
 CONF_METER_INTERVAL = "meter_interval"
 CONF_MODE = ha.CONF_MODE
 CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
+CONF_MONITORED_VARIABLES_AUTOCONFIG = "monitored_variables_autoconfig"
 CONF_NAME = ha.CONF_NAME
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
@@ -95,6 +96,7 @@ MEASURANDS = [
 ]
 DEFAULT_MEASURAND = Measurand.energy_active_import_register.value
 DEFAULT_MONITORED_VARIABLES = ",".join(MEASURANDS)
+DEFAULT_MONITORED_VARIABLES_AUTOCONFIG = True
 DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
 DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
