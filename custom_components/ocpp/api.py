@@ -1229,7 +1229,7 @@ class ChargePoint(cp):
                 # where an empty string is supplied convert to 0
                 try:
                     value = float(value)
-                except:
+                except ValueError:
                     value = 0
 
                 if len(sampled_value.keys()) == 1:  # Backwards compatibility
