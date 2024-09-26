@@ -831,7 +831,7 @@ class ChargePoint(cpclass):
                             "location": "Outlet",
                         },
                         {
-                            "value": "0.000",
+                            "value": "",
                             "context": "Sample.Periodic",
                             "measurand": "Power.Active.Import",
                             "location": "Outlet",
