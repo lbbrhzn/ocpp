@@ -1116,14 +1116,19 @@ class ChargePoint(cp):
             value = item.get(om.value.value, None)
             unit = item.get(om.unit.value, None)
             context = item.get(om.context.value, None)
+            # where an empty string is supplied convert to 0
+            try:
+                value = float(value)
+            except ValueError:
+                value = 0
             if measurand is not None and phase is not None and unit is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)
+                measurand_data[measurand][phase] = value
                 self._metrics[measurand].unit = unit
                 self._metrics[measurand].extra_attr[om.unit.value] = unit
-                self._metrics[measurand].extra_attr[phase] = float(value)
+                self._metrics[measurand].extra_attr[phase] = value
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
