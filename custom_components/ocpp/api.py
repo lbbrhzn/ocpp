@@ -1116,14 +1116,19 @@ class ChargePoint(cp):
             value = item.get(om.value.value, None)
             unit = item.get(om.unit.value, None)
             context = item.get(om.context.value, None)
+            # where an empty string is supplied convert to 0
+            try:
+                value = float(value)
+            except ValueError:
+                value = 0
             if measurand is not None and phase is not None and unit is not None:
                 if measurand not in measurand_data:
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = float(value)
+                measurand_data[measurand][phase] = value
                 self._metrics[measurand].unit = unit
                 self._metrics[measurand].extra_attr[om.unit.value] = unit
-                self._metrics[measurand].extra_attr[phase] = float(value)
+                self._metrics[measurand].extra_attr[phase] = value
                 self._metrics[measurand].extra_attr[om.context.value] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
@@ -1226,6 +1231,11 @@ class ChargePoint(cp):
                 phase = sampled_value.get(om.phase.value, None)
                 location = sampled_value.get(om.location.value, None)
                 context = sampled_value.get(om.context.value, None)
+                # where an empty string is supplied convert to 0
+                try:
+                    value = float(value)
+                except ValueError:
+                    value = 0
 
                 if len(sampled_value.keys()) == 1:  # Backwards compatibility
                     measurand = DEFAULT_MEASURAND
@@ -1240,7 +1250,7 @@ class ChargePoint(cp):
 
                 if phase is None:
                     if unit == DEFAULT_POWER_UNIT:
-                        self._metrics[measurand].value = float(value) / 1000
+                        self._metrics[measurand].value = value / 1000
                         self._metrics[measurand].unit = HA_POWER_UNIT
                     elif (
                         measurand == DEFAULT_MEASURAND
@@ -1248,27 +1258,25 @@ class ChargePoint(cp):
                     ):
                         if transaction_matches:
                             if unit == DEFAULT_ENERGY_UNIT:
-                                value = float(value) / 1000
+                                value = value / 1000
                                 unit = HA_ENERGY_UNIT
-                            self._metrics[csess.session_energy.value].value = float(
-                                value
-                            )
+                            self._metrics[csess.session_energy.value].value = value
                             self._metrics[csess.session_energy.value].unit = unit
                             self._metrics[csess.session_energy.value].extra_attr[
                                 cstat.id_tag.name
                             ] = self._metrics[cstat.id_tag.value].value
                         else:
                             if unit == DEFAULT_ENERGY_UNIT:
-                                value = float(value) / 1000
+                                value = value / 1000
                                 unit = HA_ENERGY_UNIT
-                            self._metrics[measurand].value = float(value)
+                            self._metrics[measurand].value = value
                             self._metrics[measurand].unit = unit
                     elif unit == DEFAULT_ENERGY_UNIT:
                         if transaction_matches:
-                            self._metrics[measurand].value = float(value) / 1000
+                            self._metrics[measurand].value = value / 1000
                             self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
-                        self._metrics[measurand].value = float(value)
+                        self._metrics[measurand].value = value
                         self._metrics[measurand].unit = unit
                     if location is not None:
                         self._metrics[measurand].extra_attr[om.location.value] = (
