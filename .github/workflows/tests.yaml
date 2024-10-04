@@ -26,6 +26,8 @@ jobs:
 
       - name: Upgrade pip
         run: |
+          python -m venv venv
+          . venv/bin/activate
           pip install "$(grep '^uv' < requirements.txt)"
           pip --version
 
@@ -72,6 +74,8 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON }}
       - name: Install requirements
         run: |
+          python -m venv venv
+          . venv/bin/activate
           pip install "$(grep '^uv' < requirements.txt)"
           uv pip install -r requirements.txt
       - name: Tests suite
