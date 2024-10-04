@@ -26,12 +26,12 @@ jobs:
 
       - name: Upgrade pip
         run: |
-          pip install --constraint=.github/workflows/constraints.txt pip
+          pip install "$(grep '^uv' < requirements.txt)"
           pip --version
 
       - name: Install Python modules
         run: |
-          pip install --constraint=.github/workflows/constraints.txt pre-commit
+          uv pip install "$(grep '^pre-commit' < requirements.txt)"
 
       - name: Run pre-commit on all files
         run: |
@@ -72,8 +72,8 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON }}
       - name: Install requirements
         run: |
-          pip install --constraint=.github/workflows/constraints.txt pip
-          pip install -r requirements.txt --constraint=.github/workflows/constraints.txt
+          pip install "$(grep '^uv' < requirements.txt)"
+          uv pip install -r requirements.txt
       - name: Tests suite
         run: |
           pytest \
