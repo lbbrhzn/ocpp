@@ -219,9 +219,7 @@ class CentralSystem:
         self._server = server
         return self
 
-    async def on_connect(
-        self, websocket: websockets.server.WebSocketServerProtocol, path: str
-    ):
+    async def on_connect(self, websocket: websockets.server.WebSocketServerProtocol):
         """Request handler executed for every new OCPP connection."""
         if self.config.get(CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION):
             _LOGGER.warning("Skipping websocket subprotocol validation")
@@ -240,8 +238,8 @@ class CentralSystem:
                 )
                 return await websocket.close()
 
-        _LOGGER.info(f"Charger websocket path={path}")
-        cp_id = path.strip("/")
+        _LOGGER.info(f"Charger websocket path={websocket.path}")
+        cp_id = websocket.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         if self.cpid not in self.charge_points:
             _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
