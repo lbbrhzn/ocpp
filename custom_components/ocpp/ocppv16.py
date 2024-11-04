@@ -1,6 +1,5 @@
 """Representation of a OCPP 1.6 charging station."""
 
-import asyncio
 from datetime import datetime, timedelta, UTC
 import logging
 
@@ -59,7 +58,6 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
-    CONFIG,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_IDLE_INTERVAL,
