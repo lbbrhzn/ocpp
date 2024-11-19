@@ -3,15 +3,6 @@
 import asyncio
 from datetime import datetime, UTC  # timedelta,
 
-from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
-from homeassistant.components.button.const import SERVICE_PRESS
-from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
-from homeassistant.components.switch import (
-    DOMAIN as SWITCH_DOMAIN,
-    SERVICE_TURN_OFF,
-    SERVICE_TURN_ON,
-)
-from homeassistant.const import ATTR_ENTITY_ID
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
@@ -43,6 +34,7 @@ from ocpp.v16.enums import (
 )
 
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_2
+from .charge_point_test import set_switch, press_button, set_number
 import contextlib
 
 
@@ -50,39 +42,19 @@ import contextlib
 async def test_cms_responses(hass, socket_enabled):
     """Test central system responses to a charger."""
 
-    async def test_switches(hass, socket_enabled):
+    async def test_switches(hass, cs, socket_enabled):
         """Test switch operations."""
         for switch in SWITCHES:
-            await hass.services.async_call(
-                SWITCH_DOMAIN,
-                SERVICE_TURN_ON,
-                service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
-                },
-                blocking=True,
-            )
-
+            await set_switch(hass, cs, switch.key, True)
             await asyncio.sleep(1)
-            await hass.services.async_call(
-                SWITCH_DOMAIN,
-                SERVICE_TURN_OFF,
-                service_data={
-                    ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.test_cpid_{switch.key}"
-                },
-                blocking=True,
-            )
+            await set_switch(hass, cs, switch.key, False)
 
-    async def test_buttons(hass, socket_enabled):
+    async def test_buttons(hass, cs, socket_enabled):
         """Test button operations."""
         for button in BUTTONS:
-            await hass.services.async_call(
-                BUTTON_DOMAIN,
-                SERVICE_PRESS,
-                {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.test_cpid_{button.key}"},
-                blocking=True,
-            )
+            await press_button(hass, cs, button.key)
 
-    async def test_services(hass, socket_enabled):
+    async def test_services(hass, cs, socket_enabled):
         """Test service operations."""
         SERVICES = [
             csvcs.service_update_firmware,
@@ -142,13 +114,7 @@ async def test_cms_responses(hass, socket_enabled):
 
         for number in NUMBERS:
             # test setting value of number slider
-            await hass.services.async_call(
-                NUMBER_DOMAIN,
-                "set_value",
-                service_data={"value": "10"},
-                blocking=True,
-                target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.test_cpid_{number.key}"},
-            )
+            await set_number(hass, cs, number.key, 10)
 
     # Test MOCK_CONFIG_DATA_2
     if True:
@@ -375,9 +341,9 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.start(),
                     cs.charge_points[cs.settings.cpid].trigger_boot_notification(),
                     cs.charge_points[cs.settings.cpid].trigger_status_notification(),
-                    test_switches(hass, socket_enabled),
-                    test_services(hass, socket_enabled),
-                    test_buttons(hass, socket_enabled),
+                    test_switches(hass, cs, socket_enabled),
+                    test_services(hass, cs, socket_enabled),
+                    test_buttons(hass, cs, socket_enabled),
                     cp.send_meter_clock_data(),
                 ),
                 timeout=5,
@@ -465,9 +431,9 @@ async def test_cms_responses(hass, socket_enabled):
                     cp.start(),
                     cs.charge_points[cs.settings.cpid].trigger_boot_notification(),
                     cs.charge_points[cs.settings.cpid].trigger_status_notification(),
-                    test_switches(hass, socket_enabled),
-                    test_services(hass, socket_enabled),
-                    test_buttons(hass, socket_enabled),
+                    test_switches(hass, cs, socket_enabled),
+                    test_services(hass, cs, socket_enabled),
+                    test_buttons(hass, cs, socket_enabled),
                 ),
                 timeout=3,
             )
@@ -491,7 +457,7 @@ async def test_cms_responses(hass, socket_enabled):
 
     # test services when charger is unavailable
     await asyncio.sleep(1)
-    await test_services(hass, socket_enabled)
+    await test_services(hass, cs, socket_enabled)
     if entry := hass.config_entries.async_get_entry(config_entry.entry_id):
         await hass.config_entries.async_remove(entry.entry_id)
         await hass.async_block_till_done()
