@@ -9,6 +9,7 @@ from custom_components.ocpp import CentralSystem
 from .const import CONF_PORT
 import contextlib
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
+from custom_components.ocpp.enums import HAChargerServices as csvcs
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button.const import SERVICE_PRESS
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -84,6 +85,12 @@ async def remove_configuration(hass: HomeAssistant, config_entry: MockConfigEntr
 
 
 remove_configuration.__test__ = False
+
+
+async def wait_ready(hass: HomeAssistant):
+    """Wait until charge point is connected and initialised."""
+    while not hass.services.has_service(OCPP_DOMAIN, csvcs.service_data_transfer):
+        await asyncio.sleep(0.1)
 
 
 def _check_complete(

@@ -1,4 +1,4 @@
-"""Implement a test by a simulating a chargepoint."""
+"""Implement a test by a simulating an OCPP 1.6 chargepoint."""
 
 import asyncio
 from datetime import datetime, UTC  # timedelta,
@@ -39,7 +39,7 @@ import contextlib
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
-async def test_cms_responses(hass, socket_enabled):
+async def test_cms_responses_v16(hass, socket_enabled):
     """Test central system responses to a charger."""
 
     async def test_switches(hass, cs, socket_enabled):
