@@ -1,7 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 
 from homeassistant.core import HomeAssistant
 from ocpp.v16.enums import Measurand
@@ -10,6 +10,7 @@ from custom_components.ocpp import CentralSystem
 from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
     HAChargerSession as csess,
+    HAChargerStatuses as cstat,
     Profiles,
 )
 from .charge_point_test import (
@@ -21,6 +22,7 @@ from .charge_point_test import (
 )
 from .const import MOCK_CONFIG_DATA
 from custom_components.ocpp.const import (
+    DEFAULT_METER_INTERVAL,
     DOMAIN as OCPP_DOMAIN,
     CONF_CPID,
     CONF_MONITORED_VARIABLES,
@@ -44,21 +46,26 @@ from ocpp.v201.enums import (
     Action,
     BootReasonType,
     ChangeAvailabilityStatusType,
+    ChargingStateType,
     ConnectorStatusType,
     DataType,
     GenericDeviceModelStatusType,
     IdTokenType,
     MutabilityType,
     OperationalStatusType,
+    PhaseType,
+    ReadingContextType,
     RegistrationStatusType,
     ReportBaseType,
     RequestStartStopStatusType,
     SetVariableStatusType,
+    ReasonType,
     TransactionEventType,
     TriggerMessageStatusType,
     TriggerReasonType,
     UpdateFirmwareStatusType,
 )
+from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
 
 
 supported_measurands = [
@@ -76,6 +83,9 @@ class ChargePoint(cpclass):
     task: asyncio.Task | None = None
     remote_start_tx_id: str = "remotestart"
     operative: bool | None = None
+    tx_updated_interval: int | None = None
+    tx_updated_measurands: list[str] | None = None
+    tx_start_time: datetime | None = None
 
     @on(Action.GetBaseReport)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
@@ -109,6 +119,14 @@ class ChargePoint(cpclass):
     def _on_set_variables(self, set_variable_data: list[dict], **kwargs):
         result: list[SetVariableResultType] = []
         for input in set_variable_data:
+            if (input["component"] == {"name": "SampledDataCtrlr"}) and (
+                input["variable"] == {"name": "TxUpdatedInterval"}
+            ):
+                self.tx_updated_interval = int(input["attribute_value"])
+            if (input["component"] == {"name": "SampledDataCtrlr"}) and (
+                input["variable"] == {"name": "TxUpdatedMeasurands"}
+            ):
+                self.tx_updated_measurands = input["attribute_value"].split(",")
             result.append(
                 SetVariableResultType(
                     SetVariableStatusType.accepted,
@@ -133,9 +151,10 @@ class ChargePoint(cpclass):
     async def _start_transaction_remote_start(
         self, id_token: dict, remote_start_id: int
     ):
+        self.tx_start_time = datetime.now(tz=UTC)
         request = call.TransactionEvent(
             TransactionEventType.started.value,
-            datetime.now(tz=UTC).isoformat(),
+            self.tx_start_time.isoformat(),
             TriggerReasonType.remote_start.value,
             0,
             transaction_info={
@@ -276,6 +295,282 @@ class ChargePointAllFeatures(ChargePoint):
         return call_result.TriggerMessage(TriggerMessageStatusType.rejected.value)
 
 
+async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
+    cpid: str = MOCK_CONFIG_DATA[CONF_CPID]
+
+    await set_switch(hass, cs, "charge_control", True)
+    assert len(cp.remote_starts) == 1
+    assert cp.remote_starts[0].id_token == {
+        "id_token": cs.charge_points[cpid]._remote_id_tag,
+        "type": IdTokenType.central.value,
+    }
+    while cs.get_metric(cpid, csess.transaction_id.value) is None:
+        await asyncio.sleep(0.1)
+    assert cs.get_metric(cpid, csess.transaction_id.value) == cp.remote_start_tx_id
+
+    tx_start_time = cp.tx_start_time
+    await cp.call(
+        call.StatusNotification(
+            tx_start_time.isoformat(), ConnectorStatusType.occupied, 1, 1
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.preparing
+    )
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.cable_plugged_in.value,
+            1,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+            },
+        )
+    )
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.charging_state_changed.value,
+            2,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.charging.value,
+            },
+            meter_value=[
+                {
+                    "timestamp": tx_start_time.isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 0,
+                            "measurand": Measurand.current_export.value,
+                            "phase": PhaseType.l1.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.current_export.value,
+                            "phase": PhaseType.l2.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.current_export.value,
+                            "phase": PhaseType.l3.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 1.1,
+                            "measurand": Measurand.current_import.value,
+                            "phase": PhaseType.l1.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 2.2,
+                            "measurand": Measurand.current_import.value,
+                            "phase": PhaseType.l2.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 3.3,
+                            "measurand": Measurand.current_import.value,
+                            "phase": PhaseType.l3.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 12.1,
+                            "measurand": Measurand.current_offered.value,
+                            "phase": PhaseType.l1.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 12.2,
+                            "measurand": Measurand.current_offered.value,
+                            "phase": PhaseType.l2.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 12.3,
+                            "measurand": Measurand.current_offered.value,
+                            "phase": PhaseType.l3.value,
+                            "unit_of_measure": {"unit": "A"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.energy_active_export_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                        {
+                            "value": 100,
+                            "measurand": Measurand.energy_active_import_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.energy_reactive_export_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.energy_reactive_import_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                        {
+                            "value": 50,
+                            "measurand": Measurand.frequency.value,
+                            "unit_of_measure": {"unit": "Hz"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.power_active_export.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                        {
+                            "value": 1518,
+                            "measurand": Measurand.power_active_import.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                        {
+                            "value": 8418,
+                            "measurand": Measurand.power_offered.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                        {
+                            "value": 1,
+                            "measurand": Measurand.power_factor.value,
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.power_reactive_export.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                        {
+                            "value": 0,
+                            "measurand": Measurand.power_reactive_import.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                        {
+                            "value": 69,
+                            "measurand": Measurand.soc.value,
+                            "unit_of_measure": {"unit": "percent"},
+                        },
+                        {
+                            "value": 229.9,
+                            "measurand": Measurand.voltage.value,
+                            "phase": PhaseType.l1_n.value,
+                            "unit_of_measure": {"unit": "V"},
+                        },
+                        {
+                            "value": 230,
+                            "measurand": Measurand.voltage.value,
+                            "phase": PhaseType.l2_n.value,
+                            "unit_of_measure": {"unit": "V"},
+                        },
+                        {
+                            "value": 230.4,
+                            "measurand": Measurand.voltage.value,
+                            "phase": PhaseType.l3_n.value,
+                            "unit_of_measure": {"unit": "V"},
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.charging
+    )
+    assert cs.get_metric(cpid, Measurand.current_export.value) == 0
+    assert abs(cs.get_metric(cpid, Measurand.current_import.value) - 6.6) < 1e-6
+    assert abs(cs.get_metric(cpid, Measurand.current_offered.value) - 36.6) < 1e-6
+    assert cs.get_metric(cpid, Measurand.energy_active_export_register.value) == 0
+    assert cs.get_metric(cpid, Measurand.energy_active_import_register.value) == 0.1
+    assert cs.get_metric(cpid, Measurand.energy_reactive_export_register.value) == 0
+    assert cs.get_metric(cpid, Measurand.energy_reactive_import_register.value) == 0
+    assert cs.get_metric(cpid, Measurand.frequency.value) == 50
+    assert cs.get_metric(cpid, Measurand.power_active_export.value) == 0
+    assert abs(cs.get_metric(cpid, Measurand.power_active_import.value) - 1.518) < 1e-6
+    assert abs(cs.get_metric(cpid, Measurand.power_offered.value) - 8.418) < 1e-6
+    assert cs.get_metric(cpid, Measurand.power_reactive_export.value) == 0
+    assert cs.get_metric(cpid, Measurand.power_reactive_import.value) == 0
+    assert cs.get_metric(cpid, Measurand.soc.value) == 69
+    assert abs(cs.get_metric(cpid, Measurand.voltage.value) - 230.1) < 1e-6
+    assert cs.get_metric(cpid, csess.session_energy) == 0
+    assert cs.get_metric(cpid, csess.session_time) == 0
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            (tx_start_time + timedelta(seconds=60)).isoformat(),
+            TriggerReasonType.meter_value_periodic.value,
+            3,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.charging.value,
+            },
+            meter_value=[
+                {
+                    "timestamp": (tx_start_time + timedelta(seconds=60)).isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 256,
+                            "measurand": Measurand.energy_active_import_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+    assert cs.get_metric(cpid, csess.session_energy) == 0.156
+    assert cs.get_metric(cpid, csess.session_time) == 1
+
+    await set_switch(hass, cs, "charge_control", False)
+    assert len(cp.remote_stops) == 1
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.ended.value,
+            (tx_start_time + timedelta(seconds=120)).isoformat(),
+            TriggerReasonType.remote_stop.value,
+            4,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.ev_connected.value,
+                "stopped_reason": ReasonType.remote.value,
+            },
+            meter_value=[
+                {
+                    "timestamp": (tx_start_time + timedelta(seconds=120)).isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 333,
+                            "context": ReadingContextType.transaction_end,
+                            "measurand": Measurand.energy_active_import_register.value,
+                            "unit_of_measure": {"unit": "Wh"},
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+    assert cs.get_metric(cpid, Measurand.current_import.value) == 0
+    assert cs.get_metric(cpid, Measurand.current_offered.value) == 0
+    assert cs.get_metric(cpid, Measurand.energy_active_import_register.value) == 0.333
+    assert cs.get_metric(cpid, Measurand.frequency.value) == 0
+    assert cs.get_metric(cpid, Measurand.power_active_import.value) == 0
+    assert cs.get_metric(cpid, Measurand.power_offered.value) == 0
+    assert cs.get_metric(cpid, Measurand.power_reactive_import.value) == 0
+    assert cs.get_metric(cpid, Measurand.soc.value) == 0
+    assert cs.get_metric(cpid, Measurand.voltage.value) == 0
+    assert cs.get_metric(cpid, csess.session_energy) == 0.233
+    assert cs.get_metric(cpid, csess.session_time) == 2
+
+
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
@@ -297,35 +592,27 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
         )
     )
     await wait_ready(hass)
-    assert cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], cdet.serial.value) == "SERIAL"
-    assert cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], cdet.model.value) == "MODEL"
-    assert cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], cdet.vendor.value) == "VENDOR"
+    cpid: str = MOCK_CONFIG_DATA[CONF_CPID]
+    assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
+    assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
+    assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
+    assert cs.get_metric(cpid, cdet.firmware_version.value) == "VERSION"
     assert (
-        cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], cdet.firmware_version.value)
-        == "VERSION"
-    )
-    assert (
-        cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], cdet.features.value)
+        cs.get_metric(cpid, cdet.features.value)
         == Profiles.CORE | Profiles.SMART | Profiles.RES | Profiles.AUTH
     )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ConnectorStatusType.available.value
+    )
+    assert cp.tx_updated_interval == DEFAULT_METER_INTERVAL
+    assert cp.tx_updated_measurands == supported_measurands
 
     while cp.operative is None:
         await asyncio.sleep(0.1)
     assert cp.operative
 
-    await set_switch(hass, "charge_control", True)
-    assert len(cp.remote_starts) == 1
-    assert cp.remote_starts[0].id_token == {
-        "id_token": "HomeAssistantStart",
-        "type": IdTokenType.central.value,
-    }
-    assert (
-        cs.get_metric(MOCK_CONFIG_DATA[CONF_CPID], csess.transaction_id.value)
-        == cp.remote_start_tx_id
-    )
-
-    await set_switch(hass, "charge_control", False)
-    assert len(cp.remote_stops) == 1
+    await _test_transaction(hass, cs, cp)
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
