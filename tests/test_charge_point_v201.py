@@ -3,12 +3,14 @@
 import asyncio
 from datetime import datetime, timedelta, UTC
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceResponse
+from homeassistant.exceptions import HomeAssistantError
 from ocpp.v16.enums import Measurand
 
 from custom_components.ocpp import CentralSystem
 from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
+    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     Profiles,
@@ -32,10 +34,12 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from ocpp.routing import on
+import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
 from ocpp.v201.datatypes import (
     ComponentType,
     EVSEType,
+    GetVariableResultType,
     SetVariableResultType,
     VariableType,
     VariableAttributeType,
@@ -50,6 +54,7 @@ from ocpp.v201.enums import (
     ConnectorStatusType,
     DataType,
     GenericDeviceModelStatusType,
+    GetVariableStatusType,
     IdTokenType,
     MutabilityType,
     OperationalStatusType,
@@ -86,6 +91,8 @@ class ChargePoint(cpclass):
     tx_updated_interval: int | None = None
     tx_updated_measurands: list[str] | None = None
     tx_start_time: datetime | None = None
+    component_instance_used: str | None = None
+    variable_instance_used: str | None = None
 
     @on(Action.GetBaseReport)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
@@ -127,14 +134,54 @@ class ChargePoint(cpclass):
                 input["variable"] == {"name": "TxUpdatedMeasurands"}
             ):
                 self.tx_updated_measurands = input["attribute_value"].split(",")
+
+            attr_result: SetVariableStatusType
+            if input["variable"] == {"name": "RebootRequired"}:
+                attr_result = SetVariableStatusType.reboot_required
+            elif input["variable"] == {"name": "BadVariable"}:
+                attr_result = SetVariableStatusType.unknown_variable
+            elif input["variable"] == {"name": "VeryBadVariable"}:
+                raise ocpp.exceptions.InternalError()
+            else:
+                attr_result = SetVariableStatusType.accepted
+                self.component_instance_used = input["component"].get("instance", None)
+                self.variable_instance_used = input["variable"].get("instance", None)
+
             result.append(
                 SetVariableResultType(
-                    SetVariableStatusType.accepted,
+                    attr_result,
                     ComponentType(input["component"]["name"]),
                     VariableType(input["variable"]["name"]),
                 )
             )
         return call_result.SetVariables(result)
+
+    @on(Action.GetVariables)
+    def _on_get_variables(self, get_variable_data: list[dict], **kwargs):
+        result: list[GetVariableResultType] = []
+        for input in get_variable_data:
+            value: str | None = None
+            if (input["component"] == {"name": "SampledDataCtrlr"}) and (
+                input["variable"] == {"name": "TxUpdatedInterval"}
+            ):
+                value = str(self.tx_updated_interval)
+            elif input["variable"]["name"] == "TestInstance":
+                value = (
+                    input["component"]["instance"] + "," + input["variable"]["instance"]
+                )
+            elif input["variable"] == {"name": "VeryBadVariable"}:
+                raise ocpp.exceptions.InternalError()
+            result.append(
+                GetVariableResultType(
+                    GetVariableStatusType.accepted
+                    if value is not None
+                    else GetVariableStatusType.unknown_variable,
+                    ComponentType(input["component"]["name"]),
+                    VariableType(input["variable"]["name"]),
+                    attribute_value=value,
+                )
+            )
+        return call_result.GetVariables(result)
 
     @on(Action.ChangeAvailability)
     def _on_change_availability(self, operational_status: str, **kwargs):
@@ -571,6 +618,105 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert cs.get_metric(cpid, csess.session_time) == 2
 
 
+async def _set_variable(
+    hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint, key: str, value: str
+) -> tuple[ServiceResponse, HomeAssistantError]:
+    response: ServiceResponse | None = None
+    error: HomeAssistantError | None = None
+    try:
+        response = await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_configure_v201,
+            service_data={"ocpp_key": key, "value": value},
+            blocking=True,
+            return_response=True,
+        )
+    except HomeAssistantError as e:
+        error = e
+    return response, error
+
+
+async def _get_variable(
+    hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint, key: str
+) -> tuple[ServiceResponse, HomeAssistantError]:
+    response: ServiceResponse | None = None
+    error: HomeAssistantError | None = None
+    try:
+        response = await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_get_configuration_v201,
+            service_data={"ocpp_key": key},
+            blocking=True,
+            return_response=True,
+        )
+    except HomeAssistantError as e:
+        error = e
+    return response, error
+
+
+async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
+    service_response: ServiceResponse
+    error: HomeAssistantError
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "SampledDataCtrlr/TxUpdatedInterval", "17"
+    )
+    assert service_response == {"reboot_required": False}
+    assert cp.tx_updated_interval == 17
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "SampledDataCtrlr/RebootRequired", "17"
+    )
+    assert service_response == {"reboot_required": True}
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "TestComponent(CompInstance)/TestVariable(VarInstance)", "17"
+    )
+    assert service_response == {"reboot_required": False}
+    assert cp.component_instance_used == "CompInstance"
+    assert cp.variable_instance_used == "VarInstance"
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "SampledDataCtrlr/BadVariable", "17"
+    )
+    assert error is not None
+    assert str(error).startswith("Failed to set variable")
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "SampledDataCtrlr/VeryBadVariable", "17"
+    )
+    assert error is not None
+    assert str(error).startswith("OCPP call failed: InternalError")
+
+    service_response, error = await _set_variable(
+        hass, cs, cp, "does not compute", "17"
+    )
+    assert error is not None
+    assert str(error) == "Invalid OCPP key"
+
+    service_response, error = await _get_variable(
+        hass, cs, cp, "SampledDataCtrlr/TxUpdatedInterval"
+    )
+    assert service_response == {"value": "17"}
+
+    service_response, error = await _get_variable(
+        hass, cs, cp, "TestComponent(CompInstance)/TestInstance(VarInstance)"
+    )
+    assert service_response == {"value": "CompInstance,VarInstance"}
+
+    service_response, error = await _get_variable(
+        hass, cs, cp, "SampledDataCtrlr/BadVariale"
+    )
+    assert error is not None
+    assert str(error).startswith("Failed to get variable")
+
+    service_response, error = await _get_variable(
+        hass, cs, cp, "SampledDataCtrlr/VeryBadVariable"
+    )
+    assert error is not None
+    assert str(error).startswith("OCPP call failed: InternalError")
+
+
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
@@ -613,6 +759,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert cp.operative
 
     await _test_transaction(hass, cs, cp)
+    await _test_services(hass, cs, cp)
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
