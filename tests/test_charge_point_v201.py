@@ -736,7 +736,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             ],
         )
     )
-    assert cs.get_metric(cpid, csess.session_energy) == 0.234
+    assert abs(cs.get_metric(cpid, csess.session_energy) - 0.234) < 1e-6
 
     await cp.call(
         call.TransactionEvent(

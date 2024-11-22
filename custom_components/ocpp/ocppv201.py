@@ -36,7 +36,12 @@ from ocpp.v201.enums import (
     ChargingProfileStatus,
 )
 
-from .chargepoint import CentralSystemSettings, OcppVersion, SetVariableResult, Metric
+from .chargepoint import (
+    CentralSystemSettings,
+    OcppVersion,
+    SetVariableResult,
+    MeasurandValue,
+)
 from .chargepoint import ChargePoint as cp
 from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
@@ -52,7 +57,6 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DOMAIN,
     HA_ENERGY_UNIT,
-    HA_POWER_UNIT,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -576,133 +580,50 @@ class ChargePoint(cp):
             status = self.get_authorization_status(token)
         return call_result.Authorize(id_token_info={"status": status})
 
-    @staticmethod
-    def _get_value(sampled_value: dict) -> float:
-        value: float = sampled_value["value"]
-        unit_of_measure: dict = sampled_value.get("unit_of_measure", {})
-        multiplier: int = unit_of_measure.get("multiplier", 0)
-        if multiplier != 0:
-            value *= pow(10, multiplier)
-        return value
-
-    @staticmethod
-    def _set_energy(metric: Metric, sampled_value: dict):
-        metric.unit = HA_ENERGY_UNIT
-        value: float = ChargePoint._get_value(sampled_value)
-        unit_of_measure: dict = sampled_value.get("unit_of_measure", {})
-        unit: str = unit_of_measure.get("unit", "Wh")
-        if unit == "Wh":
-            value *= 0.001
-        metric.value = value
-
-    @staticmethod
-    def _set_current(metric: Metric, sampled_values: list[dict]):
-        total: float = 0
-        for sampled_value in sampled_values:
-            unit_of_measure: dict = sampled_value.get("unit_of_measure", {})
-            metric.unit = unit_of_measure.get("unit", "A")
-            total += ChargePoint._get_value(sampled_value)
-        metric.value = total
-
-    @staticmethod
-    def _set_power(metric: Metric, sampled_values: list[dict]):
-        total: float = 0
-        metric.unit = HA_POWER_UNIT
-        for sampled_value in sampled_values:
-            value: float = ChargePoint._get_value(sampled_value)
-            unit: str = sampled_value["unit_of_measure"]["unit"]
-            if unit == "W":
-                value *= 0.001
-            total += value
-        metric.value = total
-
-    @staticmethod
-    def _set_voltage(metric: Metric, sampled_values: list[dict]):
-        average: float = 0
-        for sampled_value in sampled_values:
-            metric.unit = sampled_value.get("unit_of_measure", {}).get("unit", "V")
-            average += ChargePoint._get_value(sampled_value)
-        metric.value = average / len(sampled_values)
-
-    @staticmethod
-    def _set_frequency(metric: Metric, sampled_values: list[dict]):
-        average: float = 0
-        for sampled_value in sampled_values:
-            metric.unit = sampled_value.get("unit_of_measure", {}).get("unit", "Hz")
-            average += ChargePoint._get_value(sampled_value)
-        metric.value = average / len(sampled_values)
-
-    @staticmethod
-    def _set_soc(metric: Metric, sampled_value: dict):
-        metric.value = ChargePoint._get_value(sampled_value)
-        metric.unit = sampled_value.get("unit_of_measure", {}).get("unit", "Percent")
-
-    def _set_measurand(self, measurand: str, sampled_values: list[dict]):
-        if measurand == MeasurandType.energy_active_import_register.value:
-            self._set_energy(self._metrics[csess.session_energy], sampled_values[0])
-            if self._metrics[csess.meter_start].value is None:
-                self._set_energy(self._metrics[csess.meter_start], sampled_values[0])
-            meter_start: float = self._metrics[csess.meter_start].value
-            energy_usage: float = (
-                self._metrics[csess.session_energy].value - meter_start
-            )
-            energy_usage_rounded: float = 0.001 * round(energy_usage * 1000)
-            self._metrics[csess.session_energy].value = energy_usage_rounded
-
-        if measurand not in self._metrics:
-            return
-        metric: Metric = self._metrics[measurand]
-        if measurand.startswith("Energy"):
-            self._set_energy(metric, sampled_values[0])
-        elif measurand.startswith("Current"):
-            self._set_current(metric, sampled_values)
-        elif measurand.startswith("Power") and (
-            measurand != MeasurandType.power_factor.value
-        ):
-            self._set_power(metric, sampled_values)
-        elif measurand == MeasurandType.voltage.value:
-            self._set_voltage(metric, sampled_values)
-        elif measurand == MeasurandType.frequency.value:
-            self._set_frequency(metric, sampled_values)
-        elif measurand == MeasurandType.soc.value:
-            self._set_soc(metric, sampled_values[0])
-
-    @staticmethod
-    def _values_by_measurand(meter_value: dict) -> dict:
-        result = {}
-        for sampled_value in meter_value["sampled_value"]:
-            measurand = sampled_value["measurand"]
-            samples = result.get(measurand, [])
-            samples.append(sampled_value)
-            result[measurand] = samples
-        return result
-
     def _set_meter_values(self, tx_event_type: str, meter_values: list[dict]):
-        if tx_event_type == TransactionEventType.started.value:
-            for meter_value in meter_values:
-                measurands = self._values_by_measurand(meter_value)
-                for measurand in measurands:
-                    sampled_values = measurands[measurand]
-                    if measurand == MeasurandType.energy_active_import_register.value:
-                        self._set_energy(
-                            self._metrics[csess.meter_start], sampled_values[0]
-                        )
-                    self._set_measurand(measurand, sampled_values)
-        elif tx_event_type == TransactionEventType.updated.value:
-            for meter_value in meter_values:
-                measurands = self._values_by_measurand(meter_value)
-                for measurand in measurands:
-                    self._set_measurand(measurand, measurands[measurand])
-        elif tx_event_type == TransactionEventType.ended.value:
-            measurands_in_tx: set = set()
-            for meter_value in meter_values:
-                measurands = self._values_by_measurand(meter_value)
-                for measurand in measurands:
-                    sampled_values = measurands[measurand]
-                    context: ReadingContextType = sampled_values[0]["context"]
-                    if context == ReadingContextType.transaction_end:
-                        measurands_in_tx.add(measurand)
-                        self._set_measurand(measurand, sampled_values)
+        converted_values: list[list[MeasurandValue]] = []
+        for meter_value in meter_values:
+            measurands: list[MeasurandValue] = []
+            for sampled_value in meter_value["sampled_value"]:
+                measurand: str = sampled_value.get(
+                    "measurand", MeasurandType.energy_active_import_register.value
+                )
+                value: float = sampled_value["value"]
+                context: str = sampled_value.get("context", None)
+                phase: str = sampled_value.get("phase", None)
+                location: str = sampled_value.get("location", None)
+                unit_struct: dict = sampled_value.get("unit_of_measure", {})
+                unit: str = unit_struct.get("unit", None)
+                multiplier: int = unit_struct.get("multiplier", 0)
+                if multiplier != 0:
+                    value *= pow(10, multiplier)
+                measurands.append(
+                    MeasurandValue(measurand, value, phase, unit, context, location)
+                )
+            converted_values.append(measurands)
+
+        if (tx_event_type == TransactionEventType.started.value) or (
+            (tx_event_type == TransactionEventType.updated.value)
+            and (self._metrics[csess.meter_start].value is None)
+        ):
+            energy_measurand = MeasurandType.energy_active_import_register.value
+            for meter_value in converted_values:
+                for measurand_item in meter_value:
+                    if measurand_item.measurand == energy_measurand:
+                        energy_value = ChargePoint.get_energy_kwh(measurand_item)
+                        energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
+                        self._metrics[csess.meter_start].value = energy_value
+                        self._metrics[csess.meter_start].unit = energy_unit
+
+        self.process_measurands(converted_values, True)
+
+        if tx_event_type == TransactionEventType.ended.value:
+            measurands_in_tx: set[str] = set()
+            tx_end_context = ReadingContextType.transaction_end.value
+            for meter_value in converted_values:
+                for measurand_item in meter_value:
+                    if measurand_item.context == tx_end_context:
+                        measurands_in_tx.add(measurand_item.measurand)
             if self._inventory:
                 for measurand in self._inventory.tx_updated_measurands:
                     if (

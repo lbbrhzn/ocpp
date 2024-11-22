@@ -722,13 +722,19 @@ class ChargePoint(cp):
                     self._metrics[metric].value = metric_value
                     self._metrics[metric].unit = metric_unit
 
+    @staticmethod
+    def get_energy_kwh(measurand_value: MeasurandValue) -> float:
+        """Convert energy value from charger to kWh."""
+        if (measurand_value.unit == "Wh") or (measurand_value.unit is None):
+            return measurand_value.value / 1000
+        return measurand_value.value
+
     def process_measurands(
         self, meter_values: list[list[MeasurandValue]], is_transaction: bool
     ):
         """Process all value from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
         for bucket in meter_values:
-            unprocessed: list[MeasurandValue] = bucket
-            processed_keys = []
+            unprocessed: list[MeasurandValue] = []
             for idx in range(len(bucket)):
                 sampled_value: MeasurandValue = bucket[idx]
                 measurand = sampled_value.measurand
@@ -746,51 +752,54 @@ class ChargePoint(cp):
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
 
+                if unit == DEFAULT_ENERGY_UNIT:
+                    value = ChargePoint.get_energy_kwh(sampled_value)
+                    unit = HA_ENERGY_UNIT
+
+                if unit == DEFAULT_POWER_UNIT:
+                    value = value / 1000
+                    unit = HA_POWER_UNIT
+
                 if self._metrics[csess.meter_start.value].value == 0:
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
                 if phase is None:
-                    if unit == DEFAULT_POWER_UNIT:
-                        self._metrics[measurand].value = value / 1000
-                        self._metrics[measurand].unit = HA_POWER_UNIT
-                    elif (
+                    if (
                         measurand == DEFAULT_MEASURAND
                         and self._charger_reports_session_energy
                     ):
                         if is_transaction:
-                            if unit == DEFAULT_ENERGY_UNIT:
-                                value = value / 1000
-                                unit = HA_ENERGY_UNIT
                             self._metrics[csess.session_energy.value].value = value
                             self._metrics[csess.session_energy.value].unit = unit
                             self._metrics[csess.session_energy.value].extra_attr[
                                 cstat.id_tag.name
                             ] = self._metrics[cstat.id_tag.value].value
                         else:
-                            if unit == DEFAULT_ENERGY_UNIT:
-                                value = value / 1000
-                                unit = HA_ENERGY_UNIT
                             self._metrics[measurand].value = value
                             self._metrics[measurand].unit = unit
-                    elif unit == DEFAULT_ENERGY_UNIT:
-                        if is_transaction:
-                            self._metrics[measurand].value = value / 1000
-                            self._metrics[measurand].unit = HA_ENERGY_UNIT
                     else:
                         self._metrics[measurand].value = value
                         self._metrics[measurand].unit = unit
+                        if (
+                            is_transaction
+                            and (measurand == DEFAULT_MEASURAND)
+                            and (self._metrics[csess.meter_start].value is not None)
+                            and (self._metrics[csess.meter_start].unit == unit)
+                        ):
+                            self._metrics[csess.session_energy.value].value = (
+                                value - self._metrics[csess.meter_start].value
+                            )
+                            self._metrics[csess.session_energy.value].unit = unit
                     if location is not None:
                         self._metrics[measurand].extra_attr[om.location.value] = (
                             location
                         )
                     if context is not None:
                         self._metrics[measurand].extra_attr[om.context.value] = context
-                    processed_keys.append(idx)
-            for idx in sorted(processed_keys, reverse=True):
-                unprocessed.pop(idx)
-            if unprocessed is not None:
-                self.process_phases(unprocessed)
+                else:
+                    unprocessed.append(sampled_value)
+            self.process_phases(unprocessed)
 
     @property
     def supported_features(self) -> int:
