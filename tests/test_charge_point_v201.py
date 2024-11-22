@@ -17,6 +17,8 @@ from custom_components.ocpp.enums import (
 )
 from .charge_point_test import (
     set_switch,
+    set_number,
+    press_button,
     create_configuration,
     run_charge_point_test,
     remove_configuration,
@@ -26,7 +28,7 @@ from .const import MOCK_CONFIG_DATA
 from custom_components.ocpp.const import (
     DEFAULT_METER_INTERVAL,
     DOMAIN as OCPP_DOMAIN,
-    CONF_CPID,
+    CONF_PORT,
     CONF_MONITORED_VARIABLES,
     MEASURANDS,
 )
@@ -48,14 +50,22 @@ from ocpp.v201.datatypes import (
 )
 from ocpp.v201.enums import (
     Action,
+    AuthorizationStatusType,
     BootReasonType,
     ChangeAvailabilityStatusType,
+    ChargingProfileKindType,
+    ChargingProfilePurposeType,
+    ChargingProfileStatus,
+    ChargingRateUnitType,
     ChargingStateType,
+    ClearChargingProfileStatusType,
     ConnectorStatusType,
     DataType,
+    FirmwareStatusType,
     GenericDeviceModelStatusType,
     GetVariableStatusType,
     IdTokenType,
+    MeasurandType,
     MutabilityType,
     OperationalStatusType,
     PhaseType,
@@ -63,9 +73,12 @@ from ocpp.v201.enums import (
     RegistrationStatusType,
     ReportBaseType,
     RequestStartStopStatusType,
+    ResetStatusType,
+    ResetType,
     SetVariableStatusType,
     ReasonType,
     TransactionEventType,
+    MessageTriggerType,
     TriggerMessageStatusType,
     TriggerReasonType,
     UpdateFirmwareStatusType,
@@ -93,6 +106,10 @@ class ChargePoint(cpclass):
     tx_start_time: datetime | None = None
     component_instance_used: str | None = None
     variable_instance_used: str | None = None
+    charge_profiles_set: list[call.SetChargingProfile] = []
+    charge_profiles_cleared: list[call.ClearChargingProfile] = []
+    accept_reset: bool = True
+    resets: list[call.Reset] = []
 
     @on(Action.GetBaseReport)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
@@ -195,9 +212,52 @@ class ChargePoint(cpclass):
             ChangeAvailabilityStatusType.accepted.value
         )
 
+    @on(Action.SetChargingProfile)
+    def _on_set_charging_profile(self, evse_id: int, charging_profile: dict, **kwargs):
+        self.charge_profiles_set.append(
+            call.SetChargingProfile(evse_id, charging_profile)
+        )
+        unit = charging_profile["charging_schedule"][0]["charging_rate_unit"]
+        limit = charging_profile["charging_schedule"][0]["charging_schedule_period"][0][
+            "limit"
+        ]
+        if (unit == ChargingRateUnitType.amps.value) and (limit < 6):
+            return call_result.SetChargingProfile(ChargingProfileStatus.rejected.value)
+        return call_result.SetChargingProfile(ChargingProfileStatus.accepted.value)
+
+    @on(Action.ClearChargingProfile)
+    def _on_clear_charging_profile(self, **kwargs):
+        self.charge_profiles_cleared.append(
+            call.ClearChargingProfile(
+                kwargs.get("charging_profile_id", None),
+                kwargs.get("charging_profile_criteria", None),
+            )
+        )
+        return call_result.ClearChargingProfile(
+            ClearChargingProfileStatusType.accepted.value
+        )
+
+    @on(Action.Reset)
+    def _on_reset(self, type: str, **kwargs):
+        self.resets.append(call.Reset(type, kwargs.get("evse_id", None)))
+        return call_result.Reset(
+            ResetStatusType.accepted.value
+            if self.accept_reset
+            else ResetStatusType.rejected.value
+        )
+
     async def _start_transaction_remote_start(
         self, id_token: dict, remote_start_id: int
     ):
+        # As if AuthorizeRemoteStart is set
+        authorize_resp: call_result.Authorize = await self.call(
+            call.Authorize(id_token)
+        )
+        assert (
+            authorize_resp.id_token_info["status"]
+            == AuthorizationStatusType.accepted.value
+        )
+
         self.tx_start_time = datetime.now(tz=UTC)
         request = call.TransactionEvent(
             TransactionEventType.started.value,
@@ -208,6 +268,18 @@ class ChargePoint(cpclass):
                 "transaction_id": self.remote_start_tx_id,
                 "remote_start_id": remote_start_id,
             },
+            meter_value=[
+                {
+                    "timestamp": self.tx_start_time.isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 0,
+                            "measurand": Measurand.power_active_import.value,
+                            "unit_of_measure": {"unit": "W"},
+                        },
+                    ],
+                },
+            ],
             id_token=id_token,
         )
         await self.call(request)
@@ -330,20 +402,8 @@ class ChargePoint(cpclass):
         )
 
 
-class ChargePointAllFeatures(ChargePoint):
-    """A charge point which also supports UpdateFirmware and TriggerMessage."""
-
-    @on(Action.UpdateFirmware)
-    def _on_update_firmware(self, request_id: int, firmware: dict, **kwargs):
-        return call_result.UpdateFirmware(UpdateFirmwareStatusType.rejected.value)
-
-    @on(Action.TriggerMessage)
-    def _on_trigger_message(self, requested_message: str, **kwargs):
-        return call_result.TriggerMessage(TriggerMessageStatusType.rejected.value)
-
-
 async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cpid: str = MOCK_CONFIG_DATA[CONF_CPID]
+    cpid: str = cs.settings.cpid
 
     await set_switch(hass, cs, "charge_control", True)
     assert len(cp.remote_starts) == 1
@@ -451,9 +511,9 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
                             "unit_of_measure": {"unit": "Wh"},
                         },
                         {
-                            "value": 100,
+                            "value": 0.1,
                             "measurand": Measurand.energy_active_import_register.value,
-                            "unit_of_measure": {"unit": "Wh"},
+                            "unit_of_measure": {"unit": "Wh", "multiplier": 3},
                         },
                         {
                             "value": 0,
@@ -521,6 +581,12 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
                             "measurand": Measurand.voltage.value,
                             "phase": PhaseType.l3_n.value,
                             "unit_of_measure": {"unit": "V"},
+                        },
+                        {
+                            # Not among enabled measurands, will be ignored
+                            "value": 1111,
+                            "measurand": MeasurandType.energy_active_net.value,
+                            "unit_of_measure": {"unit": "Wh"},
                         },
                     ],
                 }
@@ -616,6 +682,113 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert cs.get_metric(cpid, Measurand.voltage.value) == 0
     assert cs.get_metric(cpid, csess.session_energy) == 0.233
     assert cs.get_metric(cpid, csess.session_time) == 2
+
+    # Now with energy reading in Started transaction event
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.started.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.cable_plugged_in.value,
+            0,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.ev_connected.value,
+            },
+            meter_value=[
+                {
+                    "timestamp": tx_start_time.isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 1000,
+                            "measurand": Measurand.energy_active_import_register.value,
+                            "unit_of_measure": {"unit": "kWh", "multiplier": -3},
+                        },
+                    ],
+                },
+            ],
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.preparing
+    )
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.charging_state_changed.value,
+            1,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.charging.value,
+            },
+            meter_value=[
+                {
+                    "timestamp": tx_start_time.isoformat(),
+                    "sampled_value": [
+                        {
+                            "value": 1234,
+                            "measurand": Measurand.energy_active_import_register.value,
+                            "unit_of_measure": {"unit": "kWh", "multiplier": -3},
+                        },
+                    ],
+                },
+            ],
+        )
+    )
+    assert cs.get_metric(cpid, csess.session_energy) == 0.234
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.charging_state_changed.value,
+            1,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.suspended_ev.value,
+            },
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.suspended_ev
+    )
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.updated.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.charging_state_changed.value,
+            1,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.suspended_evse.value,
+            },
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.suspended_evse
+    )
+
+    await cp.call(
+        call.TransactionEvent(
+            TransactionEventType.ended.value,
+            tx_start_time.isoformat(),
+            TriggerReasonType.ev_communication_lost.value,
+            2,
+            transaction_info={
+                "transaction_id": cp.remote_start_tx_id,
+                "charging_state": ChargingStateType.idle.value,
+                "stopped_reason": ReasonType.ev_disconnected.value,
+            },
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ChargePointStatusv16.available
+    )
 
 
 async def _set_variable(
@@ -717,6 +890,125 @@ async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
     assert str(error).startswith("OCPP call failed: InternalError")
 
 
+async def _set_charge_rate_service(
+    hass: HomeAssistant, data: dict
+) -> HomeAssistantError:
+    try:
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_set_charge_rate,
+            service_data=data,
+            blocking=True,
+        )
+    except HomeAssistantError as e:
+        return e
+    return None
+
+
+async def _test_charge_profiles(
+    hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
+):
+    error: HomeAssistantError = await _set_charge_rate_service(
+        hass, {"limit_watts": 3000}
+    )
+    assert error is None
+    assert len(cp.charge_profiles_set) == 1
+    assert cp.charge_profiles_set[-1].evse_id == 0
+    assert cp.charge_profiles_set[-1].charging_profile == {
+        "id": 1,
+        "stack_level": 0,
+        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile,
+        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_schedule": [
+            {
+                "id": 1,
+                "charging_schedule_period": [{"start_period": 0, "limit": 3000}],
+                "charging_rate_unit": ChargingRateUnitType.watts.value,
+            },
+        ],
+    }
+
+    error = await _set_charge_rate_service(hass, {"limit_amps": 16})
+    assert error is None
+    assert len(cp.charge_profiles_set) == 2
+    assert cp.charge_profiles_set[-1].evse_id == 0
+    assert cp.charge_profiles_set[-1].charging_profile == {
+        "id": 1,
+        "stack_level": 0,
+        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile,
+        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_schedule": [
+            {
+                "id": 1,
+                "charging_schedule_period": [{"start_period": 0, "limit": 16}],
+                "charging_rate_unit": ChargingRateUnitType.amps.value,
+            },
+        ],
+    }
+
+    error = await _set_charge_rate_service(
+        hass,
+        {
+            "custom_profile": """{
+            'id': 2,
+            'stack_level': 1,
+            'charging_profile_purpose': 'TxProfile',
+            'charging_profile_kind': 'Relative',
+            'charging_schedule': [{
+                'id': 1,
+                'charging_rate_unit': 'A',
+                'charging_schedule_period': [{'start_period': 0, 'limit': 6}]
+            }]
+        }"""
+        },
+    )
+    assert error is None
+    assert len(cp.charge_profiles_set) == 3
+    assert cp.charge_profiles_set[-1].evse_id == 0
+    assert cp.charge_profiles_set[-1].charging_profile == {
+        "id": 2,
+        "stack_level": 1,
+        "charging_profile_purpose": ChargingProfilePurposeType.tx_profile.value,
+        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_schedule": [
+            {
+                "id": 1,
+                "charging_schedule_period": [{"start_period": 0, "limit": 6}],
+                "charging_rate_unit": ChargingRateUnitType.amps.value,
+            },
+        ],
+    }
+
+    await set_number(hass, cs, "maximum_current", 12)
+    assert len(cp.charge_profiles_set) == 4
+    assert cp.charge_profiles_set[-1].evse_id == 0
+    assert cp.charge_profiles_set[-1].charging_profile == {
+        "id": 1,
+        "stack_level": 0,
+        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile.value,
+        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_schedule": [
+            {
+                "id": 1,
+                "charging_schedule_period": [{"start_period": 0, "limit": 12}],
+                "charging_rate_unit": ChargingRateUnitType.amps.value,
+            },
+        ],
+    }
+
+    error = await _set_charge_rate_service(hass, {"limit_amps": 5})
+    assert error is not None
+    assert str(error).startswith("Failed to set variable: Rejected")
+
+    assert len(cp.charge_profiles_cleared) == 0
+    await set_number(hass, cs, "maximum_current", 32)
+    assert len(cp.charge_profiles_cleared) == 1
+    assert cp.charge_profiles_cleared[-1].charging_profile_id is None
+    assert cp.charge_profiles_cleared[-1].charging_profile_criteria == {
+        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile.value
+    }
+
+
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
@@ -737,8 +1029,16 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
             datetime.now(tz=UTC).isoformat(), ConnectorStatusType.available, 1, 1
         )
     )
+
+    heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
+    datetime.fromisoformat(heartbeat_resp.current_time)
+
     await wait_ready(hass)
-    cpid: str = MOCK_CONFIG_DATA[CONF_CPID]
+
+    # Junk report to be ignored
+    await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
+
+    cpid: str = cs.settings.cpid
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
     assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
@@ -760,9 +1060,141 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
 
     await _test_transaction(hass, cs, cp)
     await _test_services(hass, cs, cp)
+    await _test_charge_profiles(hass, cs, cp)
+
+    await press_button(hass, cs, "reset")
+    assert len(cp.resets) == 1
+    assert cp.resets[0].type == ResetType.immediate.value
+    assert cp.resets[0].evse_id is None
+
+    error: HomeAssistantError = None
+    cp.accept_reset = False
+    try:
+        await press_button(hass, cs, "reset")
+    except HomeAssistantError as e:
+        error = e
+    assert error is not None
+    assert str(error) == "OCPP call failed: Rejected"
+
+    await set_switch(hass, cs, "availability", False)
+    assert not cp.operative
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(), ConnectorStatusType.unavailable, 1, 1
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ConnectorStatusType.unavailable.value
+    )
+
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(), ConnectorStatusType.faulted, 1, 1
+        )
+    )
+    assert (
+        cs.get_metric(cpid, cstat.status_connector.value)
+        == ConnectorStatusType.faulted.value
+    )
+
+    await cp.call(call.FirmwareStatusNotification(FirmwareStatusType.installed.value))
 
 
-@pytest.mark.timeout(90)  # Set timeout for this test
+class ChargePointAllFeatures(ChargePoint):
+    """A charge point which also supports UpdateFirmware and TriggerMessage."""
+
+    triggered_status_notification: list[EVSEType] = []
+
+    @on(Action.UpdateFirmware)
+    def _on_update_firmware(self, request_id: int, firmware: dict, **kwargs):
+        return call_result.UpdateFirmware(UpdateFirmwareStatusType.rejected.value)
+
+    @on(Action.TriggerMessage)
+    def _on_trigger_message(self, requested_message: str, **kwargs):
+        if (requested_message == MessageTriggerType.status_notification) and (
+            "evse" in kwargs
+        ):
+            self.triggered_status_notification.append(
+                EVSEType(kwargs["evse"]["id"], kwargs["evse"]["connector_id"])
+            )
+        return call_result.TriggerMessage(TriggerMessageStatusType.rejected.value)
+
+
+async def _extra_features_test(
+    hass: HomeAssistant,
+    cs: CentralSystem,
+    cp: ChargePointAllFeatures,
+):
+    await cp.call(
+        call.BootNotification(
+            {
+                "serial_number": "SERIAL",
+                "model": "MODEL",
+                "vendor_name": "VENDOR",
+                "firmware_version": "VERSION",
+            },
+            BootReasonType.power_up.value,
+        )
+    )
+    await wait_ready(hass)
+
+    assert (
+        cs.get_metric(cs.settings.cpid, cdet.features.value)
+        == Profiles.CORE
+        | Profiles.SMART
+        | Profiles.RES
+        | Profiles.AUTH
+        | Profiles.FW
+        | Profiles.REM
+    )
+
+    while len(cp.triggered_status_notification) < 1:
+        await asyncio.sleep(0.1)
+    assert cp.triggered_status_notification[0].id == 1
+    assert cp.triggered_status_notification[0].connector_id == 1
+
+
+class ChargePointReportUnsupported(ChargePointAllFeatures):
+    """A charge point which does not support GetBaseReport."""
+
+    @on(Action.GetBaseReport)
+    def _on_base_report(self, request_id: int, report_base: str, **kwargs):
+        raise ocpp.exceptions.NotImplementedError("This is not implemented")
+
+
+class ChargePointReportFailing(ChargePointAllFeatures):
+    """A charge point which keeps failing GetBaseReport."""
+
+    @on(Action.GetBaseReport)
+    def _on_base_report(self, request_id: int, report_base: str, **kwargs):
+        raise ocpp.exceptions.InternalError("Test failure")
+
+
+async def _unsupported_base_report_test(
+    hass: HomeAssistant,
+    cs: CentralSystem,
+    cp: ChargePoint,
+):
+    await cp.call(
+        call.BootNotification(
+            {
+                "serial_number": "SERIAL",
+                "model": "MODEL",
+                "vendor_name": "VENDOR",
+                "firmware_version": "VERSION",
+            },
+            BootReasonType.power_up.value,
+        )
+    )
+    await wait_ready(hass)
+    assert (
+        cs.get_metric(cs.settings.cpid, cdet.features.value)
+        == Profiles.CORE | Profiles.REM | Profiles.FW
+    )
+
+
+@pytest.mark.timeout(90)
 async def test_cms_responses_v201(hass, socket_enabled):
     """Test central system responses to a charger."""
 
@@ -785,4 +1217,36 @@ async def test_cms_responses_v201(hass, socket_enabled):
         lambda ws: ChargePoint("CP_2_client", ws),
         [lambda cp: _run_test(hass, cs, cp)],
     )
+
+    await run_charge_point_test(
+        config_entry,
+        "CP_2_allfeatures",
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointAllFeatures("CP_2_allfeatures_client", ws),
+        [lambda cp: _extra_features_test(hass, cs, cp)],
+    )
+
+    await remove_configuration(hass, config_entry)
+    config_data[CONF_MONITORED_VARIABLES] = ""
+    config_entry = MockConfigEntry(
+        domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
+    )
+    cs = await create_configuration(hass, config_entry)
+
+    await run_charge_point_test(
+        config_entry,
+        "CP_2_noreport",
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointReportUnsupported("CP_2_noreport_client", ws),
+        [lambda cp: _unsupported_base_report_test(hass, cs, cp)],
+    )
+
+    await run_charge_point_test(
+        config_entry,
+        "CP_2_report_fail",
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointReportFailing("CP_2_report_fail_client", ws),
+        [lambda cp: _unsupported_base_report_test(hass, cs, cp)],
+    )
+
     await remove_configuration(hass, config_entry)

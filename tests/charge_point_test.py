@@ -89,6 +89,7 @@ remove_configuration.__test__ = False
 
 async def wait_ready(hass: HomeAssistant):
     """Wait until charge point is connected and initialised."""
+    hass.services.async_remove(OCPP_DOMAIN, csvcs.service_data_transfer)
     while not hass.services.has_service(OCPP_DOMAIN, csvcs.service_data_transfer):
         await asyncio.sleep(0.1)
 
