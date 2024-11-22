@@ -2,9 +2,11 @@
 
 import asyncio
 from collections import defaultdict
+from dataclasses import dataclass
 from enum import Enum
 import json
 import logging
+from math import sqrt
 import secrets
 import string
 import time
@@ -24,7 +26,7 @@ import websockets.server
 from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
-from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus
+from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus, Measurand, Phase
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
@@ -35,6 +37,7 @@ from .enums import (
     HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
+    OcppMisc as om,
     Profiles as prof,
 )
 
@@ -45,7 +48,12 @@ from .const import (
     CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
     CONFIG,
+    DEFAULT_ENERGY_UNIT,
+    DEFAULT_POWER_UNIT,
+    DEFAULT_MEASURAND,
     DOMAIN,
+    HA_ENERGY_UNIT,
+    HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
 )
 
@@ -161,6 +169,18 @@ class SetVariableResult(Enum):
 
     accepted = 0
     reboot_required = 1
+
+
+@dataclass
+class MeasurandValue:
+    """Version-independent representation of a measurand."""
+
+    measurand: str
+    value: float
+    phase: str | None
+    unit: str | None
+    context: str | None
+    location: str | None
 
 
 class ChargePoint(cp):
@@ -621,6 +641,156 @@ class ChargePoint(cp):
                 f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
             )
         return auth_status
+
+    def process_phases(self, data: list[MeasurandValue]):
+        """Process phase data from meter values ."""
+
+        def average_of_nonzero(values):
+            nonzero_values: list = [v for v in values if v != 0.0]
+            nof_values: int = len(nonzero_values)
+            average = sum(nonzero_values) / nof_values if nof_values > 0 else 0
+            return average
+
+        measurand_data = {}
+        for item in data:
+            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
+            measurand = item.measurand
+            phase = item.phase
+            value = item.value
+            unit = item.unit
+            context = item.context
+            if measurand is not None and phase is not None and unit is not None:
+                if measurand not in measurand_data:
+                    measurand_data[measurand] = {}
+                measurand_data[measurand][om.unit.value] = unit
+                measurand_data[measurand][phase] = value
+                self._metrics[measurand].unit = unit
+                self._metrics[measurand].extra_attr[om.unit.value] = unit
+                self._metrics[measurand].extra_attr[phase] = value
+                self._metrics[measurand].extra_attr[om.context.value] = context
+
+        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
+        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
+        line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
+
+        for metric, phase_info in measurand_data.items():
+            metric_value = None
+            if metric in [Measurand.voltage.value]:
+                if not phase_info.keys().isdisjoint(line_to_neutral_phases):
+                    # Line to neutral voltages are averaged
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
+                    )
+                elif not phase_info.keys().isdisjoint(line_to_line_phases):
+                    # Line to line voltages are averaged and converted to line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_to_line_phases]
+                    ) / sqrt(3)
+                elif not phase_info.keys().isdisjoint(line_phases):
+                    # Workaround for chargers that don't follow engineering convention
+                    # Assumes voltages are line to neutral
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0) for phase in line_phases]
+                    )
+            else:
+                if not phase_info.keys().isdisjoint(line_phases):
+                    metric_value = sum(
+                        phase_info.get(phase, 0) for phase in line_phases
+                    )
+                elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
+                    # Workaround for some chargers that erroneously use line to neutral for current
+                    metric_value = sum(
+                        phase_info.get(phase, 0) for phase in line_to_neutral_phases
+                    )
+
+            if metric_value is not None:
+                metric_unit = phase_info.get(om.unit.value)
+                _LOGGER.debug(
+                    "process_phases: metric: %s, phase_info: %s value: %f unit :%s",
+                    metric,
+                    phase_info,
+                    metric_value,
+                    metric_unit,
+                )
+                if metric_unit == DEFAULT_POWER_UNIT:
+                    self._metrics[metric].value = metric_value / 1000
+                    self._metrics[metric].unit = HA_POWER_UNIT
+                elif metric_unit == DEFAULT_ENERGY_UNIT:
+                    self._metrics[metric].value = metric_value / 1000
+                    self._metrics[metric].unit = HA_ENERGY_UNIT
+                else:
+                    self._metrics[metric].value = metric_value
+                    self._metrics[metric].unit = metric_unit
+
+    def process_measurands(
+        self, meter_values: list[list[MeasurandValue]], is_transaction: bool
+    ):
+        """Process all value from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
+        for bucket in meter_values:
+            unprocessed: list[MeasurandValue] = bucket
+            processed_keys = []
+            for idx in range(len(bucket)):
+                sampled_value: MeasurandValue = bucket[idx]
+                measurand = sampled_value.measurand
+                value = sampled_value.value
+                unit = sampled_value.unit
+                phase = sampled_value.phase
+                location = sampled_value.location
+                context = sampled_value.context
+                # where an empty string is supplied convert to 0
+
+                if sampled_value.measurand is None:  # Backwards compatibility
+                    measurand = DEFAULT_MEASURAND
+                    unit = DEFAULT_ENERGY_UNIT
+
+                if measurand == DEFAULT_MEASURAND and unit is None:
+                    unit = DEFAULT_ENERGY_UNIT
+
+                if self._metrics[csess.meter_start.value].value == 0:
+                    # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
+                    self._charger_reports_session_energy = True
+
+                if phase is None:
+                    if unit == DEFAULT_POWER_UNIT:
+                        self._metrics[measurand].value = value / 1000
+                        self._metrics[measurand].unit = HA_POWER_UNIT
+                    elif (
+                        measurand == DEFAULT_MEASURAND
+                        and self._charger_reports_session_energy
+                    ):
+                        if is_transaction:
+                            if unit == DEFAULT_ENERGY_UNIT:
+                                value = value / 1000
+                                unit = HA_ENERGY_UNIT
+                            self._metrics[csess.session_energy.value].value = value
+                            self._metrics[csess.session_energy.value].unit = unit
+                            self._metrics[csess.session_energy.value].extra_attr[
+                                cstat.id_tag.name
+                            ] = self._metrics[cstat.id_tag.value].value
+                        else:
+                            if unit == DEFAULT_ENERGY_UNIT:
+                                value = value / 1000
+                                unit = HA_ENERGY_UNIT
+                            self._metrics[measurand].value = value
+                            self._metrics[measurand].unit = unit
+                    elif unit == DEFAULT_ENERGY_UNIT:
+                        if is_transaction:
+                            self._metrics[measurand].value = value / 1000
+                            self._metrics[measurand].unit = HA_ENERGY_UNIT
+                    else:
+                        self._metrics[measurand].value = value
+                        self._metrics[measurand].unit = unit
+                    if location is not None:
+                        self._metrics[measurand].extra_attr[om.location.value] = (
+                            location
+                        )
+                    if context is not None:
+                        self._metrics[measurand].extra_attr[om.context.value] = context
+                    processed_keys.append(idx)
+            for idx in sorted(processed_keys, reverse=True):
+                unprocessed.pop(idx)
+            if unprocessed is not None:
+                self.process_phases(unprocessed)
 
     @property
     def supported_features(self) -> int:

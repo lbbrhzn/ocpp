@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, UTC
 import logging
 
 from homeassistant.const import STATE_UNAVAILABLE
-from math import sqrt
 import time
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,7 +28,6 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
-    Phase,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -38,7 +36,7 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .chargepoint import CentralSystemSettings, OcppVersion
+from .chargepoint import CentralSystemSettings, OcppVersion, MeasurandValue
 from .chargepoint import ChargePoint as cp
 from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
@@ -58,16 +56,12 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
-    DEFAULT_ENERGY_UNIT,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
-    DEFAULT_POWER_UNIT,
     DOMAIN,
-    HA_ENERGY_UNIT,
-    HA_POWER_UNIT,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -597,91 +591,6 @@ class ChargePoint(cp):
             boot_info.get(om.firmware_version.name, None),
         )
 
-    def process_phases(self, data):
-        """Process phase data from meter values ."""
-
-        def average_of_nonzero(values):
-            nonzero_values: list = [v for v in values if float(v) != 0.0]
-            nof_values: int = len(nonzero_values)
-            average = sum(nonzero_values) / nof_values if nof_values > 0 else 0
-            return average
-
-        measurand_data = {}
-        for item in data:
-            # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
-            measurand = item.get(om.measurand.value, None)
-            phase = item.get(om.phase.value, None)
-            value = item.get(om.value.value, None)
-            unit = item.get(om.unit.value, None)
-            context = item.get(om.context.value, None)
-            # where an empty string is supplied convert to 0
-            try:
-                value = float(value)
-            except ValueError:
-                value = 0
-            if measurand is not None and phase is not None and unit is not None:
-                if measurand not in measurand_data:
-                    measurand_data[measurand] = {}
-                measurand_data[measurand][om.unit.value] = unit
-                measurand_data[measurand][phase] = value
-                self._metrics[measurand].unit = unit
-                self._metrics[measurand].extra_attr[om.unit.value] = unit
-                self._metrics[measurand].extra_attr[phase] = value
-                self._metrics[measurand].extra_attr[om.context.value] = context
-
-        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
-        line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
-        line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
-
-        for metric, phase_info in measurand_data.items():
-            metric_value = None
-            if metric in [Measurand.voltage.value]:
-                if not phase_info.keys().isdisjoint(line_to_neutral_phases):
-                    # Line to neutral voltages are averaged
-                    metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
-                    )
-                elif not phase_info.keys().isdisjoint(line_to_line_phases):
-                    # Line to line voltages are averaged and converted to line to neutral
-                    metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_to_line_phases]
-                    ) / sqrt(3)
-                elif not phase_info.keys().isdisjoint(line_phases):
-                    # Workaround for chargers that don't follow engineering convention
-                    # Assumes voltages are line to neutral
-                    metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_phases]
-                    )
-            else:
-                if not phase_info.keys().isdisjoint(line_phases):
-                    metric_value = sum(
-                        phase_info.get(phase, 0) for phase in line_phases
-                    )
-                elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
-                    # Workaround for some chargers that erroneously use line to neutral for current
-                    metric_value = sum(
-                        phase_info.get(phase, 0) for phase in line_to_neutral_phases
-                    )
-
-            if metric_value is not None:
-                metric_unit = phase_info.get(om.unit.value)
-                _LOGGER.debug(
-                    "process_phases: metric: %s, phase_info: %s value: %f unit :%s",
-                    metric,
-                    phase_info,
-                    metric_value,
-                    metric_unit,
-                )
-                if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[metric].value = float(metric_value) / 1000
-                    self._metrics[metric].unit = HA_POWER_UNIT
-                elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[metric].value = float(metric_value) / 1000
-                    self._metrics[metric].unit = HA_ENERGY_UNIT
-                else:
-                    self._metrics[metric].value = float(metric_value)
-                    self._metrics[metric].unit = metric_unit
-
     @on(Action.meter_values)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls."""
@@ -719,75 +628,27 @@ class ChargePoint(cp):
         elif transaction_id != 0:
             _LOGGER.warning("Unknown transaction detected with id=%i", transaction_id)
 
+        meter_values: list[list[MeasurandValue]] = []
         for bucket in meter_value:
-            unprocessed = bucket[om.sampled_value.name]
-            processed_keys = []
-            for idx, sampled_value in enumerate(bucket[om.sampled_value.name]):
+            measurands: list[MeasurandValue] = []
+            for sampled_value in bucket[om.sampled_value.name]:
                 measurand = sampled_value.get(om.measurand.value, None)
                 value = sampled_value.get(om.value.value, None)
-                unit = sampled_value.get(om.unit.value, None)
-                phase = sampled_value.get(om.phase.value, None)
-                location = sampled_value.get(om.location.value, None)
-                context = sampled_value.get(om.context.value, None)
                 # where an empty string is supplied convert to 0
                 try:
                     value = float(value)
                 except ValueError:
                     value = 0
+                unit = sampled_value.get(om.unit.value, None)
+                phase = sampled_value.get(om.phase.value, None)
+                location = sampled_value.get(om.location.value, None)
+                context = sampled_value.get(om.context.value, None)
+                measurands.append(
+                    MeasurandValue(measurand, value, phase, unit, context, location)
+                )
+            meter_values.append(measurands)
+        self.process_measurands(meter_values, transaction_matches)
 
-                if len(sampled_value.keys()) == 1:  # Backwards compatibility
-                    measurand = DEFAULT_MEASURAND
-                    unit = DEFAULT_ENERGY_UNIT
-
-                if measurand == DEFAULT_MEASURAND and unit is None:
-                    unit = DEFAULT_ENERGY_UNIT
-
-                if self._metrics[csess.meter_start.value].value == 0:
-                    # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
-                    self._charger_reports_session_energy = True
-
-                if phase is None:
-                    if unit == DEFAULT_POWER_UNIT:
-                        self._metrics[measurand].value = value / 1000
-                        self._metrics[measurand].unit = HA_POWER_UNIT
-                    elif (
-                        measurand == DEFAULT_MEASURAND
-                        and self._charger_reports_session_energy
-                    ):
-                        if transaction_matches:
-                            if unit == DEFAULT_ENERGY_UNIT:
-                                value = value / 1000
-                                unit = HA_ENERGY_UNIT
-                            self._metrics[csess.session_energy.value].value = value
-                            self._metrics[csess.session_energy.value].unit = unit
-                            self._metrics[csess.session_energy.value].extra_attr[
-                                cstat.id_tag.name
-                            ] = self._metrics[cstat.id_tag.value].value
-                        else:
-                            if unit == DEFAULT_ENERGY_UNIT:
-                                value = value / 1000
-                                unit = HA_ENERGY_UNIT
-                            self._metrics[measurand].value = value
-                            self._metrics[measurand].unit = unit
-                    elif unit == DEFAULT_ENERGY_UNIT:
-                        if transaction_matches:
-                            self._metrics[measurand].value = value / 1000
-                            self._metrics[measurand].unit = HA_ENERGY_UNIT
-                    else:
-                        self._metrics[measurand].value = value
-                        self._metrics[measurand].unit = unit
-                    if location is not None:
-                        self._metrics[measurand].extra_attr[om.location.value] = (
-                            location
-                        )
-                    if context is not None:
-                        self._metrics[measurand].extra_attr[om.context.value] = context
-                    processed_keys.append(idx)
-            for idx in sorted(processed_keys, reverse=True):
-                unprocessed.pop(idx)
-            # _LOGGER.debug("Meter data not yet processed: %s", unprocessed)
-            if unprocessed is not None:
-                self.process_phases(unprocessed)
         if transaction_matches:
             self._metrics[csess.session_time.value].value = round(
                 (
