@@ -1,6 +1,6 @@
 colorlog==6.9.0
 uv>=0.4
-ruff==0.7.2
+ruff==0.8.0
 ocpp==1.0.0
 websockets==13.1
 jsonschema==4.23.0
