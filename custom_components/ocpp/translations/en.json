@@ -60,5 +60,19 @@
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed."
         }
+    },
+    "exceptions": {
+        "invalid_ocpp_key": {
+            "message": "Invalid OCPP key"
+        },
+        "ocpp_call_error": {
+            "message": "OCPP call failed: {message}"
+        },
+        "get_variables_error": {
+            "message": "Failed to get variable: {message}"
+        },
+        "set_variables_error": {
+            "message": "Failed to set variable: {message}"
+        }
     }
 }
