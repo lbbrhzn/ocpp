@@ -598,20 +598,20 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
         == ChargePointStatusv16.charging
     )
     assert cs.get_metric(cpid, Measurand.current_export.value) == 0
-    assert abs(cs.get_metric(cpid, Measurand.current_import.value) - 6.6) < 1e-6
-    assert abs(cs.get_metric(cpid, Measurand.current_offered.value) - 36.6) < 1e-6
+    assert cs.get_metric(cpid, Measurand.current_import.value) == 6.6
+    assert cs.get_metric(cpid, Measurand.current_offered.value) == 36.6
     assert cs.get_metric(cpid, Measurand.energy_active_export_register.value) == 0
     assert cs.get_metric(cpid, Measurand.energy_active_import_register.value) == 0.1
     assert cs.get_metric(cpid, Measurand.energy_reactive_export_register.value) == 0
     assert cs.get_metric(cpid, Measurand.energy_reactive_import_register.value) == 0
     assert cs.get_metric(cpid, Measurand.frequency.value) == 50
     assert cs.get_metric(cpid, Measurand.power_active_export.value) == 0
-    assert abs(cs.get_metric(cpid, Measurand.power_active_import.value) - 1.518) < 1e-6
-    assert abs(cs.get_metric(cpid, Measurand.power_offered.value) - 8.418) < 1e-6
+    assert cs.get_metric(cpid, Measurand.power_active_import.value) == 1.518
+    assert cs.get_metric(cpid, Measurand.power_offered.value) == 8.418
     assert cs.get_metric(cpid, Measurand.power_reactive_export.value) == 0
     assert cs.get_metric(cpid, Measurand.power_reactive_import.value) == 0
     assert cs.get_metric(cpid, Measurand.soc.value) == 69
-    assert abs(cs.get_metric(cpid, Measurand.voltage.value) - 230.1) < 1e-6
+    assert cs.get_metric(cpid, Measurand.voltage.value) == 230.1
     assert cs.get_metric(cpid, csess.session_energy) == 0
     assert cs.get_metric(cpid, csess.session_time) == 0
 
@@ -736,7 +736,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             ],
         )
     )
-    assert abs(cs.get_metric(cpid, csess.session_energy) - 0.234) < 1e-6
+    assert cs.get_metric(cpid, csess.session_energy) == 0.234
 
     await cp.call(
         call.TransactionEvent(

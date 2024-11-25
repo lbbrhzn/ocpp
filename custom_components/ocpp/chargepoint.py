@@ -787,8 +787,9 @@ class ChargePoint(cp):
                             and (self._metrics[csess.meter_start].value is not None)
                             and (self._metrics[csess.meter_start].unit == unit)
                         ):
+                            meter_start = self._metrics[csess.meter_start].value
                             self._metrics[csess.session_energy.value].value = (
-                                value - self._metrics[csess.meter_start].value
+                                round(1000 * (value - meter_start)) / 1000
                             )
                             self._metrics[csess.session_energy.value].unit = unit
                     if location is not None:
