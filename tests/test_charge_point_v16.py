@@ -184,7 +184,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 asyncio.gather(
                     cp.start(),
                 ),
-                timeout=5,
+                timeout=3,
             )
         await ws.close()
 
@@ -202,7 +202,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 asyncio.gather(
                     cp.start(),
                 ),
-                timeout=5,
+                timeout=3,
             )
         await ws.close()
 
@@ -223,7 +223,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                     cp.start(),
                     cp.send_meter_periodic_data(),
                 ),
-                timeout=5,
+                timeout=3,
             )
         # check if None
         assert cs.get_metric("test_cpid", "Energy.Meter.Start") is None
@@ -235,7 +235,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                     cp.send_start_transaction(12344),
                     cp.send_meter_periodic_data(),
                 ),
-                timeout=5,
+                timeout=3,
             )
         # save for reference the values for meter_start and transaction_id
         saved_meter_start = int(cs.get_metric("test_cpid", "Energy.Meter.Start"))
@@ -249,7 +249,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 asyncio.gather(
                     cp.send_meter_periodic_data(),
                 ),
-                timeout=5,
+                timeout=3,
             )
         await ws.close()
 
@@ -411,7 +411,9 @@ async def test_cms_responses_v16(hass, socket_enabled):
         "ws://127.0.0.1:9000/CP_1_error",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        with contextlib.suppress(asyncio.TimeoutError):
+        with contextlib.suppress(
+            asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
+        ):
             cp = ChargePoint("CP_1_error", ws)
             cp.accept = False
             await asyncio.wait_for(
