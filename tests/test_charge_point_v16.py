@@ -140,8 +140,8 @@ async def test_cms_responses_v16(hass, socket_enabled):
             # use a different id for debugging
             cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
             with contextlib.suppress(
-                    asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
-                ):
+                asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
+            ):
                 await asyncio.wait_for(
                     asyncio.gather(
                         cp2.start(),
