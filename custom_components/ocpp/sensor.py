@@ -163,8 +163,10 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             Measurand.rpm,
         ] or self.metric.lower().startswith("frequency"):
             device_class = SensorDeviceClass.FREQUENCY
-        elif self.metric.lower().startswith(("power.a", "power.o", "power.r")):
+        elif self.metric.lower().startswith("power.a", "power.o"):
             device_class = SensorDeviceClass.POWER
+        elif self.metric.lower().startswith("power.r"):
+            device_class = SensorDeviceClass.REACTIVE_POWER
         elif self.metric.lower().startswith("temperature."):
             device_class = SensorDeviceClass.TEMPERATURE
         elif self.metric.lower().startswith("timestamp.") or self.metric in [
