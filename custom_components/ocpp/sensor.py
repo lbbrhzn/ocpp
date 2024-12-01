@@ -156,6 +156,8 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             device_class = SensorDeviceClass.CURRENT
         elif self.metric.lower().startswith("voltage"):
             device_class = SensorDeviceClass.VOLTAGE
+        elif self.metric.lower().startswith("energy.r"):
+            device_class = None
         elif self.metric.lower().startswith("energy."):
             device_class = SensorDeviceClass.ENERGY
         elif self.metric in [
