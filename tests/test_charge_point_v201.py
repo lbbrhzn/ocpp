@@ -35,7 +35,7 @@ from custom_components.ocpp.const import (
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from ocpp.messages import ASYNC_VALIDATION
+import ocpp
 from ocpp.routing import on
 import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
@@ -1211,8 +1211,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
         domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
     )
     cs: CentralSystem = await create_configuration(hass, config_entry)
-    # threading in async validation causes tests to fail
-    ASYNC_VALIDATION = False
+    ocpp.messages.ASYNC_VALIDATION = False
     await run_charge_point_test(
         config_entry,
         "CP_2",
