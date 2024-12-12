@@ -1211,6 +1211,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
         domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
     )
     cs: CentralSystem = await create_configuration(hass, config_entry)
+    # threading in async validation causes tests to fail
     ocpp.messages.ASYNC_VALIDATION = False
     await run_charge_point_test(
         config_entry,
