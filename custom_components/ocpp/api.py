@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import ssl
 
+from functools import partial
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
@@ -101,8 +102,10 @@ class CentralSystem:
             localhost_keyfile = entry.data.get(
                 CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH
             )
-            self.ssl_context.load_cert_chain(
-                localhost_certfile, keyfile=localhost_keyfile
+            await hass.async_add_executor_job(
+                partial(
+                    self.ssl_context.load_cert_chain, localhost_certfile, keyfile=localhost_keyfile
+                )
             )
         else:
             self.ssl_context = None
