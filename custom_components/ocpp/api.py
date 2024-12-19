@@ -94,8 +94,11 @@ class CentralSystem:
         self.id = entry.entry_id
         self.charge_points = {}
 
-    async def async_init(self):
-        """Handle awaitable code during init sequence."""
+    @staticmethod
+    async def create(hass: HomeAssistant, entry: ConfigEntry):
+        """Create instance and start listening for OCPP connections on given port."""
+        self = CentralSystem(hass, entry)
+
         if self.entry.data.get(CONF_SSL, DEFAULT_SSL):
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
@@ -114,17 +117,6 @@ class CentralSystem:
             )
         else:
             self.ssl_context = None
-            yield
-        return self
-
-    def __await__(self):
-        """Call async directly after init."""
-        return self.async_init().__await__()
-
-    @staticmethod
-    async def create(hass: HomeAssistant, entry: ConfigEntry):
-        """Create instance and start listening for OCPP connections on given port."""
-        self = await CentralSystem(hass, entry)
 
         server = await websockets.server.serve(
             self.on_connect,
