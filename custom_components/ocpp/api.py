@@ -122,7 +122,7 @@ class CentralSystem:
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
         """Create instance and start listening for OCPP connections on given port."""
-        self = CentralSystem(hass, entry)
+        self = await CentralSystem(hass, entry)
 
         server = await websockets.server.serve(
             self.on_connect,
