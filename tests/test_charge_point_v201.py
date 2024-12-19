@@ -1198,12 +1198,7 @@ async def _unsupported_base_report_test(
 async def test_cms_responses_v201(hass, socket_enabled):
     """Test central system responses to a charger."""
 
-    # Should not have to do this ideally, however web socket in the CSMS
-    # restarts if measurands reported by the charger differ from the list
-    # from the configuration, which a real charger can deal with but this
-    # test cannot
     config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
 
     config_data[CONF_PORT] = 9010
     config_entry = MockConfigEntry(
