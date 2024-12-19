@@ -182,7 +182,10 @@ async def test_cms_responses_v16(hass, socket_enabled):
         cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
         with (
             contextlib.suppress(websockets.exceptions.ConnectionClosedOK),
-            pytest.raises(websockets.exceptions.NegotiationError),
+            pytest.raises(
+                websockets.exceptions.InvalidStatus,
+                websockets.exceptions.NegotiationError,
+            ),
         ):
             await asyncio.wait_for(
                 asyncio.gather(
