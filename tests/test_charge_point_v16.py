@@ -173,23 +173,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
-    # no subprotocol
-    async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1_unsup",
-    ) as ws:
-        # use a different id for debugging
-        cp = ChargePoint("CP_1_no_subprotocol", ws)
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                ),
-                timeout=3,
-            )
-        await ws.close()
-
-    await asyncio.sleep(1)
-
     # unsupported subprotocol
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_unsup",
@@ -197,7 +180,10 @@ async def test_cms_responses_v16(hass, socket_enabled):
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
+        with (
+            contextlib.suppress(websockets.exceptions.ConnectionClosedOK),
+            pytest.raises(websockets.exceptions.NegotiationError),
+        ):
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),

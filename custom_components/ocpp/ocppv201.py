@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, SupportsResponse, ServiceResponse
 from homeassistant.exceptions import ServiceValidationError, HomeAssistantError
-import websockets.server
+from websockets.asyncio.server import ServerConnection
 
 from ocpp.routing import on
 from ocpp.v201 import call, call_result
@@ -85,7 +85,7 @@ class ChargePoint(cp):
     def __init__(
         self,
         id: str,
-        connection: websockets.server.WebSocketServerProtocol,
+        connection: ServerConnection,
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystemSettings,
