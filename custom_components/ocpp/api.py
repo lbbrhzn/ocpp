@@ -114,6 +114,7 @@ class CentralSystem:
             )
         else:
             self.ssl_context = None
+            yield
 
     def __await__(self):
         """Call async directly after init."""
