@@ -129,7 +129,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         assert await hass.config_entries.async_setup(config_entry2.entry_id)
         await hass.async_block_till_done()
 
-        # no subprotocol
+        # no subprotocol central system assumes ocpp1.6 charge point
         # NB each new config entry will trigger async_update_entry
         # if the charger measurands differ from the config entry
         # which causes the websocket server to close/restart with a
@@ -138,6 +138,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
             "ws://127.0.0.1:9002/CP_1_nosub",
         ) as ws2:
             # use a different id for debugging
+            assert ws2.subprotocol is None
             cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
             with contextlib.suppress(
                 asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
@@ -173,27 +174,12 @@ async def test_cms_responses_v16(hass, socket_enabled):
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
-    # unsupported subprotocol
+    # unsupported subprotocol raises websockets exception
     with pytest.raises(websockets.exceptions.InvalidStatus):
-        async with websockets.connect(
+        await websockets.connect(
             "ws://127.0.0.1:9000/CP_1_unsup",
             subprotocols=["ocpp0.0"],
-        ) as ws:
-            # use a different id for debugging
-            cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
-            with (
-                contextlib.suppress(websockets.exceptions.ConnectionClosedOK),
-                pytest.raises(websockets.exceptions.NegotiationError),
-            ):
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        cp.start(),
-                    ),
-                    timeout=3,
-                )
-            await ws.close()
-
-    await asyncio.sleep(1)
+        )
 
     # test restore feature of meter_start and active_tranasction_id.
     async with websockets.connect(
