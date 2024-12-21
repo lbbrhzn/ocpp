@@ -117,51 +117,51 @@ async def test_cms_responses_v16(hass, socket_enabled):
             await set_number(hass, cs, number.key, 10)
 
     # Test MOCK_CONFIG_DATA_2
-    if True:
-        # Create a mock entry so we don't have to go through config flow
-        config_entry2 = MockConfigEntry(
-            domain=OCPP_DOMAIN,
-            data=MOCK_CONFIG_DATA_2,
-            entry_id="test_cms2",
-            title="test_cms2",
-        )
-        config_entry2.add_to_hass(hass)
-        assert await hass.config_entries.async_setup(config_entry2.entry_id)
-        await hass.async_block_till_done()
+    # Create a mock entry so we don't have to go through config flow
+    config_entry2 = MockConfigEntry(
+        domain=OCPP_DOMAIN,
+        data=MOCK_CONFIG_DATA_2,
+        entry_id="test_cms2",
+        title="test_cms2",
+    )
+    config_entry2.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry2.entry_id)
+    await hass.async_block_till_done()
 
-        # no subprotocol
-        # NB each new config entry will trigger async_update_entry
-        # if the charger measurands differ from the config entry
-        # which causes the websocket server to close/restart with a
-        # ConnectionClosedOK exception, hence it needs to be passed/suppressed
-        async with websockets.connect(
-            "ws://127.0.0.1:9002/CP_1_nosub",
-        ) as ws2:
-            # use a different id for debugging
-            cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
-            with contextlib.suppress(
-                asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
-            ):
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        cp2.start(),
-                        cp2.send_boot_notification(),
-                        cp2.send_authorize(),
-                        cp2.send_heartbeat(),
-                        cp2.send_status_notification(),
-                        cp2.send_firmware_status(),
-                        cp2.send_data_transfer(),
-                        cp2.send_start_transaction(),
-                        cp2.send_stop_transaction(),
-                        cp2.send_meter_periodic_data(),
-                    ),
-                    timeout=5,
-                )
-            await ws2.close()
-        await asyncio.sleep(1)
-        if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
-            await hass.config_entries.async_remove(entry.entry_id)
-            await hass.async_block_till_done()
+    # no subprotocol central system assumes ocpp1.6 charge point
+    # NB each new config entry will trigger async_update_entry
+    # if the charger measurands differ from the config entry
+    # which causes the websocket server to close/restart with a
+    # ConnectionClosedOK exception, hence it needs to be passed/suppressed
+    async with websockets.connect(
+        "ws://127.0.0.1:9002/CP_1_nosub",
+    ) as ws2:
+        # use a different id for debugging
+        assert ws2.subprotocol is None
+        cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+        with contextlib.suppress(
+            asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
+        ):
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp2.start(),
+                    cp2.send_boot_notification(),
+                    cp2.send_authorize(),
+                    cp2.send_heartbeat(),
+                    cp2.send_status_notification(),
+                    cp2.send_firmware_status(),
+                    cp2.send_data_transfer(),
+                    cp2.send_start_transaction(),
+                    cp2.send_stop_transaction(),
+                    cp2.send_meter_periodic_data(),
+                ),
+                timeout=5,
+            )
+        await ws2.close()
+    await asyncio.sleep(1)
+    if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -173,40 +173,12 @@ async def test_cms_responses_v16(hass, socket_enabled):
 
     cs = hass.data[OCPP_DOMAIN][config_entry.entry_id]
 
-    # no subprotocol
-    async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1_unsup",
-    ) as ws:
-        # use a different id for debugging
-        cp = ChargePoint("CP_1_no_subprotocol", ws)
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                ),
-                timeout=3,
-            )
-        await ws.close()
-
-    await asyncio.sleep(1)
-
-    # unsupported subprotocol
-    async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1_unsup",
-        subprotocols=["ocpp0.0"],
-    ) as ws:
-        # use a different id for debugging
-        cp = ChargePoint("CP_1_unsupported_subprotocol", ws)
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                ),
-                timeout=3,
-            )
-        await ws.close()
-
-    await asyncio.sleep(1)
+    # unsupported subprotocol raises websockets exception
+    with pytest.raises(websockets.exceptions.InvalidStatus):
+        await websockets.connect(
+            "ws://127.0.0.1:9000/CP_1_unsup",
+            subprotocols=["ocpp0.0"],
+        )
 
     # test restore feature of meter_start and active_tranasction_id.
     async with websockets.connect(
@@ -431,18 +403,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
 
     await asyncio.sleep(1)
 
-    # setting state no longer available with websockets >14
-    # test ping timeout, change cpid to start new connection
-    # cs.settings.cpid = "CP_3_test"
-    # async with websockets.connect(
-    #     "ws://127.0.0.1:9000/CP_3",
-    #     subprotocols=["ocpp1.6"],
-    # ) as ws:
-    #     cp = ChargePoint("CP_3_test", ws)
-    #     ws.state = 3  # CLOSED = 3
-    #     await asyncio.sleep(3)
-    #     await ws.close()
-
     # test services when charger is unavailable
     await asyncio.sleep(1)
     await test_services(hass, cs, socket_enabled)
@@ -460,7 +420,7 @@ class ChargePoint(cpclass):
         self.active_transactionId: int = 0
         self.accept: bool = True
 
-    @on(Action.GetConfiguration)
+    @on(Action.get_configuration)
     def on_get_configuration(self, key, **kwargs):
         """Handle a get configuration requests."""
         if key[0] == ConfigurationKey.supported_feature_profiles.value:
@@ -547,15 +507,20 @@ class ChargePoint(cpclass):
             configuration_key=[{"key": key[0], "readonly": False, "value": ""}]
         )
 
-    @on(Action.ChangeConfiguration)
-    def on_change_configuration(self, **kwargs):
+    @on(Action.change_configuration)
+    def on_change_configuration(self, key, **kwargs):
         """Handle a get configuration request."""
         if self.accept is True:
-            return call_result.ChangeConfiguration(ConfigurationStatus.accepted)
+            if key == ConfigurationKey.meter_values_sampled_data.value:
+                return call_result.ChangeConfiguration(
+                    ConfigurationStatus.reboot_required
+                )
+            else:
+                return call_result.ChangeConfiguration(ConfigurationStatus.accepted)
         else:
             return call_result.ChangeConfiguration(ConfigurationStatus.rejected)
 
-    @on(Action.ChangeAvailability)
+    @on(Action.change_availability)
     def on_change_availability(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
@@ -563,7 +528,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.ChangeAvailability(AvailabilityStatus.rejected)
 
-    @on(Action.UnlockConnector)
+    @on(Action.unlock_connector)
     def on_unlock_connector(self, **kwargs):
         """Handle unlock request."""
         if self.accept is True:
@@ -571,7 +536,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.UnlockConnector(UnlockStatus.unlock_failed)
 
-    @on(Action.Reset)
+    @on(Action.reset)
     def on_reset(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
@@ -579,7 +544,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.Reset(ResetStatus.rejected)
 
-    @on(Action.RemoteStartTransaction)
+    @on(Action.remote_start_transaction)
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         if self.accept is True:
@@ -588,7 +553,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
-    @on(Action.RemoteStopTransaction)
+    @on(Action.remote_stop_transaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
         if self.accept is True:
@@ -596,7 +561,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
-    @on(Action.SetChargingProfile)
+    @on(Action.set_charging_profile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
         if self.accept is True:
@@ -604,7 +569,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.SetChargingProfile(ChargingProfileStatus.rejected)
 
-    @on(Action.ClearChargingProfile)
+    @on(Action.clear_charging_profile)
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
         if self.accept is True:
@@ -612,7 +577,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
-    @on(Action.TriggerMessage)
+    @on(Action.trigger_message)
     def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
         if self.accept is True:
@@ -620,17 +585,17 @@ class ChargePoint(cpclass):
         else:
             return call_result.TriggerMessage(TriggerMessageStatus.rejected)
 
-    @on(Action.UpdateFirmware)
+    @on(Action.update_firmware)
     def on_update_firmware(self, **kwargs):
         """Handle update firmware request."""
         return call_result.UpdateFirmware()
 
-    @on(Action.GetDiagnostics)
+    @on(Action.get_diagnostics)
     def on_get_diagnostics(self, **kwargs):
         """Handle get diagnostics request."""
         return call_result.GetDiagnostics()
 
-    @on(Action.DataTransfer)
+    @on(Action.data_transfer)
     def on_data_transfer(self, **kwargs):
         """Handle get data transfer request."""
         if self.accept is True:
