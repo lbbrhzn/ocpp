@@ -117,52 +117,51 @@ async def test_cms_responses_v16(hass, socket_enabled):
             await set_number(hass, cs, number.key, 10)
 
     # Test MOCK_CONFIG_DATA_2
-    if True:
-        # Create a mock entry so we don't have to go through config flow
-        config_entry2 = MockConfigEntry(
-            domain=OCPP_DOMAIN,
-            data=MOCK_CONFIG_DATA_2,
-            entry_id="test_cms2",
-            title="test_cms2",
-        )
-        config_entry2.add_to_hass(hass)
-        assert await hass.config_entries.async_setup(config_entry2.entry_id)
-        await hass.async_block_till_done()
+    # Create a mock entry so we don't have to go through config flow
+    config_entry2 = MockConfigEntry(
+        domain=OCPP_DOMAIN,
+        data=MOCK_CONFIG_DATA_2,
+        entry_id="test_cms2",
+        title="test_cms2",
+    )
+    config_entry2.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry2.entry_id)
+    await hass.async_block_till_done()
 
-        # no subprotocol central system assumes ocpp1.6 charge point
-        # NB each new config entry will trigger async_update_entry
-        # if the charger measurands differ from the config entry
-        # which causes the websocket server to close/restart with a
-        # ConnectionClosedOK exception, hence it needs to be passed/suppressed
-        async with websockets.connect(
-            "ws://127.0.0.1:9002/CP_1_nosub",
-        ) as ws2:
-            # use a different id for debugging
-            assert ws2.subprotocol is None
-            cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
-            with contextlib.suppress(
-                asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
-            ):
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        cp2.start(),
-                        cp2.send_boot_notification(),
-                        cp2.send_authorize(),
-                        cp2.send_heartbeat(),
-                        cp2.send_status_notification(),
-                        cp2.send_firmware_status(),
-                        cp2.send_data_transfer(),
-                        cp2.send_start_transaction(),
-                        cp2.send_stop_transaction(),
-                        cp2.send_meter_periodic_data(),
-                    ),
-                    timeout=5,
-                )
-            await ws2.close()
-        await asyncio.sleep(1)
-        if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
-            await hass.config_entries.async_remove(entry.entry_id)
-            await hass.async_block_till_done()
+    # no subprotocol central system assumes ocpp1.6 charge point
+    # NB each new config entry will trigger async_update_entry
+    # if the charger measurands differ from the config entry
+    # which causes the websocket server to close/restart with a
+    # ConnectionClosedOK exception, hence it needs to be passed/suppressed
+    async with websockets.connect(
+        "ws://127.0.0.1:9002/CP_1_nosub",
+    ) as ws2:
+        # use a different id for debugging
+        assert ws2.subprotocol is None
+        cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+        with contextlib.suppress(
+            asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
+        ):
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp2.start(),
+                    cp2.send_boot_notification(),
+                    cp2.send_authorize(),
+                    cp2.send_heartbeat(),
+                    cp2.send_status_notification(),
+                    cp2.send_firmware_status(),
+                    cp2.send_data_transfer(),
+                    cp2.send_start_transaction(),
+                    cp2.send_stop_transaction(),
+                    cp2.send_meter_periodic_data(),
+                ),
+                timeout=5,
+            )
+        await ws2.close()
+    await asyncio.sleep(1)
+    if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
 
     # Create a mock entry so we don't have to go through config flow
     config_entry = MockConfigEntry(
@@ -403,18 +402,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
         await ws.close()
 
     await asyncio.sleep(1)
-
-    # setting state no longer available with websockets >14
-    # test ping timeout, change cpid to start new connection
-    # cs.settings.cpid = "CP_3_test"
-    # async with websockets.connect(
-    #     "ws://127.0.0.1:9000/CP_3",
-    #     subprotocols=["ocpp1.6"],
-    # ) as ws:
-    #     cp = ChargePoint("CP_3_test", ws)
-    #     ws.state = 3  # CLOSED = 3
-    #     await asyncio.sleep(3)
-    #     await ws.close()
 
     # test services when charger is unavailable
     await asyncio.sleep(1)
