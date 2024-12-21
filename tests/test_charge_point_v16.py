@@ -420,7 +420,7 @@ class ChargePoint(cpclass):
         self.active_transactionId: int = 0
         self.accept: bool = True
 
-    @on(Action.GetConfiguration)
+    @on(Action.get_configuration)
     def on_get_configuration(self, key, **kwargs):
         """Handle a get configuration requests."""
         if key[0] == ConfigurationKey.supported_feature_profiles.value:
@@ -507,7 +507,7 @@ class ChargePoint(cpclass):
             configuration_key=[{"key": key[0], "readonly": False, "value": ""}]
         )
 
-    @on(Action.ChangeConfiguration)
+    @on(Action.change_configuration)
     def on_change_configuration(self, **kwargs):
         """Handle a get configuration request."""
         if self.accept is True:
@@ -515,7 +515,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.ChangeConfiguration(ConfigurationStatus.rejected)
 
-    @on(Action.ChangeAvailability)
+    @on(Action.change_availability)
     def on_change_availability(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
@@ -523,7 +523,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.ChangeAvailability(AvailabilityStatus.rejected)
 
-    @on(Action.UnlockConnector)
+    @on(Action.unlock_connector)
     def on_unlock_connector(self, **kwargs):
         """Handle unlock request."""
         if self.accept is True:
@@ -531,7 +531,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.UnlockConnector(UnlockStatus.unlock_failed)
 
-    @on(Action.Reset)
+    @on(Action.reset)
     def on_reset(self, **kwargs):
         """Handle change availability request."""
         if self.accept is True:
@@ -539,7 +539,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.Reset(ResetStatus.rejected)
 
-    @on(Action.RemoteStartTransaction)
+    @on(Action.remote_start_transaction)
     def on_remote_start_transaction(self, **kwargs):
         """Handle remote start request."""
         if self.accept is True:
@@ -548,7 +548,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
-    @on(Action.RemoteStopTransaction)
+    @on(Action.remote_stop_transaction)
     def on_remote_stop_transaction(self, **kwargs):
         """Handle remote stop request."""
         if self.accept is True:
@@ -556,7 +556,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.RemoteStopTransaction(RemoteStartStopStatus.rejected)
 
-    @on(Action.SetChargingProfile)
+    @on(Action.set_charging_profile)
     def on_set_charging_profile(self, **kwargs):
         """Handle set charging profile request."""
         if self.accept is True:
@@ -564,7 +564,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.SetChargingProfile(ChargingProfileStatus.rejected)
 
-    @on(Action.ClearChargingProfile)
+    @on(Action.clear_charging_profile)
     def on_clear_charging_profile(self, **kwargs):
         """Handle clear charging profile request."""
         if self.accept is True:
@@ -572,7 +572,7 @@ class ChargePoint(cpclass):
         else:
             return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
-    @on(Action.TriggerMessage)
+    @on(Action.trigger_message)
     def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
         if self.accept is True:
@@ -580,17 +580,17 @@ class ChargePoint(cpclass):
         else:
             return call_result.TriggerMessage(TriggerMessageStatus.rejected)
 
-    @on(Action.UpdateFirmware)
+    @on(Action.update_firmware)
     def on_update_firmware(self, **kwargs):
         """Handle update firmware request."""
         return call_result.UpdateFirmware()
 
-    @on(Action.GetDiagnostics)
+    @on(Action.get_diagnostics)
     def on_get_diagnostics(self, **kwargs):
         """Handle get diagnostics request."""
         return call_result.GetDiagnostics()
 
-    @on(Action.DataTransfer)
+    @on(Action.data_transfer)
     def on_data_transfer(self, **kwargs):
         """Handle get data transfer request."""
         if self.accept is True:
