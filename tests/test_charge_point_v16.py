@@ -508,10 +508,15 @@ class ChargePoint(cpclass):
         )
 
     @on(Action.change_configuration)
-    def on_change_configuration(self, **kwargs):
+    def on_change_configuration(self, key, **kwargs):
         """Handle a get configuration request."""
         if self.accept is True:
-            return call_result.ChangeConfiguration(ConfigurationStatus.accepted)
+            if key[0] == ConfigurationKey.meter_values_sampled_data.value:
+                return call_result.ChangeConfiguration(
+                    ConfigurationStatus.reboot_required
+                )
+            else:
+                return call_result.ChangeConfiguration(ConfigurationStatus.accepted)
         else:
             return call_result.ChangeConfiguration(ConfigurationStatus.rejected)
 
