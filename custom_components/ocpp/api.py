@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import ssl
 
+from functools import partial
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
@@ -90,25 +91,30 @@ class CentralSystem:
         self.config = entry.data
         self.id = entry.entry_id
         self.charge_points = {}
-        if entry.data.get(CONF_SSL, DEFAULT_SSL):
-            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_certfile = entry.data.get(
-                CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH
-            )
-            localhost_keyfile = entry.data.get(
-                CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH
-            )
-            self.ssl_context.load_cert_chain(
-                localhost_certfile, keyfile=localhost_keyfile
-            )
-        else:
-            self.ssl_context = None
 
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem(hass, entry)
+
+        if self.entry.data.get(CONF_SSL, DEFAULT_SSL):
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
+            localhost_certfile = self.entry.data.get(
+                CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH
+            )
+            localhost_keyfile = self.entry.data.get(
+                CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH
+            )
+            await self.hass.async_add_executor_job(
+                partial(
+                    self.ssl_context.load_cert_chain,
+                    localhost_certfile,
+                    keyfile=localhost_keyfile,
+                )
+            )
+        else:
+            self.ssl_context = None
 
         server = await websockets.serve(
             self.on_connect,
