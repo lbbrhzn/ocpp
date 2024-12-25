@@ -35,11 +35,11 @@ def skip_notifications_fixture():
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
     future = asyncio.Future()
-    future.set_result(websockets.WebSocketServer)
+    future.set_result(websockets.asyncio.server.Server)
     with (
-        patch("websockets.server.serve", return_value=future),
-        patch("websockets.server.WebSocketServer.close"),
-        patch("websockets.server.WebSocketServer.wait_closed"),
+        patch("websockets.asyncio.server.serve", return_value=future),
+        patch("websockets.asyncio.server.Server.close"),
+        patch("websockets.asyncio.server.Server.wait_closed"),
     ):
         yield
 

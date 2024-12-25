@@ -9,9 +9,9 @@ from functools import partial
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
-from websockets import Subprotocol
-import websockets.protocol
+from websockets import Subprotocol, NegotiationError
 import websockets.server
+from websockets.asyncio.server import ServerConnection
 
 from .chargepoint import CentralSystemSettings
 from .ocppv16 import ChargePoint as ChargePointv16
@@ -22,7 +22,6 @@ from .const import (
     CONF_CSID,
     CONF_HOST,
     CONF_PORT,
-    CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
     CONF_SSL_CERTFILE_PATH,
     CONF_SSL_KEYFILE_PATH,
@@ -35,7 +34,6 @@ from .const import (
     DEFAULT_CSID,
     DEFAULT_HOST,
     DEFAULT_PORT,
-    DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
     DEFAULT_SSL_KEYFILE_PATH,
@@ -122,6 +120,7 @@ class CentralSystem:
             self.on_connect,
             self.host,
             self.port,
+            select_subprotocol=self.select_subprotocol,
             subprotocols=self.subprotocols,
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
@@ -131,27 +130,38 @@ class CentralSystem:
         self._server = server
         return self
 
-    async def on_connect(self, websocket: websockets.server.WebSocketServerProtocol):
-        """Request handler executed for every new OCPP connection."""
-        if self.config.get(CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION):
-            _LOGGER.warning("Skipping websocket subprotocol validation")
-        else:
-            if websocket.subprotocol is not None:
-                _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
-            else:
-                # In the websockets lib if no subprotocols are supported by the
-                # client and the server, it proceeds without a subprotocol,
-                # so we have to manually close the connection.
-                _LOGGER.warning(
-                    "Protocols mismatched | expected Subprotocols: %s,"
-                    " but client supports  %s | Closing connection",
-                    websocket.available_subprotocols,
-                    websocket.request_headers.get("Sec-WebSocket-Protocol", ""),
-                )
-                return await websocket.close()
+    def select_subprotocol(
+        self, connection: ServerConnection, subprotocols
+    ) -> Subprotocol | None:
+        """Override default subprotocol selection."""
 
-        _LOGGER.info(f"Charger websocket path={websocket.path}")
-        cp_id = websocket.path.strip("/")
+        # Server offers at least one subprotocol but client doesn't offer any.
+        # Default to None
+        if not subprotocols:
+            return None
+
+        # Server and client both offer subprotocols. Look for a shared one.
+        proposed_subprotocols = set(subprotocols)
+        for subprotocol in proposed_subprotocols:
+            if subprotocol in self.subprotocols:
+                return subprotocol
+
+        # No common subprotocol was found.
+        raise NegotiationError(
+            "invalid subprotocol; expected one of " + ", ".join(self.subprotocols)
+        )
+
+    async def on_connect(self, websocket: ServerConnection):
+        """Request handler executed for every new OCPP connection."""
+        if websocket.subprotocol is not None:
+            _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
+        else:
+            _LOGGER.info(
+                "Websocket Subprotocol not provided by charger: default to ocpp1.6"
+            )
+
+        _LOGGER.info(f"Charger websocket path={websocket.request.path}")
+        cp_id = websocket.request.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         if self.settings.cpid not in self.charge_points:
             _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
