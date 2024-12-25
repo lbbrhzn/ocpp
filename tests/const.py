@@ -76,6 +76,7 @@ MOCK_CONFIG_DATA_2 = {
     CONF_PORT: 9002,
     CONF_CPID: "test_cpid_2",
     CONF_SKIP_SCHEMA_VALIDATION: True,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
 }
 
 # separate entry for switch so tests can run concurrently
