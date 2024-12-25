@@ -21,7 +21,9 @@ from homeassistant.const import UnitOfTime
 from homeassistant.helpers import device_registry, entity_component, entity_registry
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-import websockets.server
+from websockets.asyncio.server import ServerConnection
+from websockets.exceptions import WebSocketException
+from websockets.protocol import State
 
 from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
@@ -471,7 +473,7 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_pong.value].unit = "ms"
         connection = self._connection
         timeout_counter = 0
-        while connection.open:
+        while connection.state is State.OPEN:
             try:
                 await asyncio.sleep(self.central.websocket_ping_interval)
                 time0 = time.perf_counter()
@@ -529,7 +531,7 @@ class ChargePoint(cp):
             await asyncio.gather(*self.tasks)
         except TimeoutError:
             pass
-        except websockets.exceptions.WebSocketException as websocket_exception:
+        except WebSocketException as websocket_exception:
             _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
         except Exception as other_exception:
             _LOGGER.error(
@@ -542,13 +544,13 @@ class ChargePoint(cp):
     async def stop(self):
         """Close connection and cancel ongoing tasks."""
         self.status = STATE_UNAVAILABLE
-        if self._connection.open:
+        if self._connection.state is State.OPEN:
             _LOGGER.debug(f"Closing websocket to '{self.id}'")
             await self._connection.close()
         for task in self.tasks:
             task.cancel()
 
-    async def reconnect(self, connection: websockets.server.WebSocketServerProtocol):
+    async def reconnect(self, connection: ServerConnection):
         """Reconnect charge point."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
 
