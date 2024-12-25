@@ -116,7 +116,7 @@ class CentralSystem:
         else:
             self.ssl_context = None
 
-        server = await websockets.server.serve(
+        server = await websockets.serve(
             self.on_connect,
             self.host,
             self.port,
