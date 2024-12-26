@@ -44,7 +44,7 @@ async def test_successful_config_flow(hass, bypass_get_data):
     )
 
     # Check that the config flow shows the user form as the first step
-    assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
 
     # If a user were to enter `test_username` for username and `test_password`
@@ -55,7 +55,7 @@ async def test_successful_config_flow(hass, bypass_get_data):
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["title"] == "test_csid"
     assert result["data"] == MOCK_CONFIG_DATA
     assert result["result"]
