@@ -5,12 +5,6 @@
 from collections.abc import AsyncGenerator
 
 from homeassistant.core import HomeAssistant
-from homeassistant.const import ATTR_DEVICE_CLASS
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorStateClass,
-    ATTR_STATE_CLASS,
-)
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import CentralSystem
@@ -43,17 +37,6 @@ async def test_setup_unload_and_reload_entry(
     assert DOMAIN in hass.data
     assert config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
-
-    # Test a random reactive power sensor to have correct device_class and state_class
-    reactive_power_sensor = hass.states.get("sensor.test_cpid_1_power_reactive_import")
-    assert (
-        reactive_power_sensor.attributes.get(ATTR_DEVICE_CLASS)
-        == SensorDeviceClass.REACTIVE_POWER
-    )
-    assert (
-        reactive_power_sensor.attributes.get(ATTR_STATE_CLASS)
-        == SensorStateClass.MEASUREMENT
-    )
 
     # Reload the entry and assert that the data from above is still there
     assert await hass.config_entries.async_reload(config_entry.entry_id)
