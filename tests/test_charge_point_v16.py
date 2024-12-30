@@ -268,6 +268,8 @@ async def test_cms_responses_v16(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Current.Import")) == 0
     assert int(cs.get_metric("test_cpid", "Voltage")) == 228
     assert cs.get_unit("test_cpid", "Energy.Active.Import.Register") == "kWh"
+    assert cs.get_ha_unit("test_cpid", "Power.Reactive.Import") == "var"
+    assert cs.get_unit("test_cpid", "Power.Reactive.Import") == "var"
     assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_unit("unknown_cpid", "Energy.Active.Import.Register") is None
     assert cs.get_extra_attr("unknown_cpid", "Energy.Active.Import.Register") is None
@@ -821,7 +823,7 @@ class ChargePoint(cpclass):
                             "value": "89.00",
                             "context": "Sample.Periodic",
                             "measurand": "Power.Reactive.Import",
-                            "unit": "W",
+                            "unit": "var",
                         },
                         {
                             "value": "0.010",
