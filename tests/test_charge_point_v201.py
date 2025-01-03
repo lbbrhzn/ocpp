@@ -40,14 +40,14 @@ from ocpp.routing import on
 import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
 from ocpp.v201.datatypes import (
-    ComponentCriterionEnumType,
-    EVSEEnumType,
-    GetVariableResultEnumType,
-    SetVariableResultEnumType,
-    VariableEnumType,
-    VariableAttributeEnumType,
-    VariableCharacteristicsEnumType,
-    ReportDataEnumType,
+    ComponentType,
+    EVSEType,
+    GetVariableResultType,
+    SetVariableResultType,
+    VariableType,
+    VariableAttributeType,
+    VariableCharacteristicsType,
+    ReportDataType,
 )
 from ocpp.v201.enums import (
     Action,
@@ -112,7 +112,7 @@ class ChargePoint(cpclass):
     accept_reset: bool = True
     resets: list[call.Reset] = []
 
-    @on(Action.GetBaseReport)
+    @on(Action.get_base_report)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
         assert report_base == ReportBaseEnumType.full_inventory.value
         self.task = asyncio.create_task(self._send_full_inventory(request_id))
@@ -120,7 +120,7 @@ class ChargePoint(cpclass):
             GenericDeviceModelStatusEnumType.accepted.value
         )
 
-    @on(Action.RequestStartTransaction)
+    @on(Action.request_start_transaction)
     def _on_remote_start(
         self, id_token: dict, remote_start_id: int, **kwargs
     ) -> call_result.RequestStartTransaction:
@@ -134,7 +134,7 @@ class ChargePoint(cpclass):
             RequestStartStopStatusEnumType.accepted.value
         )
 
-    @on(Action.RequestStopTransaction)
+    @on(Action.request_stop_transaction)
     def _on_remote_stop(self, transaction_id: str, **kwargs):
         assert transaction_id == self.remote_start_tx_id
         self.remote_stops.append(transaction_id)
@@ -142,9 +142,9 @@ class ChargePoint(cpclass):
             RequestStartStopStatusEnumType.accepted.value
         )
 
-    @on(Action.SetVariables)
+    @on(Action.set_variables)
     def _on_set_variables(self, set_variable_data: list[dict], **kwargs):
-        result: list[SetVariableResultEnumType] = []
+        result: list[SetVariableResultType] = []
         for input in set_variable_data:
             if (input["component"] == {"name": "SampledDataCtrlr"}) and (
                 input["variable"] == {"name": "TxUpdatedInterval"}
@@ -168,17 +168,17 @@ class ChargePoint(cpclass):
                 self.variable_instance_used = input["variable"].get("instance", None)
 
             result.append(
-                SetVariableResultEnumType(
+                SetVariableResultType(
                     attr_result,
-                    ComponentCriterionEnumType(input["component"]["name"]),
-                    VariableEnumType(input["variable"]["name"]),
+                    ComponentType(input["component"]["name"]),
+                    VariableType(input["variable"]["name"]),
                 )
             )
         return call_result.SetVariables(result)
 
-    @on(Action.GetVariables)
+    @on(Action.get_variables)
     def _on_get_variables(self, get_variable_data: list[dict], **kwargs):
-        result: list[GetVariableResultEnumType] = []
+        result: list[GetVariableResultType] = []
         for input in get_variable_data:
             value: str | None = None
             if (input["component"] == {"name": "SampledDataCtrlr"}) and (
@@ -192,18 +192,18 @@ class ChargePoint(cpclass):
             elif input["variable"] == {"name": "VeryBadVariable"}:
                 raise ocpp.exceptions.InternalError()
             result.append(
-                GetVariableResultEnumType(
+                GetVariableResultType(
                     GetVariableStatusEnumType.accepted
                     if value is not None
                     else GetVariableStatusEnumType.unknown_variable,
-                    ComponentCriterionEnumType(input["component"]["name"]),
-                    VariableEnumType(input["variable"]["name"]),
+                    ComponentType(input["component"]["name"]),
+                    VariableType(input["variable"]["name"]),
                     attribute_value=value,
                 )
             )
         return call_result.GetVariables(result)
 
-    @on(Action.ChangeAvailability)
+    @on(Action.change_availability)
     def _on_change_availability(self, operational_status: str, **kwargs):
         if operational_status == OperationalStatusEnumType.operative.value:
             self.operative = True
@@ -215,7 +215,7 @@ class ChargePoint(cpclass):
             ChangeAvailabilityStatusEnumType.accepted.value
         )
 
-    @on(Action.SetChargingProfile)
+    @on(Action.set_charging_profile)
     def _on_set_charging_profile(self, evse_id: int, charging_profile: dict, **kwargs):
         self.charge_profiles_set.append(
             call.SetChargingProfile(evse_id, charging_profile)
@@ -232,7 +232,7 @@ class ChargePoint(cpclass):
             ChargingProfileStatusEnumType.accepted.value
         )
 
-    @on(Action.ClearChargingProfile)
+    @on(Action.clear_charging_profile)
     def _on_clear_charging_profile(self, **kwargs):
         self.charge_profiles_cleared.append(
             call.ClearChargingProfile(
@@ -244,7 +244,7 @@ class ChargePoint(cpclass):
             ClearChargingProfileStatusEnumType.accepted.value
         )
 
-    @on(Action.Reset)
+    @on(Action.reset)
     def _on_reset(self, Type: str, **kwargs):
         self.resets.append(call.Reset(Type, kwargs.get("evse_id", None)))
         return call_result.Reset(
@@ -299,11 +299,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 0,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType("SmartChargingCtrlr"),
-                        VariableEnumType("Available"),
+                    ReportDataType(
+                        ComponentType("SmartChargingCtrlr"),
+                        VariableType("Available"),
                         [
-                            VariableAttributeEnumType(
+                            VariableAttributeType(
                                 value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
@@ -318,11 +318,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 1,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType("ReservationCtrlr"),
-                        VariableEnumType("Available"),
+                    ReportDataType(
+                        ComponentType("ReservationCtrlr"),
+                        VariableType("Available"),
                         [
-                            VariableAttributeEnumType(
+                            VariableAttributeType(
                                 value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
@@ -337,11 +337,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 2,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType("LocalAuthListCtrlr"),
-                        VariableEnumType("Available"),
+                    ReportDataType(
+                        ComponentType("LocalAuthListCtrlr"),
+                        VariableType("Available"),
                         [
-                            VariableAttributeEnumType(
+                            VariableAttributeType(
                                 value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
@@ -356,11 +356,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 3,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType("EVSE", evse=EVSEEnumType(1)),
-                        VariableEnumType("Available"),
+                    ReportDataType(
+                        ComponentType("EVSE", evse=EVSEType(1)),
+                        VariableType("Available"),
                         [
-                            VariableAttributeEnumType(
+                            VariableAttributeType(
                                 value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
@@ -375,13 +375,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 4,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType(
-                            "Connector", evse=EVSEEnumType(1, connector_id=1)
-                        ),
-                        VariableEnumType("Available"),
+                    ReportDataType(
+                        ComponentType("Connector", evse=EVSEType(1, connector_id=1)),
+                        VariableType("Available"),
                         [
-                            VariableAttributeEnumType(
+                            VariableAttributeType(
                                 value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
@@ -396,11 +394,11 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 5,
                 [
-                    ReportDataEnumType(
-                        ComponentCriterionEnumType("SampledDataCtrlr"),
-                        VariableEnumType("TxUpdatedMeasurands"),
-                        [VariableAttributeEnumType(value="", persistent=True)],
-                        VariableCharacteristicsEnumType(
+                    ReportDataType(
+                        ComponentType("SampledDataCtrlr"),
+                        VariableType("TxUpdatedMeasurands"),
+                        [VariableAttributeType(value="", persistent=True)],
+                        VariableCharacteristicsType(
                             DataEnumType.member_list,
                             False,
                             values_list=",".join(supported_measurands),
@@ -1115,19 +1113,19 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
 class ChargePointAllFeatures(ChargePoint):
     """A charge point which also supports UpdateFirmware and TriggerMessage."""
 
-    triggered_status_notification: list[EVSEEnumType] = []
+    triggered_status_notification: list[EVSEType] = []
 
-    @on(Action.UpdateFirmware)
+    @on(Action.update_firmware)
     def _on_update_firmware(self, request_id: int, firmware: dict, **kwargs):
         return call_result.UpdateFirmware(UpdateFirmwareStatusEnumType.rejected.value)
 
-    @on(Action.TriggerMessage)
+    @on(Action.trigger_message)
     def _on_trigger_message(self, requested_message: str, **kwargs):
         if (requested_message == MessageTriggerEnumType.status_notification) and (
             "evse" in kwargs
         ):
             self.triggered_status_notification.append(
-                EVSEEnumType(kwargs["evse"]["id"], kwargs["evse"]["connector_id"])
+                EVSEType(kwargs["evse"]["id"], kwargs["evse"]["connector_id"])
             )
         return call_result.TriggerMessage(TriggerMessageStatusEnumType.rejected.value)
 
@@ -1169,7 +1167,7 @@ async def _extra_features_test(
 class ChargePointReportUnsupported(ChargePointAllFeatures):
     """A charge point which does not support GetBaseReport."""
 
-    @on(Action.GetBaseReport)
+    @on(Action.get_base_report)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
         raise ocpp.exceptions.NotImplementedError("This is not implemented")
 
@@ -1177,7 +1175,7 @@ class ChargePointReportUnsupported(ChargePointAllFeatures):
 class ChargePointReportFailing(ChargePointAllFeatures):
     """A charge point which keeps failing GetBaseReport."""
 
-    @on(Action.GetBaseReport)
+    @on(Action.get_base_report)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
         raise ocpp.exceptions.InternalError("Test failure")
 
