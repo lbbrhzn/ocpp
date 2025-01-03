@@ -571,12 +571,12 @@ class ChargePoint(cp):
     def on_authorize(self, id_token: dict, **kwargs):
         """Perform OCPP callback."""
         status: str = AuthorizationStatusEnumType.unknown.value
-        token_EnumType: str = id_token["type"]
+        token_type: str = id_token["type"]
         token: str = id_token["id_token"]
         if (
-            (token_EnumType == IdTokenEnumType.iso14443)
-            or (token_EnumType == IdTokenEnumType.iso15693)
-            or (token_EnumType == IdTokenEnumType.central)
+            (token_type == IdTokenEnumType.iso14443)
+            or (token_type == IdTokenEnumType.iso15693)
+            or (token_type == IdTokenEnumType.central)
         ):
             status = self.get_authorization_status(token)
         return call_result.Authorize(id_token_info={"status": status})
