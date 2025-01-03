@@ -40,7 +40,7 @@ from ocpp.routing import on
 import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
 from ocpp.v201.datatypes import (
-    ComponentEnumType,
+    ComponentCriterionEnumType,
     EVSEEnumType,
     GetVariableResultEnumType,
     SetVariableResultEnumType,
@@ -59,7 +59,7 @@ from ocpp.v201.enums import (
     ChargingProfileStatusEnumType,
     ChargingRateUnitEnumType,
     ChargingStateEnumType,
-    ClearChargingProfileStatusEnumTypeEnumType,
+    ClearChargingProfileStatusEnumType,
     ConnectorStatusEnumType,
     DataEnumType,
     FirmwareStatusEnumType,
@@ -170,7 +170,7 @@ class ChargePoint(cpclass):
             result.append(
                 SetVariableResultEnumType(
                     attr_result,
-                    ComponentEnumType(input["component"]["name"]),
+                    ComponentCriterionEnumType(input["component"]["name"]),
                     VariableEnumType(input["variable"]["name"]),
                 )
             )
@@ -196,7 +196,7 @@ class ChargePoint(cpclass):
                     GetVariableStatusEnumType.accepted
                     if value is not None
                     else GetVariableStatusEnumType.unknown_variable,
-                    ComponentEnumType(input["component"]["name"]),
+                    ComponentCriterionEnumType(input["component"]["name"]),
                     VariableEnumType(input["variable"]["name"]),
                     attribute_value=value,
                 )
@@ -241,12 +241,12 @@ class ChargePoint(cpclass):
             )
         )
         return call_result.ClearChargingProfile(
-            ClearChargingProfileStatusEnumTypeEnumType.accepted.value
+            ClearChargingProfileStatusEnumType.accepted.value
         )
 
     @on(Action.Reset)
-    def _on_reset(self, EnumType: str, **kwargs):
-        self.resets.append(call.Reset(EnumType, kwargs.get("evse_id", None)))
+    def _on_reset(self, Type: str, **kwargs):
+        self.resets.append(call.Reset(Type, kwargs.get("evse_id", None)))
         return call_result.Reset(
             ResetStatusEnumType.accepted.value
             if self.accept_reset
@@ -300,7 +300,7 @@ class ChargePoint(cpclass):
                 0,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType("SmartChargingCtrlr"),
+                        ComponentCriterionEnumType("SmartChargingCtrlr"),
                         VariableEnumType("Available"),
                         [
                             VariableAttributeEnumType(
@@ -319,7 +319,7 @@ class ChargePoint(cpclass):
                 1,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType("ReservationCtrlr"),
+                        ComponentCriterionEnumType("ReservationCtrlr"),
                         VariableEnumType("Available"),
                         [
                             VariableAttributeEnumType(
@@ -338,7 +338,7 @@ class ChargePoint(cpclass):
                 2,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType("LocalAuthListCtrlr"),
+                        ComponentCriterionEnumType("LocalAuthListCtrlr"),
                         VariableEnumType("Available"),
                         [
                             VariableAttributeEnumType(
@@ -357,7 +357,7 @@ class ChargePoint(cpclass):
                 3,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType("EVSE", evse=EVSEEnumType(1)),
+                        ComponentCriterionEnumType("EVSE", evse=EVSEEnumType(1)),
                         VariableEnumType("Available"),
                         [
                             VariableAttributeEnumType(
@@ -376,7 +376,7 @@ class ChargePoint(cpclass):
                 4,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType(
+                        ComponentCriterionEnumType(
                             "Connector", evse=EVSEEnumType(1, connector_id=1)
                         ),
                         VariableEnumType("Available"),
@@ -397,7 +397,7 @@ class ChargePoint(cpclass):
                 5,
                 [
                     ReportDataEnumType(
-                        ComponentEnumType("SampledDataCtrlr"),
+                        ComponentCriterionEnumType("SampledDataCtrlr"),
                         VariableEnumType("TxUpdatedMeasurands"),
                         [VariableAttributeEnumType(value="", persistent=True)],
                         VariableCharacteristicsEnumType(
