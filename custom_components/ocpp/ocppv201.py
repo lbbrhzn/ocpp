@@ -17,6 +17,7 @@ from ocpp.routing import on
 from ocpp.v201 import call, call_result
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
 from ocpp.v201.enums import (
+    Action,
     ConnectorStatusEnumType,
     GetVariableStatusEnumType,
     IdTokenEnumType,
@@ -319,7 +320,7 @@ class ChargePoint(cp):
         req: call.RequestStartTransaction = call.RequestStartTransaction(
             id_token={
                 "id_token": self._remote_id_tag,
-                "EnumType": IdTokenEnumType.central.value,
+                "type": IdTokenEnumType.central.value,
             },
             remote_start_id=1,
         )
@@ -416,7 +417,7 @@ class ChargePoint(cp):
                 translation_placeholders={"message": str(result)},
             )
 
-    @on("BootNotification")
+    @on(Action.boot_notification)
     def on_boot_notification(self, charging_station, reason, **kwargs):
         """Perform OCPP callback."""
         resp = call_result.BootNotification(
@@ -432,7 +433,7 @@ class ChargePoint(cp):
         self._register_boot_notification()
         return resp
 
-    @on("Heartbeat")
+    @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Perform OCPP callback."""
         return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
@@ -448,7 +449,7 @@ class ChargePoint(cp):
             )
         self.hass.async_create_task(self.update(self.central.cpid))
 
-    @on("StatusNotification")
+    @on(Action.status_notification)
     def on_status_notification(
         self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
     ):
@@ -488,15 +489,15 @@ class ChargePoint(cp):
 
         return call_result.StatusNotification()
 
-    @on("FirmwareStatusNotification")
-    @on("MeterValues")
-    @on("LogStatusNotification")
-    @on("NotifyEvent")
+    @on(Action.firmware_status_notification)
+    @on(Action.meter_values)
+    @on(Action.log_status_notification)
+    @on(Action.notify_event)
     def ack(self, **kwargs):
         """Perform OCPP callback."""
         return call_result.StatusNotification()
 
-    @on("NotifyReport")
+    @on(Action.notify_report)
     def on_report(self, request_id: int, generated_at: str, seq_no: int, **kwargs):
         """Perform OCPP callback."""
         if self._wait_inventory is None:
@@ -511,9 +512,9 @@ class ChargePoint(cp):
             variable_name = variable["name"]
             value: str | None = None
             for attribute in report_data["variable_attribute"]:
-                if (
-                    ("EnumType" not in attribute) or (attribute["EnumType"] == "Actual")
-                ) and ("value" in attribute):
+                if (("type" not in attribute) or (attribute["type"] == "Actual")) and (
+                    "value" in attribute
+                ):
                     value = attribute["value"]
                     break
             bool_value: bool = value and (value.casefold() == "true".casefold())
@@ -566,11 +567,11 @@ class ChargePoint(cp):
             self._wait_inventory.set()
         return call_result.NotifyReport()
 
-    @on("Authorize")
+    @on(Action.authorize)
     def on_authorize(self, id_token: dict, **kwargs):
         """Perform OCPP callback."""
         status: str = AuthorizationStatusEnumType.unknown.value
-        token_EnumType: str = id_token["EnumType"]
+        token_EnumType: str = id_token["type"]
         token: str = id_token["id_token"]
         if (
             (token_EnumType == IdTokenEnumType.iso14443)
@@ -580,7 +581,7 @@ class ChargePoint(cp):
             status = self.get_authorization_status(token)
         return call_result.Authorize(id_token_info={"status": status})
 
-    def _set_meter_values(self, tx_event_EnumType: str, meter_values: list[dict]):
+    def _set_meter_values(self, tx_event_type: str, meter_values: list[dict]):
         converted_values: list[list[MeasurandValue]] = []
         for meter_value in meter_values:
             measurands: list[MeasurandValue] = []
@@ -602,8 +603,8 @@ class ChargePoint(cp):
                 )
             converted_values.append(measurands)
 
-        if (tx_event_EnumType == TransactionEventEnumType.started.value) or (
-            (tx_event_EnumType == TransactionEventEnumType.updated.value)
+        if (tx_event_type == TransactionEventEnumType.started.value) or (
+            (tx_event_type == TransactionEventEnumType.updated.value)
             and (self._metrics[csess.meter_start].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
@@ -617,7 +618,7 @@ class ChargePoint(cp):
 
         self.process_measurands(converted_values, True)
 
-        if tx_event_EnumType == TransactionEventEnumType.ended.value:
+        if tx_event_type == TransactionEventEnumType.ended.value:
             measurands_in_tx: set[str] = set()
             tx_end_context = ReadingContextEnumType.transaction_end.value
             for meter_value in converted_values:
@@ -633,10 +634,10 @@ class ChargePoint(cp):
                     ):
                         self._metrics[measurand].value = 0
 
-    @on("TransactionEvent")
+    @on(Action.transaction_event)
     def on_transaction_event(
         self,
-        event_EnumType,
+        event_type,
         timestamp,
         trigger_reason,
         seq_no,
@@ -646,7 +647,7 @@ class ChargePoint(cp):
         """Perform OCPP callback."""
         offline: bool = kwargs.get("offline", False)
         meter_values: list[dict] = kwargs.get("meter_value", [])
-        self._set_meter_values(event_EnumType, meter_values)
+        self._set_meter_values(event_type, meter_values)
         t = datetime.fromisoformat(timestamp)
 
         if "charging_state" in transaction_info:
@@ -670,10 +671,10 @@ class ChargePoint(cp):
         id_token = kwargs.get("id_token")
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
-            id_tag_string: str = id_token["EnumType"] + ":" + id_token["id_token"]
+            id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
             self._metrics[cstat.id_tag.value].value = id_tag_string
 
-        if event_EnumType == TransactionEventEnumType.started.value:
+        if event_type == TransactionEventEnumType.started.value:
             self._tx_start_time = t
             tx_id: str = transaction_info["transaction_id"]
             self._metrics[csess.transaction_id.value].value = tx_id
@@ -684,7 +685,7 @@ class ChargePoint(cp):
                 duration_minutes: int = ((t - self._tx_start_time).seconds + 59) // 60
                 self._metrics[csess.session_time].value = duration_minutes
                 self._metrics[csess.session_time].unit = UnitOfTime.MINUTES
-            if event_EnumType == TransactionEventEnumType.ended.value:
+            if event_type == TransactionEventEnumType.ended.value:
                 self._metrics[csess.transaction_id.value].value = ""
                 self._metrics[cstat.id_tag.value].value = ""
 

@@ -416,7 +416,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert len(cp.remote_starts) == 1
     assert cp.remote_starts[0].id_token == {
         "id_token": cs.charge_points[cpid]._remote_id_tag,
-        "EnumType": IdTokenEnumType.central.value,
+        "type": IdTokenEnumType.central.value,
     }
     while cs.get_metric(cpid, csess.transaction_id.value) is None:
         await asyncio.sleep(0.1)
