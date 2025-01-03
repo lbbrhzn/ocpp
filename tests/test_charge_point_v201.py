@@ -39,7 +39,7 @@ import ocpp
 from ocpp.routing import on
 import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
-from ocpp.v201.dataEnumTypes import (
+from ocpp.v201.datatypes import (
     ComponentEnumType,
     EVSEEnumType,
     GetVariableResultEnumType,
