@@ -245,8 +245,8 @@ class ChargePoint(cpclass):
         )
 
     @on(Action.reset)
-    def _on_reset(self, Type: str, **kwargs):
-        self.resets.append(call.Reset(Type, kwargs.get("evse_id", None)))
+    def _on_reset(self, type: str, **kwargs):
+        self.resets.append(call.Reset(type, kwargs.get("evse_id", None)))
         return call_result.Reset(
             ResetStatusEnumType.accepted.value
             if self.accept_reset
@@ -1071,7 +1071,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
 
     await press_button(hass, cs, "reset")
     assert len(cp.resets) == 1
-    assert cp.resets[0].EnumType == ResetEnumType.immediate.value
+    assert cp.resets[0].type == ResetEnumType.immediate.value
     assert cp.resets[0].evse_id is None
 
     error: HomeAssistantError = None
