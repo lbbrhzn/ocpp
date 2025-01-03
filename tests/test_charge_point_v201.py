@@ -39,50 +39,50 @@ import ocpp
 from ocpp.routing import on
 import ocpp.exceptions
 from ocpp.v201 import ChargePoint as cpclass, call, call_result
-from ocpp.v201.datatypes import (
-    ComponentType,
-    EVSEType,
-    GetVariableResultType,
-    SetVariableResultType,
-    VariableType,
-    VariableAttributeType,
-    VariableCharacteristicsType,
-    ReportDataType,
+from ocpp.v201.dataEnumTypes import (
+    ComponentEnumType,
+    EVSEEnumType,
+    GetVariableResultEnumType,
+    SetVariableResultEnumType,
+    VariableEnumType,
+    VariableAttributeEnumType,
+    VariableCharacteristicsEnumType,
+    ReportDataEnumType,
 )
 from ocpp.v201.enums import (
     Action,
-    AuthorizationStatusType,
-    BootReasonType,
-    ChangeAvailabilityStatusType,
-    ChargingProfileKindType,
-    ChargingProfilePurposeType,
-    ChargingProfileStatus,
-    ChargingRateUnitType,
-    ChargingStateType,
-    ClearChargingProfileStatusType,
-    ConnectorStatusType,
-    DataType,
-    FirmwareStatusType,
-    GenericDeviceModelStatusType,
-    GetVariableStatusType,
-    IdTokenType,
-    MeasurandType,
-    MutabilityType,
-    OperationalStatusType,
-    PhaseType,
-    ReadingContextType,
-    RegistrationStatusType,
-    ReportBaseType,
-    RequestStartStopStatusType,
-    ResetStatusType,
-    ResetType,
-    SetVariableStatusType,
-    ReasonType,
-    TransactionEventType,
-    MessageTriggerType,
-    TriggerMessageStatusType,
-    TriggerReasonType,
-    UpdateFirmwareStatusType,
+    AuthorizationStatusEnumType,
+    BootReasonEnumType,
+    ChangeAvailabilityStatusEnumType,
+    ChargingProfileKindEnumType,
+    ChargingProfilePurposeEnumType,
+    ChargingProfileStatusEnumType,
+    ChargingRateUnitEnumType,
+    ChargingStateEnumType,
+    ClearChargingProfileStatusEnumTypeEnumType,
+    ConnectorStatusEnumType,
+    DataEnumType,
+    FirmwareStatusEnumType,
+    GenericDeviceModelStatusEnumType,
+    GetVariableStatusEnumType,
+    IdTokenEnumType,
+    MeasurandEnumType,
+    MutabilityEnumType,
+    OperationalStatusEnumType,
+    PhaseEnumType,
+    ReadingContextEnumType,
+    RegistrationStatusEnumType,
+    ReportBaseEnumType,
+    RequestStartStopStatusEnumType,
+    ResetStatusEnumType,
+    ResetEnumType,
+    SetVariableStatusEnumType,
+    ReasonEnumType,
+    TransactionEventEnumType,
+    MessageTriggerEnumType,
+    TriggerMessageStatusEnumType,
+    TriggerReasonEnumType,
+    UpdateFirmwareStatusEnumType,
 )
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
 
@@ -114,9 +114,11 @@ class ChargePoint(cpclass):
 
     @on(Action.GetBaseReport)
     def _on_base_report(self, request_id: int, report_base: str, **kwargs):
-        assert report_base == ReportBaseType.full_inventory.value
+        assert report_base == ReportBaseEnumType.full_inventory.value
         self.task = asyncio.create_task(self._send_full_inventory(request_id))
-        return call_result.GetBaseReport(GenericDeviceModelStatusType.accepted.value)
+        return call_result.GetBaseReport(
+            GenericDeviceModelStatusEnumType.accepted.value
+        )
 
     @on(Action.RequestStartTransaction)
     def _on_remote_start(
@@ -129,7 +131,7 @@ class ChargePoint(cpclass):
             self._start_transaction_remote_start(id_token, remote_start_id)
         )
         return call_result.RequestStartTransaction(
-            RequestStartStopStatusType.accepted.value
+            RequestStartStopStatusEnumType.accepted.value
         )
 
     @on(Action.RequestStopTransaction)
@@ -137,12 +139,12 @@ class ChargePoint(cpclass):
         assert transaction_id == self.remote_start_tx_id
         self.remote_stops.append(transaction_id)
         return call_result.RequestStopTransaction(
-            RequestStartStopStatusType.accepted.value
+            RequestStartStopStatusEnumType.accepted.value
         )
 
     @on(Action.SetVariables)
     def _on_set_variables(self, set_variable_data: list[dict], **kwargs):
-        result: list[SetVariableResultType] = []
+        result: list[SetVariableResultEnumType] = []
         for input in set_variable_data:
             if (input["component"] == {"name": "SampledDataCtrlr"}) and (
                 input["variable"] == {"name": "TxUpdatedInterval"}
@@ -153,30 +155,30 @@ class ChargePoint(cpclass):
             ):
                 self.tx_updated_measurands = input["attribute_value"].split(",")
 
-            attr_result: SetVariableStatusType
+            attr_result: SetVariableStatusEnumType
             if input["variable"] == {"name": "RebootRequired"}:
-                attr_result = SetVariableStatusType.reboot_required
+                attr_result = SetVariableStatusEnumType.reboot_required
             elif input["variable"] == {"name": "BadVariable"}:
-                attr_result = SetVariableStatusType.unknown_variable
+                attr_result = SetVariableStatusEnumType.unknown_variable
             elif input["variable"] == {"name": "VeryBadVariable"}:
                 raise ocpp.exceptions.InternalError()
             else:
-                attr_result = SetVariableStatusType.accepted
+                attr_result = SetVariableStatusEnumType.accepted
                 self.component_instance_used = input["component"].get("instance", None)
                 self.variable_instance_used = input["variable"].get("instance", None)
 
             result.append(
-                SetVariableResultType(
+                SetVariableResultEnumType(
                     attr_result,
-                    ComponentType(input["component"]["name"]),
-                    VariableType(input["variable"]["name"]),
+                    ComponentEnumType(input["component"]["name"]),
+                    VariableEnumType(input["variable"]["name"]),
                 )
             )
         return call_result.SetVariables(result)
 
     @on(Action.GetVariables)
     def _on_get_variables(self, get_variable_data: list[dict], **kwargs):
-        result: list[GetVariableResultType] = []
+        result: list[GetVariableResultEnumType] = []
         for input in get_variable_data:
             value: str | None = None
             if (input["component"] == {"name": "SampledDataCtrlr"}) and (
@@ -190,12 +192,12 @@ class ChargePoint(cpclass):
             elif input["variable"] == {"name": "VeryBadVariable"}:
                 raise ocpp.exceptions.InternalError()
             result.append(
-                GetVariableResultType(
-                    GetVariableStatusType.accepted
+                GetVariableResultEnumType(
+                    GetVariableStatusEnumType.accepted
                     if value is not None
-                    else GetVariableStatusType.unknown_variable,
-                    ComponentType(input["component"]["name"]),
-                    VariableType(input["variable"]["name"]),
+                    else GetVariableStatusEnumType.unknown_variable,
+                    ComponentEnumType(input["component"]["name"]),
+                    VariableEnumType(input["variable"]["name"]),
                     attribute_value=value,
                 )
             )
@@ -203,14 +205,14 @@ class ChargePoint(cpclass):
 
     @on(Action.ChangeAvailability)
     def _on_change_availability(self, operational_status: str, **kwargs):
-        if operational_status == OperationalStatusType.operative.value:
+        if operational_status == OperationalStatusEnumType.operative.value:
             self.operative = True
-        elif operational_status == OperationalStatusType.inoperative.value:
+        elif operational_status == OperationalStatusEnumType.inoperative.value:
             self.operative = False
         else:
             assert False
         return call_result.ChangeAvailability(
-            ChangeAvailabilityStatusType.accepted.value
+            ChangeAvailabilityStatusEnumType.accepted.value
         )
 
     @on(Action.SetChargingProfile)
@@ -222,9 +224,13 @@ class ChargePoint(cpclass):
         limit = charging_profile["charging_schedule"][0]["charging_schedule_period"][0][
             "limit"
         ]
-        if (unit == ChargingRateUnitType.amps.value) and (limit < 6):
-            return call_result.SetChargingProfile(ChargingProfileStatus.rejected.value)
-        return call_result.SetChargingProfile(ChargingProfileStatus.accepted.value)
+        if (unit == ChargingRateUnitEnumType.amps.value) and (limit < 6):
+            return call_result.SetChargingProfile(
+                ChargingProfileStatusEnumType.rejected.value
+            )
+        return call_result.SetChargingProfile(
+            ChargingProfileStatusEnumType.accepted.value
+        )
 
     @on(Action.ClearChargingProfile)
     def _on_clear_charging_profile(self, **kwargs):
@@ -235,16 +241,16 @@ class ChargePoint(cpclass):
             )
         )
         return call_result.ClearChargingProfile(
-            ClearChargingProfileStatusType.accepted.value
+            ClearChargingProfileStatusEnumTypeEnumType.accepted.value
         )
 
     @on(Action.Reset)
-    def _on_reset(self, type: str, **kwargs):
-        self.resets.append(call.Reset(type, kwargs.get("evse_id", None)))
+    def _on_reset(self, EnumType: str, **kwargs):
+        self.resets.append(call.Reset(EnumType, kwargs.get("evse_id", None)))
         return call_result.Reset(
-            ResetStatusType.accepted.value
+            ResetStatusEnumType.accepted.value
             if self.accept_reset
-            else ResetStatusType.rejected.value
+            else ResetStatusEnumType.rejected.value
         )
 
     async def _start_transaction_remote_start(
@@ -256,14 +262,14 @@ class ChargePoint(cpclass):
         )
         assert (
             authorize_resp.id_token_info["status"]
-            == AuthorizationStatusType.accepted.value
+            == AuthorizationStatusEnumType.accepted.value
         )
 
         self.tx_start_time = datetime.now(tz=UTC)
         request = call.TransactionEvent(
-            TransactionEventType.started.value,
+            TransactionEventEnumType.started.value,
             self.tx_start_time.isoformat(),
-            TriggerReasonType.remote_start.value,
+            TriggerReasonEnumType.remote_start.value,
             0,
             transaction_info={
                 "transaction_id": self.remote_start_tx_id,
@@ -293,12 +299,12 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 0,
                 [
-                    ReportDataType(
-                        ComponentType("SmartChargingCtrlr"),
-                        VariableType("Available"),
+                    ReportDataEnumType(
+                        ComponentEnumType("SmartChargingCtrlr"),
+                        VariableEnumType("Available"),
                         [
-                            VariableAttributeType(
-                                value="true", mutability=MutabilityType.read_only
+                            VariableAttributeEnumType(
+                                value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
                     )
@@ -312,12 +318,12 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 1,
                 [
-                    ReportDataType(
-                        ComponentType("ReservationCtrlr"),
-                        VariableType("Available"),
+                    ReportDataEnumType(
+                        ComponentEnumType("ReservationCtrlr"),
+                        VariableEnumType("Available"),
                         [
-                            VariableAttributeType(
-                                value="true", mutability=MutabilityType.read_only
+                            VariableAttributeEnumType(
+                                value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
                     ),
@@ -331,12 +337,12 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 2,
                 [
-                    ReportDataType(
-                        ComponentType("LocalAuthListCtrlr"),
-                        VariableType("Available"),
+                    ReportDataEnumType(
+                        ComponentEnumType("LocalAuthListCtrlr"),
+                        VariableEnumType("Available"),
                         [
-                            VariableAttributeType(
-                                value="true", mutability=MutabilityType.read_only
+                            VariableAttributeEnumType(
+                                value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
                     ),
@@ -350,12 +356,12 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 3,
                 [
-                    ReportDataType(
-                        ComponentType("EVSE", evse=EVSEType(1)),
-                        VariableType("Available"),
+                    ReportDataEnumType(
+                        ComponentEnumType("EVSE", evse=EVSEEnumType(1)),
+                        VariableEnumType("Available"),
                         [
-                            VariableAttributeType(
-                                value="true", mutability=MutabilityType.read_only
+                            VariableAttributeEnumType(
+                                value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
                     ),
@@ -369,12 +375,14 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 4,
                 [
-                    ReportDataType(
-                        ComponentType("Connector", evse=EVSEType(1, connector_id=1)),
-                        VariableType("Available"),
+                    ReportDataEnumType(
+                        ComponentEnumType(
+                            "Connector", evse=EVSEEnumType(1, connector_id=1)
+                        ),
+                        VariableEnumType("Available"),
                         [
-                            VariableAttributeType(
-                                value="true", mutability=MutabilityType.read_only
+                            VariableAttributeEnumType(
+                                value="true", mutability=MutabilityEnumType.read_only
                             )
                         ],
                     ),
@@ -388,12 +396,12 @@ class ChargePoint(cpclass):
                 datetime.now(tz=UTC).isoformat(),
                 5,
                 [
-                    ReportDataType(
-                        ComponentType("SampledDataCtrlr"),
-                        VariableType("TxUpdatedMeasurands"),
-                        [VariableAttributeType(value="", persistent=True)],
-                        VariableCharacteristicsType(
-                            DataType.member_list,
+                    ReportDataEnumType(
+                        ComponentEnumType("SampledDataCtrlr"),
+                        VariableEnumType("TxUpdatedMeasurands"),
+                        [VariableAttributeEnumType(value="", persistent=True)],
+                        VariableCharacteristicsEnumType(
+                            DataEnumType.member_list,
                             False,
                             values_list=",".join(supported_measurands),
                         ),
@@ -410,7 +418,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert len(cp.remote_starts) == 1
     assert cp.remote_starts[0].id_token == {
         "id_token": cs.charge_points[cpid]._remote_id_tag,
-        "type": IdTokenType.central.value,
+        "EnumType": IdTokenEnumType.central.value,
     }
     while cs.get_metric(cpid, csess.transaction_id.value) is None:
         await asyncio.sleep(0.1)
@@ -419,7 +427,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     tx_start_time = cp.tx_start_time
     await cp.call(
         call.StatusNotification(
-            tx_start_time.isoformat(), ConnectorStatusType.occupied, 1, 1
+            tx_start_time.isoformat(), ConnectorStatusEnumType.occupied, 1, 1
         )
     )
     assert (
@@ -429,9 +437,9 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.cable_plugged_in.value,
+            TriggerReasonEnumType.cable_plugged_in.value,
             1,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
@@ -440,13 +448,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     )
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.charging_state_changed.value,
+            TriggerReasonEnumType.charging_state_changed.value,
             2,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.charging.value,
+                "charging_state": ChargingStateEnumType.charging.value,
             },
             meter_value=[
                 {
@@ -455,55 +463,55 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
                         {
                             "value": 0,
                             "measurand": Measurand.current_export.value,
-                            "phase": PhaseType.l1.value,
+                            "phase": PhaseEnumType.l1.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 0,
                             "measurand": Measurand.current_export.value,
-                            "phase": PhaseType.l2.value,
+                            "phase": PhaseEnumType.l2.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 0,
                             "measurand": Measurand.current_export.value,
-                            "phase": PhaseType.l3.value,
+                            "phase": PhaseEnumType.l3.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 1.1,
                             "measurand": Measurand.current_import.value,
-                            "phase": PhaseType.l1.value,
+                            "phase": PhaseEnumType.l1.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 2.2,
                             "measurand": Measurand.current_import.value,
-                            "phase": PhaseType.l2.value,
+                            "phase": PhaseEnumType.l2.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 3.3,
                             "measurand": Measurand.current_import.value,
-                            "phase": PhaseType.l3.value,
+                            "phase": PhaseEnumType.l3.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 12.1,
                             "measurand": Measurand.current_offered.value,
-                            "phase": PhaseType.l1.value,
+                            "phase": PhaseEnumType.l1.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 12.2,
                             "measurand": Measurand.current_offered.value,
-                            "phase": PhaseType.l2.value,
+                            "phase": PhaseEnumType.l2.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
                             "value": 12.3,
                             "measurand": Measurand.current_offered.value,
-                            "phase": PhaseType.l3.value,
+                            "phase": PhaseEnumType.l3.value,
                             "unit_of_measure": {"unit": "A"},
                         },
                         {
@@ -568,25 +576,25 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
                         {
                             "value": 229.9,
                             "measurand": Measurand.voltage.value,
-                            "phase": PhaseType.l1_n.value,
+                            "phase": PhaseEnumType.l1_n.value,
                             "unit_of_measure": {"unit": "V"},
                         },
                         {
                             "value": 230,
                             "measurand": Measurand.voltage.value,
-                            "phase": PhaseType.l2_n.value,
+                            "phase": PhaseEnumType.l2_n.value,
                             "unit_of_measure": {"unit": "V"},
                         },
                         {
                             "value": 230.4,
                             "measurand": Measurand.voltage.value,
-                            "phase": PhaseType.l3_n.value,
+                            "phase": PhaseEnumType.l3_n.value,
                             "unit_of_measure": {"unit": "V"},
                         },
                         {
                             # Not among enabled measurands, will be ignored
                             "value": 1111,
-                            "measurand": MeasurandType.energy_active_net.value,
+                            "measurand": MeasurandEnumType.energy_active_net.value,
                             "unit_of_measure": {"unit": "Wh"},
                         },
                     ],
@@ -618,13 +626,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             (tx_start_time + timedelta(seconds=60)).isoformat(),
-            TriggerReasonType.meter_value_periodic.value,
+            TriggerReasonEnumType.meter_value_periodic.value,
             3,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.charging.value,
+                "charging_state": ChargingStateEnumType.charging.value,
             },
             meter_value=[
                 {
@@ -648,14 +656,14 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.ended.value,
+            TransactionEventEnumType.ended.value,
             (tx_start_time + timedelta(seconds=120)).isoformat(),
-            TriggerReasonType.remote_stop.value,
+            TriggerReasonEnumType.remote_stop.value,
             4,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.ev_connected.value,
-                "stopped_reason": ReasonType.remote.value,
+                "charging_state": ChargingStateEnumType.ev_connected.value,
+                "stopped_reason": ReasonEnumType.remote.value,
             },
             meter_value=[
                 {
@@ -663,7 +671,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
                     "sampled_value": [
                         {
                             "value": 333,
-                            "context": ReadingContextType.transaction_end,
+                            "context": ReadingContextEnumType.transaction_end,
                             "measurand": Measurand.energy_active_import_register.value,
                             "unit_of_measure": {"unit": "Wh"},
                         },
@@ -687,13 +695,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     # Now with energy reading in Started transaction event
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.started.value,
+            TransactionEventEnumType.started.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.cable_plugged_in.value,
+            TriggerReasonEnumType.cable_plugged_in.value,
             0,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.ev_connected.value,
+                "charging_state": ChargingStateEnumType.ev_connected.value,
             },
             meter_value=[
                 {
@@ -715,13 +723,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     )
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.charging_state_changed.value,
+            TriggerReasonEnumType.charging_state_changed.value,
             1,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.charging.value,
+                "charging_state": ChargingStateEnumType.charging.value,
             },
             meter_value=[
                 {
@@ -741,13 +749,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.charging_state_changed.value,
+            TriggerReasonEnumType.charging_state_changed.value,
             1,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.suspended_ev.value,
+                "charging_state": ChargingStateEnumType.suspended_ev.value,
             },
         )
     )
@@ -758,13 +766,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.updated.value,
+            TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.charging_state_changed.value,
+            TriggerReasonEnumType.charging_state_changed.value,
             1,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.suspended_evse.value,
+                "charging_state": ChargingStateEnumType.suspended_evse.value,
             },
         )
     )
@@ -775,14 +783,14 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
     await cp.call(
         call.TransactionEvent(
-            TransactionEventType.ended.value,
+            TransactionEventEnumType.ended.value,
             tx_start_time.isoformat(),
-            TriggerReasonType.ev_communication_lost.value,
+            TriggerReasonEnumType.ev_communication_lost.value,
             2,
             transaction_info={
                 "transaction_id": cp.remote_start_tx_id,
-                "charging_state": ChargingStateType.idle.value,
-                "stopped_reason": ReasonType.ev_disconnected.value,
+                "charging_state": ChargingStateEnumType.idle.value,
+                "stopped_reason": ReasonEnumType.ev_disconnected.value,
             },
         )
     )
@@ -918,13 +926,13 @@ async def _test_charge_profiles(
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 1,
         "stack_level": 0,
-        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile,
-        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile,
+        "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
         "charging_schedule": [
             {
                 "id": 1,
                 "charging_schedule_period": [{"start_period": 0, "limit": 3000}],
-                "charging_rate_unit": ChargingRateUnitType.watts.value,
+                "charging_rate_unit": ChargingRateUnitEnumType.watts.value,
             },
         ],
     }
@@ -936,13 +944,13 @@ async def _test_charge_profiles(
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 1,
         "stack_level": 0,
-        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile,
-        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile,
+        "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
         "charging_schedule": [
             {
                 "id": 1,
                 "charging_schedule_period": [{"start_period": 0, "limit": 16}],
-                "charging_rate_unit": ChargingRateUnitType.amps.value,
+                "charging_rate_unit": ChargingRateUnitEnumType.amps.value,
             },
         ],
     }
@@ -969,13 +977,13 @@ async def _test_charge_profiles(
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 2,
         "stack_level": 1,
-        "charging_profile_purpose": ChargingProfilePurposeType.tx_profile.value,
-        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.tx_profile.value,
+        "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
         "charging_schedule": [
             {
                 "id": 1,
                 "charging_schedule_period": [{"start_period": 0, "limit": 6}],
-                "charging_rate_unit": ChargingRateUnitType.amps.value,
+                "charging_rate_unit": ChargingRateUnitEnumType.amps.value,
             },
         ],
     }
@@ -986,13 +994,13 @@ async def _test_charge_profiles(
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 1,
         "stack_level": 0,
-        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile.value,
-        "charging_profile_kind": ChargingProfileKindType.relative.value,
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value,
+        "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
         "charging_schedule": [
             {
                 "id": 1,
                 "charging_schedule_period": [{"start_period": 0, "limit": 12}],
-                "charging_rate_unit": ChargingRateUnitType.amps.value,
+                "charging_rate_unit": ChargingRateUnitEnumType.amps.value,
             },
         ],
     }
@@ -1006,7 +1014,7 @@ async def _test_charge_profiles(
     assert len(cp.charge_profiles_cleared) == 1
     assert cp.charge_profiles_cleared[-1].charging_profile_id is None
     assert cp.charge_profiles_cleared[-1].charging_profile_criteria == {
-        "charging_profile_purpose": ChargingProfilePurposeType.charging_station_max_profile.value
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value
     }
 
 
@@ -1019,15 +1027,15 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
                 "vendor_name": "VENDOR",
                 "firmware_version": "VERSION",
             },
-            BootReasonType.power_up.value,
+            BootReasonEnumType.power_up.value,
         )
     )
-    assert boot_res.status == RegistrationStatusType.accepted.value
+    assert boot_res.status == RegistrationStatusEnumType.accepted.value
     assert boot_res.status_info is None
     datetime.fromisoformat(boot_res.current_time)
     await cp.call(
         call.StatusNotification(
-            datetime.now(tz=UTC).isoformat(), ConnectorStatusType.available, 1, 1
+            datetime.now(tz=UTC).isoformat(), ConnectorStatusEnumType.available, 1, 1
         )
     )
 
@@ -1050,7 +1058,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     )
     assert (
         cs.get_metric(cpid, cstat.status_connector.value)
-        == ConnectorStatusType.available.value
+        == ConnectorStatusEnumType.available.value
     )
     assert cp.tx_updated_interval == DEFAULT_METER_INTERVAL
     assert cp.tx_updated_measurands == supported_measurands
@@ -1065,7 +1073,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
 
     await press_button(hass, cs, "reset")
     assert len(cp.resets) == 1
-    assert cp.resets[0].type == ResetType.immediate.value
+    assert cp.resets[0].EnumType == ResetEnumType.immediate.value
     assert cp.resets[0].evse_id is None
 
     error: HomeAssistantError = None
@@ -1081,45 +1089,47 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert not cp.operative
     await cp.call(
         call.StatusNotification(
-            datetime.now(tz=UTC).isoformat(), ConnectorStatusType.unavailable, 1, 1
+            datetime.now(tz=UTC).isoformat(), ConnectorStatusEnumType.unavailable, 1, 1
         )
     )
     assert (
         cs.get_metric(cpid, cstat.status_connector.value)
-        == ConnectorStatusType.unavailable.value
+        == ConnectorStatusEnumType.unavailable.value
     )
 
     await cp.call(
         call.StatusNotification(
-            datetime.now(tz=UTC).isoformat(), ConnectorStatusType.faulted, 1, 1
+            datetime.now(tz=UTC).isoformat(), ConnectorStatusEnumType.faulted, 1, 1
         )
     )
     assert (
         cs.get_metric(cpid, cstat.status_connector.value)
-        == ConnectorStatusType.faulted.value
+        == ConnectorStatusEnumType.faulted.value
     )
 
-    await cp.call(call.FirmwareStatusNotification(FirmwareStatusType.installed.value))
+    await cp.call(
+        call.FirmwareStatusNotification(FirmwareStatusEnumType.installed.value)
+    )
 
 
 class ChargePointAllFeatures(ChargePoint):
     """A charge point which also supports UpdateFirmware and TriggerMessage."""
 
-    triggered_status_notification: list[EVSEType] = []
+    triggered_status_notification: list[EVSEEnumType] = []
 
     @on(Action.UpdateFirmware)
     def _on_update_firmware(self, request_id: int, firmware: dict, **kwargs):
-        return call_result.UpdateFirmware(UpdateFirmwareStatusType.rejected.value)
+        return call_result.UpdateFirmware(UpdateFirmwareStatusEnumType.rejected.value)
 
     @on(Action.TriggerMessage)
     def _on_trigger_message(self, requested_message: str, **kwargs):
-        if (requested_message == MessageTriggerType.status_notification) and (
+        if (requested_message == MessageTriggerEnumType.status_notification) and (
             "evse" in kwargs
         ):
             self.triggered_status_notification.append(
-                EVSEType(kwargs["evse"]["id"], kwargs["evse"]["connector_id"])
+                EVSEEnumType(kwargs["evse"]["id"], kwargs["evse"]["connector_id"])
             )
-        return call_result.TriggerMessage(TriggerMessageStatusType.rejected.value)
+        return call_result.TriggerMessage(TriggerMessageStatusEnumType.rejected.value)
 
 
 async def _extra_features_test(
@@ -1135,7 +1145,7 @@ async def _extra_features_test(
                 "vendor_name": "VENDOR",
                 "firmware_version": "VERSION",
             },
-            BootReasonType.power_up.value,
+            BootReasonEnumType.power_up.value,
         )
     )
     await wait_ready(hass)
@@ -1185,7 +1195,7 @@ async def _unsupported_base_report_test(
                 "vendor_name": "VENDOR",
                 "firmware_version": "VERSION",
             },
-            BootReasonType.power_up.value,
+            BootReasonEnumType.power_up.value,
         )
     )
     await wait_ready(hass)
