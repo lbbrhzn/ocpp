@@ -86,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         identifiers={(DOMAIN, entry.data.get(CONF_CPID, DEFAULT_CPID))},
         name=entry.data.get(CONF_CPID, DEFAULT_CPID),
         model="Unknown",
-        via_device=((DOMAIN), central_sys.id),
+        via_device=(DOMAIN, entry.data.get(CONF_CSID, DEFAULT_CSID)),
     )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
