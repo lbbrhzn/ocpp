@@ -104,7 +104,6 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cp_id)},
-            via_device=(DOMAIN, self.central_system.id),
         )
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
