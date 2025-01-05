@@ -137,6 +137,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             SensorDeviceClass.CURRENT,
             SensorDeviceClass.VOLTAGE,
             SensorDeviceClass.POWER,
+            SensorDeviceClass.REACTIVE_POWER,
             SensorDeviceClass.TEMPERATURE,
             SensorDeviceClass.BATTERY,
             SensorDeviceClass.FREQUENCY,
