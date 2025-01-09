@@ -271,7 +271,10 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status != TriggerMessageStatus.accepted:
                 _LOGGER.warning("Failed with response: %s", resp.status)
-                return_value = False
+                _LOGGER.warning("Forcing number of connectors to %d, charger returned %d", id - 1, nof_connectors)
+                self._metrics[cdet.connectors.value].value = max( 1, id - 1 )
+                return_value = ( id > 1 ) #False
+                break
         return return_value
 
     async def clear_profile(self):
