@@ -1,8 +1,8 @@
 {
     "config": {
         "step": {
-            "user": {
-                "title": "OCPP Configuration",
+            "cs_user": {
+                "title": "OCPP Central System Configuration",
                 "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
                 "data": {
                     "host": "Central system host address",
@@ -11,15 +11,21 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
+                    "websocket_close_timeout": "Websocket close timeout (seconds)",
+                    "websocket_ping_tries": "Websocket successive times to try connection before closing",
+                    "websocket_ping_interval": "Websocket ping interval (seconds)",
+                    "websocket_ping_timeout": "Websocket ping timeout (seconds)"
+                }
+            },
+            "cp_user": {
+                "title": "OCPP Charger Configuration",
+                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+                "data": {
                     "cpid": "Charge point identity",
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
-                    "websocket_close_timeout": "Websocket close timeout (seconds)",
-                    "websocket_ping_tries": "Websocket successive times to try connection before closing",
-                    "websocket_ping_interval": "Websocket ping interval (seconds)",
-                    "websocket_ping_timeout": "Websocket ping timeout (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
                     "force_smart_charging": "Force Smart Charging feature profile"
                 }

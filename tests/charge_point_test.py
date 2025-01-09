@@ -27,36 +27,36 @@ from websockets import connect
 from websockets.asyncio.client import ClientConnection
 
 
-async def set_switch(hass: HomeAssistant, cs: CentralSystem, key: str, on: bool):
+async def set_switch(hass: HomeAssistant, cpid: str, key: str, on: bool):
     """Toggle a switch."""
     await hass.services.async_call(
         SWITCH_DOMAIN,
         SERVICE_TURN_ON if on else SERVICE_TURN_OFF,
-        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cs.settings.cpid}_{key}"},
+        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cpid}_{key}"},
         blocking=True,
     )
 
 
-async def set_number(hass: HomeAssistant, cs: CentralSystem, key: str, value: int):
+async def set_number(hass: HomeAssistant, cpid: str, key: str, value: int):
     """Set a numeric slider."""
     await hass.services.async_call(
         NUMBER_DOMAIN,
         "set_value",
         service_data={"value": str(value)},
         blocking=True,
-        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cs.settings.cpid}_{key}"},
+        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cpid}_{key}"},
     )
 
 
 set_switch.__test__ = False
 
 
-async def press_button(hass: HomeAssistant, cs: CentralSystem, key: str):
+async def press_button(hass: HomeAssistant, cpid: str, key: str):
     """Press a button."""
     await hass.services.async_call(
         BUTTON_DOMAIN,
         SERVICE_PRESS,
-        {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.{cs.settings.cpid}_{key}"},
+        {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.{cpid}_{key}"},
         blocking=True,
     )
 

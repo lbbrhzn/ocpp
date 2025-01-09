@@ -36,7 +36,10 @@ from ocpp.v16.enums import (
     UnlockStatus,
 )
 
-from .chargepoint import CentralSystemSettings, OcppVersion, MeasurandValue
+from .chargepoint import (
+    OcppVersion,
+    MeasurandValue,
+)
 from .chargepoint import ChargePoint as cp
 from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
@@ -51,16 +54,9 @@ from .enums import (
 )
 
 from .const import (
-    CONF_FORCE_SMART_CHARGING,
-    CONF_IDLE_INTERVAL,
-    CONF_METER_INTERVAL,
-    CONF_MONITORED_VARIABLES,
-    CONF_MONITORED_VARIABLES_AUTOCONFIG,
-    DEFAULT_FORCE_SMART_CHARGING,
-    DEFAULT_IDLE_INTERVAL,
+    CentralSystemSettings,
+    ChargerSystemSettings,
     DEFAULT_MEASURAND,
-    DEFAULT_METER_INTERVAL,
-    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DOMAIN,
 )
 
@@ -78,8 +74,7 @@ class ChargePoint(cp):
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystemSettings,
-        interval_meter_metrics: int = 10,
-        skip_schema_validation: bool = False,
+        charger: ChargerSystemSettings,
     ):
         """Instantiate a ChargePoint."""
 
@@ -90,8 +85,7 @@ class ChargePoint(cp):
             hass,
             entry,
             central,
-            interval_meter_metrics,
-            skip_schema_validation,
+            charger,
         )
 
     async def get_number_of_connectors(self):
@@ -104,13 +98,8 @@ class ChargePoint(cp):
 
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
-        all_measurands = self.entry.data.get(
-            CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
-        )
-        autodetect_measurands = self.entry.data.get(
-            CONF_MONITORED_VARIABLES_AUTOCONFIG,
-            DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
-        )
+        all_measurands = self.settings.monitored_variables
+        autodetect_measurands = self.settings.monitored_variables_autoconfig
 
         key = ckey.meter_values_sampled_data.value
 
@@ -161,16 +150,12 @@ class ChargePoint(cp):
         """Send configuration values to the charger."""
         await self.configure(
             ckey.meter_value_sample_interval.value,
-            str(self.entry.data.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL)),
+            str(self.settings.meter_interval),
         )
         await self.configure(
             ckey.clock_aligned_data_interval.value,
-            str(self.entry.data.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)),
+            str(self.settings.idle_interval),
         )
-        #            await self.configure(
-        #                "StopTxnSampledData", ",".join(self.entry.data[CONF_MONITORED_VARIABLES])
-        #            )
-        #            await self.start_transaction()
 
     def register_version_specific_services(self):
         """Register HA services that differ depending on OCPP version."""
@@ -219,9 +204,7 @@ class ChargePoint(cp):
             await self.notify_ha("No feature profiles detected, defaulting to Core")
             feature_list = [om.feature_profile_core.value]
 
-        if self.central.config.get(
-            CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
-        ):
+        if self.settings.force_smart_charging:
             _LOGGER.warning("Force Smart Charging feature profile")
             features |= prof.SMART
 
@@ -261,7 +244,10 @@ class ChargePoint(cp):
     async def trigger_status_notification(self):
         """Trigger status notifications for all connectors."""
         return_value = True
-        nof_connectors = int(self._metrics[cdet.connectors.value].value)
+        try:
+            nof_connectors = int(self._metrics[cdet.connectors.value].value)
+        except TypeError:
+            nof_connectors = 1
         for id in range(0, nof_connectors + 1):
             _LOGGER.debug(f"trigger status notification for connector={id}")
             req = call.TriggerMessage(
@@ -583,7 +569,7 @@ class ChargePoint(cp):
     async def async_update_device_info_v16(self, boot_info: dict):
         """Update device info asynchronuously."""
 
-        _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
+        _LOGGER.debug("Updating device info %s: %s", self.settings.cpid, boot_info)
         await self.async_update_device_info(
             boot_info.get(om.charge_point_serial_number.name, None),
             boot_info.get(om.charge_point_vendor.name, None),
@@ -668,7 +654,7 @@ class ChargePoint(cp):
                 self._metrics[csess.session_energy.value].extra_attr[
                     cstat.id_tag.name
                 ] = self._metrics[cstat.id_tag.value].value
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.MeterValues()
 
     @on(Action.boot_notification)
@@ -719,14 +705,14 @@ class ChargePoint(cp):
                 self._metrics[Measurand.power_active_export.value].value = 0
             if Measurand.power_reactive_export.value in self._metrics:
                 self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
 
     @on(Action.firmware_status_notification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
         self._metrics[cstat.firmware_status.value].value = status
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotification()
 
@@ -779,7 +765,7 @@ class ChargePoint(cp):
             result = call_result.StartTransaction(
                 id_tag_info={om.status.value: auth_status}, transaction_id=0
             )
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         return result
 
     @on(Action.stop_transaction)
@@ -812,7 +798,7 @@ class ChargePoint(cp):
             self._metrics[Measurand.power_active_export.value].value = 0
         if Measurand.power_reactive_export.value in self._metrics:
             self._metrics[Measurand.power_reactive_export.value].value = 0
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
         )
@@ -830,5 +816,5 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=UTC)
         self._metrics[cstat.heartbeat.value].value = now
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))

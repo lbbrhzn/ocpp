@@ -16,6 +16,7 @@ from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
     CONF_CPID,
+    CONF_CPIDS,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
@@ -80,11 +81,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         model="OCPP Central System",
     )
 
-    """ Create Charge Point Device """
+    """ Create first Charge Point Device """
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.data.get(CONF_CPID, DEFAULT_CPID))},
-        name=entry.data.get(CONF_CPID, DEFAULT_CPID),
+        identifiers={(DOMAIN, entry.data[CONF_CPIDS][0].get(CONF_CPID, DEFAULT_CPID))},
+        name=entry.data[CONF_CPIDS][0].get(CONF_CPID, DEFAULT_CPID),
         model="Unknown",
         via_device=(DOMAIN, entry.data.get(CONF_CSID, DEFAULT_CSID)),
     )
