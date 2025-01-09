@@ -772,11 +772,9 @@ class ChargePoint(cp):
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
-                # Only set the meter start value from Transaction begin context
-                if is_transaction and context == ReadingContext.transaction_begin.value:
-                     self._metrics[csess.meter_start].value = value
-                     self._metrics[csess.meter_start].unit == unit
-                     continue
+                if measurand == DEFAULT_MEASURAND and is_transaction and context == ReadingContext.transaction_begin.value:
+                    # Ignore energy report messages for Transaction.Begin context
+                    continue
 
                 if phase is None:
                     if (
