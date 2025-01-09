@@ -28,7 +28,7 @@ from websockets.protocol import State
 from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
-from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus, Measurand, Phase
+from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus, Measurand, Phase, ReadingContext
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
@@ -765,6 +765,15 @@ class ChargePoint(cp):
                 if self._metrics[csess.meter_start.value].value == 0:
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
+
+                # Only set the meter start value from Transaction begin context
+                if (
+                    is_transaction
+                    and context == ReadingContext.transaction_begin.value
+                ):
+                    self._metrics[csess.meter_start].value = value
+                    self._metrics[csess.meter_start].unit == unit
+                    continue
 
                 if phase is None:
                     if (
