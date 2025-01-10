@@ -1,7 +1,7 @@
 {
     "config": {
         "step": {
-            "cs_user": {
+            "user": {
                 "title": "OCPP Central System Configuration",
                 "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
                 "data": {

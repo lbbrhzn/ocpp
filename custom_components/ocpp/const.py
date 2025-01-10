@@ -166,8 +166,11 @@ class CentralSystemSettings:
     websocket_ping_interval: int
     websocket_ping_timeout: int
     websocket_ping_tries: int
-    cpids: list = field(default_factory=list)
+    cpids: list = field(default_factory=list)  # holds cpid config flow settings
     subprotocols: list = field(default_factory=lambda: DEFAULT_SUBPROTOCOLS)
+    mapping: list = field(
+        default_factory=list
+    )  # maps [{cp_id: cpid}] order to match cpids settings
 
     # def __post_init__(self):
     #     i = 0

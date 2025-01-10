@@ -15,14 +15,12 @@ from .api import CentralSystem
 from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
-    CONF_CPID,
     CONF_CPIDS,
     CONF_CSID,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_NAME,
     CONFIG,
-    DEFAULT_CPID,
     DEFAULT_CSID,
     DOMAIN,
     PLATFORMS,
@@ -82,12 +80,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     """ Create first Charge Point Device """
+    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.data[CONF_CPIDS][0].get(CONF_CPID, DEFAULT_CPID))},
-        name=entry.data[CONF_CPIDS][0].get(CONF_CPID, DEFAULT_CPID),
+        identifiers={(DOMAIN, cpid)},
+        name=cpid,
         model="Unknown",
-        via_device=(DOMAIN, entry.data.get(CONF_CSID, DEFAULT_CSID)),
+        via_device=(DOMAIN, central_sys.id),
     )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys

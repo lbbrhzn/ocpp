@@ -328,7 +328,7 @@ class ChargePoint(cp):
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
-            updated_entry[CONF_CPIDS][self.settings.connection][
+            updated_entry[CONF_CPIDS][self.settings.connection][self.settings.cpid][
                 CONF_MONITORED_VARIABLES
             ] = accepted_measurands
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)

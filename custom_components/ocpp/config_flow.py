@@ -135,7 +135,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 measurands = DEFAULT_MONITORED_VARIABLES
             user_input[CONF_MONITORED_VARIABLES] = measurands
-            self._data[CONF_CPIDS].append(user_input)
+            self._data[CONF_CPIDS].append({user_input[CONF_CPID]: user_input})
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(

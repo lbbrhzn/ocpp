@@ -36,6 +36,10 @@ from ocpp.v16.enums import (
 from .const import MOCK_CONFIG_DATA_1, MOCK_CONFIG_DATA_2
 from .charge_point_test import set_switch, press_button, set_number
 import contextlib
+from .charge_point_test import (
+    create_configuration,
+    remove_configuration,
+)
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
@@ -124,9 +128,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         entry_id="test_cms1",
         title="test_cms1",
     )
-    config_entry1.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(config_entry1.entry_id)
-    await hass.async_block_till_done()
+    cs = await create_configuration(hass, config_entry1)
 
     # no subprotocol central system assumes ocpp1.6 charge point
     # NB each new config entry will trigger async_update_entry
@@ -159,9 +161,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
             )
         await ws2.close()
     await asyncio.sleep(1)
-    if entry := hass.config_entries.async_get_entry(config_entry1.entry_id):
-        await hass.config_entries.async_remove(entry.entry_id)
-        await hass.async_block_till_done()
+    await remove_configuration(hass, config_entry1)
 
     # Create a mock entry so we don't have to go through config flow
     config_entry2 = MockConfigEntry(
@@ -170,11 +170,8 @@ async def test_cms_responses_v16(hass, socket_enabled):
         entry_id="test_cms2",
         title="test_cms2",
     )
-    config_entry2.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(config_entry2.entry_id)
-    await hass.async_block_till_done()
 
-    cs = hass.data[OCPP_DOMAIN][config_entry2.entry_id]
+    cs = await create_configuration(hass, config_entry2)
 
     # unsupported subprotocol raises websockets exception
     with pytest.raises(websockets.exceptions.InvalidStatus):
@@ -438,9 +435,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
     await test_services(
         hass, cs.charge_points["CP_1_serv"].settings.cpid, socket_enabled
     )
-    if entry := hass.config_entries.async_get_entry(config_entry2.entry_id):
-        await hass.config_entries.async_remove(entry.entry_id)
-        await hass.async_block_till_done()
+    await remove_configuration(hass, config_entry2)
 
 
 class ChargePoint(cpclass):

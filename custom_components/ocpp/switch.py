@@ -15,7 +15,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
-from .const import CONF_CPID, CONF_CPIDS, DEFAULT_CPID, DOMAIN, ICON
+from .const import CONF_CPIDS, DOMAIN, ICON
 from .enums import HAChargerServices, HAChargerStatuses
 
 
@@ -65,12 +65,12 @@ SWITCHES: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data[CONF_CPIDS][0].get(CONF_CPID, DEFAULT_CPID)
+    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
 
     entities = []
 
     for ent in SWITCHES:
-        entities.append(ChargePointSwitch(central_system, cp_id, ent))
+        entities.append(ChargePointSwitch(central_system, cpid, ent))
 
     async_add_devices(entities, False)
 
@@ -84,27 +84,27 @@ class ChargePointSwitch(SwitchEntity):
     def __init__(
         self,
         central_system: CentralSystem,
-        cp_id: str,
+        cpid: str,
         description: OcppSwitchDescription,
     ):
         """Instantiate instance of a ChargePointSwitch."""
-        self.cp_id = cp_id
+        self.cpid = cpid
         self.central_system = central_system
         self.entity_description = description
         self._state = self.entity_description.default_state
         self._attr_unique_id = ".".join(
-            [SWITCH_DOMAIN, DOMAIN, self.cp_id, self.entity_description.key]
+            [SWITCH_DOMAIN, DOMAIN, self.cpid, self.entity_description.key]
         )
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cp_id)},
+            identifiers={(DOMAIN, self.cpid)},
             via_device=(DOMAIN, self.central_system.id),
         )
 
     @property
     def available(self) -> bool:
         """Return if switch is available."""
-        return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
+        return self.central_system.get_available(self.cpid)  # type: ignore [no-any-return]
 
     @property
     def is_on(self) -> bool:
@@ -112,7 +112,7 @@ class ChargePointSwitch(SwitchEntity):
         """Test metric state against condition if present"""
         if self.entity_description.metric_state is not None:
             resp = self.central_system.get_metric(
-                self.cp_id, self.entity_description.metric_state
+                self.cpid, self.entity_description.metric_state
             )
             if resp in self.entity_description.metric_condition:
                 self._state = True
@@ -123,7 +123,7 @@ class ChargePointSwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         self._state = await self.central_system.set_charger_state(
-            self.cp_id, self.entity_description.on_action
+            self.cpid, self.entity_description.on_action
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -133,10 +133,10 @@ class ChargePointSwitch(SwitchEntity):
             resp = True
         elif self.entity_description.off_action == self.entity_description.on_action:
             resp = await self.central_system.set_charger_state(
-                self.cp_id, self.entity_description.off_action, False
+                self.cpid, self.entity_description.off_action, False
             )
         else:
             resp = await self.central_system.set_charger_state(
-                self.cp_id, self.entity_description.off_action
+                self.cpid, self.entity_description.off_action
             )
         self._state = not resp

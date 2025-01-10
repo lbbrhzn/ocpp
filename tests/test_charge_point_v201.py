@@ -410,7 +410,7 @@ class ChargePoint(cpclass):
 
 
 async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cpid: str = cs.charge_points[next(iter(cs.charge_points))].settings.cpid
+    cpid: str = list(cs.cpids.keys())[0]
 
     await set_switch(hass, cpid, "charge_control", True)
     assert len(cp.remote_starts) == 1
@@ -918,7 +918,8 @@ async def _test_charge_profiles(
     error: HomeAssistantError = await _set_charge_rate_service(
         hass, {"limit_watts": 3000}
     )
-    cpid: str = cs.charge_points[next(iter(cs.charge_points))].settings.cpid
+
+    cpid: str = list(cs.cpids.keys())[0]
     assert error is None
     assert len(cp.charge_profiles_set) == 1
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -1046,7 +1047,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
 
-    cpid: str = cs.charge_points[next(iter(cs.charge_points))].settings.cpid
+    cpid: str = list(cs.cpids.keys())[0]
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
     assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
@@ -1151,7 +1152,7 @@ async def _extra_features_test(
 
     assert (
         cs.get_metric(
-            cs.charge_points[next(iter(cs.charge_points))].settings.cpid,
+            list(cs.cpids.keys())[0],
             cdet.features.value,
         )
         == Profiles.CORE
@@ -1203,7 +1204,7 @@ async def _unsupported_base_report_test(
     await wait_ready(hass)
     assert (
         cs.get_metric(
-            cs.charge_points[next(iter(cs.charge_points))].settings.cpid,
+            list(cs.cpids.keys())[0],
             cdet.features.value,
         )
         == Profiles.CORE | Profiles.REM | Profiles.FW

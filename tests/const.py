@@ -59,14 +59,16 @@ MOCK_CONFIG_FLOW = {
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
     CONF_CPIDS: [
         {
-            CONF_CPID: "test_cpid_flow",
-            CONF_IDLE_INTERVAL: 900,
-            CONF_MAX_CURRENT: 32,
-            CONF_METER_INTERVAL: 60,
-            CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
-            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
-            CONF_SKIP_SCHEMA_VALIDATION: False,
-            CONF_FORCE_SMART_CHARGING: True,
+            "test_cpid_flow": {
+                CONF_CPID: "test_cpid_flow",
+                CONF_IDLE_INTERVAL: 900,
+                CONF_MAX_CURRENT: 32,
+                CONF_METER_INTERVAL: 60,
+                CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+                CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+                CONF_SKIP_SCHEMA_VALIDATION: False,
+                CONF_FORCE_SMART_CHARGING: True,
+            }
         },
     ],
 }
@@ -85,14 +87,16 @@ MOCK_CONFIG_DATA = {
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
     CONF_CPIDS: [
         {
-            CONF_CPID: "test_cpid",
-            CONF_IDLE_INTERVAL: 900,
-            CONF_MAX_CURRENT: 32,
-            CONF_METER_INTERVAL: 60,
-            CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
-            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
-            CONF_SKIP_SCHEMA_VALIDATION: False,
-            CONF_FORCE_SMART_CHARGING: True,
+            "test_cpid": {
+                CONF_CPID: "test_cpid",
+                CONF_IDLE_INTERVAL: 900,
+                CONF_MAX_CURRENT: 32,
+                CONF_METER_INTERVAL: 60,
+                CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+                CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+                CONF_SKIP_SCHEMA_VALIDATION: False,
+                CONF_FORCE_SMART_CHARGING: True,
+            }
         },
     ],
 }
@@ -104,14 +108,16 @@ MOCK_CONFIG_DATA_1 = {
     CONF_PORT: 9001,
     CONF_CPIDS: [
         {
-            CONF_CPID: "test_cpid_9001",
-            CONF_IDLE_INTERVAL: 900,
-            CONF_MAX_CURRENT: 32,
-            CONF_METER_INTERVAL: 60,
-            CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
-            CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
-            CONF_SKIP_SCHEMA_VALIDATION: True,
-            CONF_FORCE_SMART_CHARGING: True,
+            "test_cpid_9001": {
+                CONF_CPID: "test_cpid_9001",
+                CONF_IDLE_INTERVAL: 900,
+                CONF_MAX_CURRENT: 32,
+                CONF_METER_INTERVAL: 60,
+                CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+                CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
+                CONF_SKIP_SCHEMA_VALIDATION: True,
+                CONF_FORCE_SMART_CHARGING: True,
+            }
         },
     ],
 }
@@ -128,14 +134,16 @@ MOCK_CONFIG_DATA_3 = {
     CONF_CSID: "test_csid_3",
     CONF_CPIDS: [
         {
-            CONF_CPID: "test_cpid",
-            CONF_IDLE_INTERVAL: 900,
-            CONF_MAX_CURRENT: 32,
-            CONF_METER_INTERVAL: 60,
-            CONF_MONITORED_VARIABLES: "",
-            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
-            CONF_SKIP_SCHEMA_VALIDATION: False,
-            CONF_FORCE_SMART_CHARGING: True,
+            "test_cpid": {
+                CONF_CPID: "test_cpid",
+                CONF_IDLE_INTERVAL: 900,
+                CONF_MAX_CURRENT: 32,
+                CONF_METER_INTERVAL: 60,
+                CONF_MONITORED_VARIABLES: "",
+                CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+                CONF_SKIP_SCHEMA_VALIDATION: False,
+                CONF_FORCE_SMART_CHARGING: True,
+            }
         },
     ],
 }
