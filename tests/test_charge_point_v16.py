@@ -291,6 +291,10 @@ async def test_cms_responses_v16(hass, socket_enabled):
         is False
     )
 
+    await remove_configuration(hass, config_entry2)
+    # start clean entry for services
+    cs = await create_configuration(hass, config_entry2)
+
     await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
@@ -301,9 +305,11 @@ async def test_cms_responses_v16(hass, socket_enabled):
     ) as ws:
         cp = ChargePoint("CP_1_services", ws)
         with contextlib.suppress(asyncio.TimeoutError):
+            cp_task = asyncio.create_task(cp.start())
+            await asyncio.sleep(5)
+            # Allow charger time to connect bfore running services
             await asyncio.wait_for(
                 asyncio.gather(
-                    cp.start(),
                     cp.send_meter_clock_data(),
                     cs.charge_points["CP_1_serv"].trigger_boot_notification(),
                     cs.charge_points["CP_1_serv"].trigger_status_notification(),
@@ -325,12 +331,12 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 ),
                 timeout=5,
             )
+            cp_task.cancel()
         await ws.close()
+
     cpid = cs.charge_points["CP_1_serv"].settings.cpid
     assert int(cs.get_metric(cpid, "Frequency")) == 50
     assert float(cs.get_metric(cpid, "Energy.Active.Import.Register")) == 1101.452
-
-    await asyncio.sleep(1)
 
     # test ocpp messages sent from charger that don't support errata 3.9
     # i.e. "Energy.Meter.Start" starts from 0 for each session and "Energy.Active.Import.Register"
@@ -364,8 +370,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
     # Last sent "Energy.Active.Import.Register" value with transaction id should be here.
     assert int(cs.get_metric(cpid, "Energy.Session")) == int(1305570 / 1000)
     assert cs.get_unit(cpid, "Energy.Session") == "kWh"
-
-    await asyncio.sleep(1)
 
     # test ocpp messages sent from charger that don't support errata 3.9 with meter values with kWh as energy unit
     async with websockets.connect(
@@ -430,10 +434,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
             )
         await ws.close()
 
-    await asyncio.sleep(1)
-
     # test services when charger is unavailable
-    await asyncio.sleep(1)
     await test_services(
         hass, cs.charge_points["CP_1_serv"].settings.cpid, socket_enabled
     )

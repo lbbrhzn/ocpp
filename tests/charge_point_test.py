@@ -83,6 +83,7 @@ async def remove_configuration(hass: HomeAssistant, config_entry: MockConfigEntr
     if entry := hass.config_entries.async_get_entry(config_entry.entry_id):
         await hass.config_entries.async_remove(entry.entry_id)
         await hass.async_block_till_done()
+        assert config_entry.entry_id not in hass.data[OCPP_DOMAIN]
 
 
 remove_configuration.__test__ = False

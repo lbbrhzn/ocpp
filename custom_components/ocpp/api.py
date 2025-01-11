@@ -121,14 +121,19 @@ class CentralSystem:
         if cp_id not in self.charge_points:
             # check if charger already has config flow
             config_flow = False
+            # map first charger connection to cpid entry
+            if self.connections == 0:
+                cpid = list(self.settings.cpids[0].keys())[0]
+                self.settings.mapping.append({cp_id: cpid})
             for map in self.settings.mapping:
                 if cp_id in map:
                     cpid = map[cp_id]
                     for cfg in self.settings.cpids:
                         if cpid in cfg:
                             config_flow = True
-                            cp_settings = ChargerSystemSettings(**cfg)
+                            cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
                             _LOGGER.info(f"Charger match found for {cpid}:{cp_id}")
+                            _LOGGER.debug(f"settings: {self.settings}")
 
             if not config_flow:
                 # placeholder before using flow to get settings and setup platforms
