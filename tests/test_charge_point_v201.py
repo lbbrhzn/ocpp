@@ -1224,7 +1224,11 @@ async def test_cms_responses_v201(hass, socket_enabled):
 
     config_data[CONF_PORT] = 9010
     config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
+        domain=OCPP_DOMAIN,
+        data=config_data,
+        entry_id="test_cms",
+        title="test_cms",
+        version=2,
     )
     cs: CentralSystem = await create_configuration(hass, config_entry)
     # threading in async validation causes tests to fail
@@ -1252,6 +1256,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
         data=MOCK_CONFIG_DATA_3,
         entry_id="test_cms",
         title="test_cms",
+        version=2,
     )
     cs = await create_configuration(hass, config_entry)
 

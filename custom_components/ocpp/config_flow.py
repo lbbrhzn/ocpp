@@ -103,7 +103,7 @@ STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
 class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
-    VERSION = 1
+    VERSION = 2
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):

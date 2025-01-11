@@ -127,6 +127,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         data=MOCK_CONFIG_DATA_1,
         entry_id="test_cms1",
         title="test_cms1",
+        version=2,
     )
     cs = await create_configuration(hass, config_entry1)
 
@@ -169,6 +170,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         data=MOCK_CONFIG_DATA_2,
         entry_id="test_cms2",
         title="test_cms2",
+        version=2,
     )
 
     cs = await create_configuration(hass, config_entry2)
