@@ -14,7 +14,7 @@
                     "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
                     "ssl": "Verschlüsselte Verbindung",
                     "ssl_certfile_path": "Pfad zum SSL Zertifikat",
-                    "ssl_keyfile_path": "Pfad zum SSL Schlüssel",
+                    "ssl_keyfile_path": "Pfad zum SSL Schlüssel"
                 }
             },
             "cp_user": {

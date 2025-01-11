@@ -11,7 +11,7 @@
                     "websocket_close_timeout": "Websocket close timeout (secondes)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (secondes)",
-                    "websocket_ping_timeout": "Websocket ping timeout (secondes)",
+                    "websocket_ping_timeout": "Websocket ping timeout (secondes)"
                 }
             },
             "cp_user": {
