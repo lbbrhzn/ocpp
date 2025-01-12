@@ -38,7 +38,24 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONFIG,
+    DEFAULT_CPID,
+    DEFAULT_IDLE_INTERVAL,
+    DEFAULT_MAX_CURRENT,
+    DEFAULT_METER_INTERVAL,
+    DEFAULT_MONITORED_VARIABLES,
+    DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_SKIP_SCHEMA_VALIDATION,
+    DEFAULT_FORCE_SMART_CHARGING,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
     DEFAULT_CSID,
+    DEFAULT_SSL,
+    DEFAULT_SSL_CERTFILE_PATH,
+    DEFAULT_SSL_KEYFILE_PATH,
+    DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
+    DEFAULT_WEBSOCKET_PING_TRIES,
+    DEFAULT_WEBSOCKET_PING_INTERVAL,
+    DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DOMAIN,
     PLATFORMS,
 )
@@ -130,35 +147,34 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
         old_data = {**config_entry.data}
         csid_data = {}
         cpid_data = {}
-        cpid_keys = [
-            CONF_CPID,
-            CONF_IDLE_INTERVAL,
-            CONF_MAX_CURRENT,
-            CONF_METER_INTERVAL,
-            CONF_MONITORED_VARIABLES,
-            CONF_MONITORED_VARIABLES_AUTOCONFIG,
-            CONF_SKIP_SCHEMA_VALIDATION,
-            CONF_FORCE_SMART_CHARGING,
-        ]
-        csid_keys = [
-            CONF_HOST,
-            CONF_PORT,
-            CONF_CSID,
-            CONF_SSL,
-            CONF_SSL_CERTFILE_PATH,
-            CONF_SSL_KEYFILE_PATH,
-            CONF_WEBSOCKET_CLOSE_TIMEOUT,
-            CONF_WEBSOCKET_PING_TRIES,
-            CONF_WEBSOCKET_PING_INTERVAL,
-            CONF_WEBSOCKET_PING_TIMEOUT,
-        ]
-        for key in cpid_keys:
-            cpid_data.update({key: old_data[key]})
+        cpid_keys = {
+            CONF_CPID: DEFAULT_CPID,
+            CONF_IDLE_INTERVAL: DEFAULT_IDLE_INTERVAL,
+            CONF_MAX_CURRENT: DEFAULT_MAX_CURRENT,
+            CONF_METER_INTERVAL: DEFAULT_METER_INTERVAL,
+            CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+            CONF_SKIP_SCHEMA_VALIDATION: DEFAULT_SKIP_SCHEMA_VALIDATION,
+            CONF_FORCE_SMART_CHARGING: DEFAULT_FORCE_SMART_CHARGING,
+        }
+        csid_keys = {
+            CONF_HOST: DEFAULT_HOST,
+            CONF_PORT: DEFAULT_PORT,
+            CONF_CSID: DEFAULT_CSID,
+            CONF_SSL: DEFAULT_SSL,
+            CONF_SSL_CERTFILE_PATH: DEFAULT_SSL_CERTFILE_PATH,
+            CONF_SSL_KEYFILE_PATH: DEFAULT_SSL_KEYFILE_PATH,
+            CONF_WEBSOCKET_CLOSE_TIMEOUT: DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
+            CONF_WEBSOCKET_PING_TRIES: DEFAULT_WEBSOCKET_PING_TRIES,
+            CONF_WEBSOCKET_PING_INTERVAL: DEFAULT_WEBSOCKET_PING_INTERVAL,
+            CONF_WEBSOCKET_PING_TIMEOUT: DEFAULT_WEBSOCKET_PING_TIMEOUT,
+        }
+        for key, value in cpid_keys.items():
+            cpid_data.update({key: old_data.get(key, value)})
 
-        for key in csid_keys:
-            csid_data.update({key: old_data[key]})
+        for key, value in csid_keys.items():
+            csid_data.update({key: old_data.get(key, value)})
 
-        # csid_data[CONF_CPIDS].append(cpid_data)
         new_data = csid_data
         new_data.update({CONF_CPIDS: [{cpid_data[CONF_CPID]: cpid_data}]})
 
