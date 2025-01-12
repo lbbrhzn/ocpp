@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, timedelta, UTC
 
 from homeassistant.core import HomeAssistant, ServiceResponse
@@ -24,12 +25,11 @@ from .charge_point_test import (
     remove_configuration,
     wait_ready,
 )
-from .const import MOCK_CONFIG_DATA
+from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_3
 from custom_components.ocpp.const import (
     DEFAULT_METER_INTERVAL,
     DOMAIN as OCPP_DOMAIN,
     CONF_PORT,
-    CONF_MONITORED_VARIABLES,
     MEASURANDS,
 )
 import pytest
@@ -410,12 +410,12 @@ class ChargePoint(cpclass):
 
 
 async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cpid: str = cs.settings.cpid
+    cpid: str = list(cs.cpids.keys())[0]
 
-    await set_switch(hass, cs, "charge_control", True)
+    await set_switch(hass, cpid, "charge_control", True)
     assert len(cp.remote_starts) == 1
     assert cp.remote_starts[0].id_token == {
-        "id_token": cs.charge_points[cpid]._remote_id_tag,
+        "id_token": cs.charge_points[cs.cpids[cpid]]._remote_id_tag,
         "type": IdTokenEnumType.central.value,
     }
     while cs.get_metric(cpid, csess.transaction_id.value) is None:
@@ -649,7 +649,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert cs.get_metric(cpid, csess.session_energy) == 0.156
     assert cs.get_metric(cpid, csess.session_time) == 1
 
-    await set_switch(hass, cs, "charge_control", False)
+    await set_switch(hass, cpid, "charge_control", False)
     assert len(cp.remote_stops) == 1
 
     await cp.call(
@@ -918,6 +918,8 @@ async def _test_charge_profiles(
     error: HomeAssistantError = await _set_charge_rate_service(
         hass, {"limit_watts": 3000}
     )
+
+    cpid: str = list(cs.cpids.keys())[0]
     assert error is None
     assert len(cp.charge_profiles_set) == 1
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -986,7 +988,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    await set_number(hass, cs, "maximum_current", 12)
+    await set_number(hass, cpid, "maximum_current", 12)
     assert len(cp.charge_profiles_set) == 4
     assert cp.charge_profiles_set[-1].evse_id == 0
     assert cp.charge_profiles_set[-1].charging_profile == {
@@ -1008,7 +1010,7 @@ async def _test_charge_profiles(
     assert str(error).startswith("Failed to set variable: Rejected")
 
     assert len(cp.charge_profiles_cleared) == 0
-    await set_number(hass, cs, "maximum_current", 32)
+    await set_number(hass, cpid, "maximum_current", 32)
     assert len(cp.charge_profiles_cleared) == 1
     assert cp.charge_profiles_cleared[-1].charging_profile_id is None
     assert cp.charge_profiles_cleared[-1].charging_profile_criteria == {
@@ -1045,7 +1047,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
 
-    cpid: str = cs.settings.cpid
+    cpid: str = list(cs.cpids.keys())[0]
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
     assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
@@ -1069,7 +1071,7 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     await _test_services(hass, cs, cp)
     await _test_charge_profiles(hass, cs, cp)
 
-    await press_button(hass, cs, "reset")
+    await press_button(hass, cpid, "reset")
     assert len(cp.resets) == 1
     assert cp.resets[0].type == ResetEnumType.immediate.value
     assert cp.resets[0].evse_id is None
@@ -1077,13 +1079,13 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     error: HomeAssistantError = None
     cp.accept_reset = False
     try:
-        await press_button(hass, cs, "reset")
+        await press_button(hass, cpid, "reset")
     except HomeAssistantError as e:
         error = e
     assert error is not None
     assert str(error) == "OCPP call failed: Rejected"
 
-    await set_switch(hass, cs, "availability", False)
+    await set_switch(hass, cpid, "availability", False)
     assert not cp.operative
     await cp.call(
         call.StatusNotification(
@@ -1149,7 +1151,10 @@ async def _extra_features_test(
     await wait_ready(hass)
 
     assert (
-        cs.get_metric(cs.settings.cpid, cdet.features.value)
+        cs.get_metric(
+            list(cs.cpids.keys())[0],
+            cdet.features.value,
+        )
         == Profiles.CORE
         | Profiles.SMART
         | Profiles.RES
@@ -1198,7 +1203,10 @@ async def _unsupported_base_report_test(
     )
     await wait_ready(hass)
     assert (
-        cs.get_metric(cs.settings.cpid, cdet.features.value)
+        cs.get_metric(
+            list(cs.cpids.keys())[0],
+            cdet.features.value,
+        )
         == Profiles.CORE | Profiles.REM | Profiles.FW
     )
 
@@ -1211,12 +1219,16 @@ async def test_cms_responses_v201(hass, socket_enabled):
     # restarts if measurands reported by the charger differ from the list
     # from the configuration, which a real charger can deal with but this
     # test cannot
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    # config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
 
     config_data[CONF_PORT] = 9010
     config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
+        domain=OCPP_DOMAIN,
+        data=config_data,
+        entry_id="test_cms",
+        title="test_cms",
+        version=2,
     )
     cs: CentralSystem = await create_configuration(hass, config_entry)
     # threading in async validation causes tests to fail
@@ -1238,9 +1250,13 @@ async def test_cms_responses_v201(hass, socket_enabled):
     )
 
     await remove_configuration(hass, config_entry)
-    config_data[CONF_MONITORED_VARIABLES] = ""
+
     config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN, data=config_data, entry_id="test_cms", title="test_cms"
+        domain=OCPP_DOMAIN,
+        data=MOCK_CONFIG_DATA_3,
+        entry_id="test_cms",
+        title="test_cms",
+        version=2,
     )
     cs = await create_configuration(hass, config_entry)
 

@@ -10,8 +10,6 @@ from math import sqrt
 import secrets
 import string
 import time
-from types import MappingProxyType
-from typing import Any
 
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
@@ -44,11 +42,14 @@ from .enums import (
 )
 
 from .const import (
+    CentralSystemSettings,
+    ChargerSystemSettings,
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
+    CONF_CPIDS,
     CONFIG,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_POWER_UNIT,
@@ -100,18 +101,6 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
-
-
-class CentralSystemSettings:
-    """A subset of CentralSystem properties needed by a ChargePoint."""
-
-    websocket_close_timeout: int
-    websocket_ping_interval: int
-    websocket_ping_timeout: int
-    websocket_ping_tries: int
-    csid: str
-    cpid: str
-    config: MappingProxyType[str, Any]
 
 
 class Metric:
@@ -196,8 +185,7 @@ class ChargePoint(cp):
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystemSettings,
-        interval_meter_metrics: int,
-        skip_schema_validation: bool,
+        charger: ChargerSystemSettings,
     ):
         """Instantiate a ChargePoint."""
 
@@ -212,12 +200,14 @@ class ChargePoint(cp):
             self._ocpp_version = "2.0.1"
 
         for action in self.route_map:
-            self.route_map[action]["_skip_schema_validation"] = skip_schema_validation
+            self.route_map[action]["_skip_schema_validation"] = (
+                charger.skip_schema_validation
+            )
 
-        self.interval_meter_metrics = interval_meter_metrics
         self.hass = hass
         self.entry = entry
-        self.central = central
+        self.cs_settings = central
+        self.settings = charger
         self.status = "init"
         # Indicates if the charger requires a reboot to apply new
         # configuration.
@@ -338,7 +328,9 @@ class ChargePoint(cp):
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
-            updated_entry[CONF_MONITORED_VARIABLES] = accepted_measurands
+            updated_entry[CONF_CPIDS][self.settings.connection][self.settings.cpid][
+                CONF_MONITORED_VARIABLES
+            ] = accepted_measurands
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
             await self.set_standard_configuration()
@@ -475,37 +467,37 @@ class ChargePoint(cp):
         timeout_counter = 0
         while connection.state is State.OPEN:
             try:
-                await asyncio.sleep(self.central.websocket_ping_interval)
+                await asyncio.sleep(self.cs_settings.websocket_ping_interval)
                 time0 = time.perf_counter()
-                latency_ping = self.central.websocket_ping_timeout * 1000
+                latency_ping = self.cs_settings.websocket_ping_timeout * 1000
                 pong_waiter = await asyncio.wait_for(
-                    connection.ping(), timeout=self.central.websocket_ping_timeout
+                    connection.ping(), timeout=self.cs_settings.websocket_ping_timeout
                 )
                 time1 = time.perf_counter()
                 latency_ping = round(time1 - time0, 3) * 1000
-                latency_pong = self.central.websocket_ping_timeout * 1000
+                latency_pong = self.cs_settings.websocket_ping_timeout * 1000
                 await asyncio.wait_for(
-                    pong_waiter, timeout=self.central.websocket_ping_timeout
+                    pong_waiter, timeout=self.cs_settings.websocket_ping_timeout
                 )
                 timeout_counter = 0
                 time2 = time.perf_counter()
                 latency_pong = round(time2 - time1, 3) * 1000
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.cs_settings.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
 
             except TimeoutError as timeout_exception:
                 _LOGGER.debug(
-                    f"Connection latency from '{self.central.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
+                    f"Connection latency from '{self.cs_settings.csid}' to '{self.id}': ping={latency_ping} ms, pong={latency_pong} ms",
                 )
                 self._metrics[cstat.latency_ping.value].value = latency_ping
                 self._metrics[cstat.latency_pong.value].value = latency_pong
                 timeout_counter += 1
-                if timeout_counter > self.central.websocket_ping_tries:
+                if timeout_counter > self.cs_settings.websocket_ping_tries:
                     _LOGGER.debug(
-                        f"Connection to '{self.id}' timed out after '{self.central.websocket_ping_tries}' ping tries",
+                        f"Connection to '{self.id}' timed out after '{self.cs_settings.websocket_ping_tries}' ping tries",
                     )
                     raise timeout_exception
                 else:
@@ -576,7 +568,6 @@ class ChargePoint(cp):
         self._metrics[cdet.serial.value].value = serial
 
         identifiers = {
-            (DOMAIN, self.central.cpid),
             (DOMAIN, self.id),
         }
         if serial is not None:
@@ -586,7 +577,7 @@ class ChargePoint(cp):
         registry.async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers=identifiers,
-            name=self.central.cpid,
+            name=self.id,
             manufacturer=vendor,
             model=model,
             suggested_area="Garage",
@@ -594,16 +585,15 @@ class ChargePoint(cp):
         )
 
     def _register_boot_notification(self):
-        self.hass.async_create_task(self.update(self.central.cpid))
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             self.hass.async_create_task(self.post_connect())
 
-    async def update(self, cp_id: str):
+    async def update(self, cpid: str):
         """Update sensors values in HA."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cp_id)}
+        identifiers = {(DOMAIN, cpid)}
         dev = dr.async_get_device(identifiers)
         # _LOGGER.info("Device id: %s updating", dev.name)
         for ent in entity_registry.async_entries_for_device(er, dev.id):
@@ -816,7 +806,7 @@ class ChargePoint(cp):
     def get_ha_metric(self, measurand: str):
         """Return last known value in HA for given measurand."""
         entity_id = "sensor." + "_".join(
-            [self.central.cpid.lower(), measurand.lower().replace(".", "_")]
+            [self.id.lower(), measurand.lower().replace(".", "_")]
         )
         try:
             value = self.hass.states.get(entity_id).state

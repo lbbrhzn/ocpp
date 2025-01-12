@@ -6,44 +6,24 @@ import logging
 import ssl
 
 from functools import partial
+from homeassistant.helpers import device_registry
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
+from dataclasses import asdict
 from websockets import Subprotocol, NegotiationError
 import websockets.server
 from websockets.asyncio.server import ServerConnection
 
-from .chargepoint import CentralSystemSettings
 from .ocppv16 import ChargePoint as ChargePointv16
 from .ocppv201 import ChargePoint as ChargePointv201
 
 from .const import (
-    CONF_CPID,
+    CentralSystemSettings,
     CONF_CSID,
-    CONF_HOST,
-    CONF_PORT,
-    CONF_SSL,
-    CONF_SSL_CERTFILE_PATH,
-    CONF_SSL_KEYFILE_PATH,
-    CONF_SUBPROTOCOL,
-    CONF_WEBSOCKET_CLOSE_TIMEOUT,
-    CONF_WEBSOCKET_PING_INTERVAL,
-    CONF_WEBSOCKET_PING_TIMEOUT,
-    CONF_WEBSOCKET_PING_TRIES,
-    DEFAULT_CPID,
-    DEFAULT_CSID,
-    DEFAULT_HOST,
-    DEFAULT_PORT,
-    DEFAULT_SSL,
-    DEFAULT_SSL_CERTFILE_PATH,
-    DEFAULT_SSL_KEYFILE_PATH,
-    DEFAULT_SUBPROTOCOL,
-    DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
-    DEFAULT_WEBSOCKET_PING_INTERVAL,
-    DEFAULT_WEBSOCKET_PING_TIMEOUT,
-    DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
     OCPP_2_0,
+    ChargerSystemSettings,
 )
 from .enums import (
     HAChargerServices as csvcs,
@@ -63,49 +43,24 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self.hass = hass
         self.entry = entry
-        self.host = entry.data.get(CONF_HOST, DEFAULT_HOST)
-        self.port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-
-        self.settings = CentralSystemSettings()
-        self.settings.csid = entry.data.get(CONF_CSID, DEFAULT_CSID)
-        self.settings.cpid = entry.data.get(CONF_CPID, DEFAULT_CPID)
-
-        self.settings.websocket_close_timeout = entry.data.get(
-            CONF_WEBSOCKET_CLOSE_TIMEOUT, DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
-        )
-        self.settings.websocket_ping_tries = entry.data.get(
-            CONF_WEBSOCKET_PING_TRIES, DEFAULT_WEBSOCKET_PING_TRIES
-        )
-        self.settings.websocket_ping_interval = entry.data.get(
-            CONF_WEBSOCKET_PING_INTERVAL, DEFAULT_WEBSOCKET_PING_INTERVAL
-        )
-        self.settings.websocket_ping_timeout = entry.data.get(
-            CONF_WEBSOCKET_PING_TIMEOUT, DEFAULT_WEBSOCKET_PING_TIMEOUT
-        )
-        self.settings.config = entry.data
-
-        self.subprotocols: list[Subprotocol] = entry.data.get(
-            CONF_SUBPROTOCOL, DEFAULT_SUBPROTOCOL
-        ).split(",")
+        self.settings = CentralSystemSettings(**entry.data)
+        self.subprotocols = self.settings.subprotocols
         self._server = None
-        self.config = entry.data
-        self.id = entry.entry_id
-        self.charge_points = {}
+        self.id = entry.data.get(CONF_CSID)
+        self.charge_points = {}  # uses cp_id as reference to charger instance
+        self.cpids = {}  # dict of {cpid:cp_id}
+        self.connections = 0
 
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem(hass, entry)
 
-        if self.entry.data.get(CONF_SSL, DEFAULT_SSL):
+        if self.settings.ssl:
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_certfile = self.entry.data.get(
-                CONF_SSL_CERTFILE_PATH, DEFAULT_SSL_CERTFILE_PATH
-            )
-            localhost_keyfile = self.entry.data.get(
-                CONF_SSL_KEYFILE_PATH, DEFAULT_SSL_KEYFILE_PATH
-            )
+            localhost_certfile = self.settings.certfile
+            localhost_keyfile = self.settings.keyfile
             await self.hass.async_add_executor_job(
                 partial(
                     self.ssl_context.load_cert_chain,
@@ -118,8 +73,8 @@ class CentralSystem:
 
         server = await websockets.serve(
             self.on_connect,
-            self.host,
-            self.port,
+            self.settings.host,
+            self.settings.port,
             select_subprotocol=self.select_subprotocol,
             subprotocols=self.subprotocols,
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
@@ -163,76 +118,165 @@ class CentralSystem:
         _LOGGER.info(f"Charger websocket path={websocket.request.path}")
         cp_id = websocket.request.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
-        if self.settings.cpid not in self.charge_points:
-            _LOGGER.info(f"Charger {cp_id} connected to {self.host}:{self.port}.")
+        if cp_id not in self.charge_points:
+            # check if charger already has config flow
+            config_flow = False
+            # map first charger connection to cpid entry
+            if self.connections == 0:
+                cpid = list(self.settings.cpids[0].keys())[0]
+                self.settings.mapping.append({cp_id: cpid})
+            for map in self.settings.mapping:
+                if cp_id in map:
+                    cpid = map[cp_id]
+                    for cfg in self.settings.cpids:
+                        if cpid in cfg:
+                            config_flow = True
+                            cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
+                            _LOGGER.info(f"Charger match found for {cpid}:{cp_id}")
+                            _LOGGER.debug(f"settings: {self.settings}")
+
+            if not config_flow:
+                # placeholder before using flow to get settings and setup platforms
+                # self.settings.cpids.append(self.settings.cpids[0])
+                cpid = list(self.settings.cpids[0].keys())[0]
+                cp_settings = ChargerSystemSettings(**self.settings.cpids[0][cpid])
+                _LOGGER.info(
+                    f"No charger match found using {cpid} settings for {cp_id}"
+                )
+                _LOGGER.info(f"{cpid} settings: {cp_settings}")
+                self.settings.mapping.append({cp_id: cpid})
+
+            # default to 0 until multi-charger properly implemented
+            # cp_settings.connection = self.connections
+            cp_settings.connection = 0
+            self.cpids.update({cp_settings.cpid: cp_id})
             if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
                 charge_point = ChargePointv201(
-                    cp_id, websocket, self.hass, self.entry, self.settings
+                    cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
                 )
             else:
                 charge_point = ChargePointv16(
-                    cp_id, websocket, self.hass, self.entry, self.settings
+                    cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
                 )
-            self.charge_points[self.settings.cpid] = charge_point
-            await charge_point.start()
-        else:
-            _LOGGER.info(f"Charger {cp_id} reconnected to {self.host}:{self.port}.")
-            charge_point = self.charge_points[self.settings.cpid]
-            await charge_point.reconnect(websocket)
-        _LOGGER.info(f"Charger {cp_id} disconnected from {self.host}:{self.port}.")
+            self.charge_points[cp_id] = charge_point
+            # if new add device and update entry with new charger details
+            if not config_flow:
+                dr = device_registry.async_get(self.hass)
+                dr.async_get_or_create(
+                    config_entry_id=self.entry.entry_id,
+                    identifiers={(DOMAIN, cp_settings.cpid)},
+                    name=cp_settings.cpid,
+                    model="Unknown",
+                    via_device=(DOMAIN, self.settings.csid),
+                )
+                updated_entry = {**asdict(self.settings)}
+                _LOGGER.info(f"Update entry data: {updated_entry}")
+                # self.hass.config_entries.async_update_entry(
+                #     self.entry, data=updated_entry
+                # )
+                _LOGGER.debug(f"Updated entry data with new charger: {self.entry.data}")
 
-    def get_metric(self, cp_id: str, measurand: str):
+            await charge_point.start()
+            self.connections = +1
+            _LOGGER.info(
+                f"Charger {cpid}:{cp_id} connected to {self.settings.host}:{self.settings.port}."
+            )
+        else:
+            _LOGGER.info(
+                f"Charger {cp_id} reconnected to {self.settings.host}:{self.settings.port}."
+            )
+            charge_point = self.charge_points[cp_id]
+            await charge_point.reconnect(websocket)
+        _LOGGER.info(
+            f"Charger {cp_id} disconnected from {self.settings.host}:{self.settings.port}."
+        )
+
+    def get_metric(self, id: str, measurand: str):
         """Return last known value for given measurand."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].value
         return None
 
-    def del_metric(self, cp_id: str, measurand: str):
+    def del_metric(self, id: str, measurand: str):
         """Set given measurand to None."""
-        if cp_id in self.charge_points:
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
+        if self.cpids.get(cp_id) in self.charge_points:
             self.charge_points[cp_id]._metrics[measurand].value = None
         return None
 
-    def get_unit(self, cp_id: str, measurand: str):
+    def get_unit(self, id: str, measurand: str):
         """Return unit of given measurand."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].unit
         return None
 
-    def get_ha_unit(self, cp_id: str, measurand: str):
+    def get_ha_unit(self, id: str, measurand: str):
         """Return home assistant unit of given measurand."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].ha_unit
         return None
 
-    def get_extra_attr(self, cp_id: str, measurand: str):
+    def get_extra_attr(self, id: str, measurand: str):
         """Return last known extra attributes for given measurand."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id]._metrics[measurand].extra_attr
         return None
 
-    def get_available(self, cp_id: str):
+    def get_available(self, id: str):
         """Return whether the charger is available."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id].status == STATE_OK
         return False
 
-    def get_supported_features(self, cp_id: str):
+    def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return self.charge_points[cp_id].supported_features
         return 0
 
-    async def set_max_charge_rate_amps(self, cp_id: str, value: float):
+    async def set_max_charge_rate_amps(self, id: str, value: float):
         """Set the maximum charge rate in amps."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         if cp_id in self.charge_points:
             return await self.charge_points[cp_id].set_charge_rate(limit_amps=value)
         return False
 
-    async def set_charger_state(
-        self, cp_id: str, service_name: str, state: bool = True
-    ):
+    async def set_charger_state(self, id: str, service_name: str, state: bool = True):
         """Carry out requested service/state change on connected charger."""
+        # allow id to be either cpid or cp_id
+        cp_id = self.cpids.get(id)
+        if cp_id is None:
+            cp_id = id
         resp = False
         if cp_id in self.charge_points:
             if service_name == csvcs.service_availability.name:
