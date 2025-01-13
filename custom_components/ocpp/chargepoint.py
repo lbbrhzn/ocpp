@@ -777,19 +777,19 @@ class ChargePoint(cp):
                         measurand == DEFAULT_MEASURAND
                         and self._charger_reports_session_energy
                     ):
-                        if context != ReadingContext.transaction_begin.value:
                         # Ignore messages with Transaction Begin context
+                        if context != ReadingContext.transaction_begin.value:
                             if is_transaction:
                                 self._metrics[csess.session_energy.value].value = value
                                 self._metrics[csess.session_energy.value].unit = unit
                                 self._metrics[csess.session_energy.value].extra_attr[
                                     cstat.id_tag.name
                                 ] = self._metrics[cstat.id_tag.value].value
-                            # Always update sensor related to DEFAULT_MEASURAND
-                            self._metrics[measurand].value = value
-                            self._metrics[measurand].unit = unit
+                            else:
+                                self._metrics[measurand].value = value
+                                self._metrics[measurand].unit = unit
                         else:
-                           continue
+                            continue
                     else:
                         self._metrics[measurand].value = value
                         self._metrics[measurand].unit = unit
