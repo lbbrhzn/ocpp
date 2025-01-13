@@ -575,7 +575,6 @@ class ChargePoint(cp):
         registry.async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers=identifiers,
-            name=self.id,
             manufacturer=vendor,
             model=model,
             suggested_area="Garage",

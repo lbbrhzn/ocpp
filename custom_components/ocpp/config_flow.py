@@ -104,6 +104,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
+    MINOR_VERSION = 0
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
