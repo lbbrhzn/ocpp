@@ -1229,6 +1229,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
         entry_id="test_cms",
         title="test_cms",
         version=2,
+        minor_version=0,
     )
     cs: CentralSystem = await create_configuration(hass, config_entry)
     # threading in async validation causes tests to fail
@@ -1257,6 +1258,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
         entry_id="test_cms",
         title="test_cms",
         version=2,
+        minor_version=0,
     )
     cs = await create_configuration(hass, config_entry)
 

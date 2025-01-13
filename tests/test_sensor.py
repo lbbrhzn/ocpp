@@ -21,6 +21,7 @@ async def test_sensor(hass, socket_enabled):
         entry_id="test_cms",
         title="test_cms",
         version=2,
+        minor_version=0,
     )
     config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)

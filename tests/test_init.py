@@ -29,6 +29,7 @@ async def test_setup_unload_and_reload_entry(
         entry_id="test_cms1",
         title="test_cms1",
         version=2,
+        minor_version=0,
     )
     config_entry.add_to_hass(hass)
     await hass.async_block_till_done()
