@@ -10,7 +10,6 @@ from homeassistant.helpers import device_registry
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
-from dataclasses import asdict
 from websockets import Subprotocol, NegotiationError
 import websockets.server
 from websockets.asyncio.server import ServerConnection
@@ -20,7 +19,6 @@ from .ocppv201 import ChargePoint as ChargePointv201
 
 from .const import (
     CentralSystemSettings,
-    CONF_CSID,
     DOMAIN,
     OCPP_2_0,
     ChargerSystemSettings,
@@ -46,7 +44,7 @@ class CentralSystem:
         self.settings = CentralSystemSettings(**entry.data)
         self.subprotocols = self.settings.subprotocols
         self._server = None
-        self.id = entry.data.get(CONF_CSID)
+        self.id = self.settings.csid
         self.charge_points = {}  # uses cp_id as reference to charger instance
         self.cpids = {}  # dict of {cpid:cp_id}
         self.connections = 0
@@ -133,7 +131,7 @@ class CentralSystem:
                             config_flow = True
                             cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
                             _LOGGER.info(f"Charger match found for {cpid}:{cp_id}")
-                            _LOGGER.debug(f"settings: {self.settings}")
+                            _LOGGER.debug(f"Central settings: {self.settings}")
 
             if not config_flow:
                 # placeholder before using flow to get settings and setup platforms
@@ -143,7 +141,7 @@ class CentralSystem:
                 _LOGGER.info(
                     f"No charger match found using {cpid} settings for {cp_id}"
                 )
-                _LOGGER.info(f"{cpid} settings: {cp_settings}")
+                _LOGGER.debug(f"{cpid} settings: {cp_settings}")
                 self.settings.mapping.append({cp_id: cpid})
 
             # default to 0 until multi-charger properly implemented
@@ -159,27 +157,34 @@ class CentralSystem:
                     cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
                 )
             self.charge_points[cp_id] = charge_point
-            # if new add device and update entry with new charger details
+            # if new add device with new charger details
             if not config_flow:
                 dr = device_registry.async_get(self.hass)
                 dr.async_get_or_create(
                     config_entry_id=self.entry.entry_id,
-                    identifiers={(DOMAIN, cp_settings.cpid)},
+                    identifiers={
+                        (DOMAIN, cp_settings.cpid),
+                        (DOMAIN, cp_id),
+                    },
                     name=cp_settings.cpid,
                     model="Unknown",
                     via_device=(DOMAIN, self.settings.csid),
                 )
-                updated_entry = {**asdict(self.settings)}
-                _LOGGER.info(f"Update entry data: {updated_entry}")
+                # entry update will be needed for multiple charger connections
+                # updated_entry = {**asdict(self.settings)}
+                # _LOGGER.debug(f"Update entry data: {updated_entry}")
                 # self.hass.config_entries.async_update_entry(
                 #     self.entry, data=updated_entry
                 # )
-                _LOGGER.debug(f"Updated entry data with new charger: {self.entry.data}")
+                # _LOGGER.debug(f"Updated entry data with new charger: {self.entry.data}")
 
             await charge_point.start()
             self.connections = +1
             _LOGGER.info(
                 f"Charger {cpid}:{cp_id} connected to {self.settings.host}:{self.settings.port}."
+            )
+            _LOGGER.info(
+                f"{self.connections} charger(s): {self.cpids} now connected to central system:{self.settings.csid}."
             )
         else:
             _LOGGER.info(

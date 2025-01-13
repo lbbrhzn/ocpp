@@ -79,7 +79,6 @@ class ChargePointButton(ButtonEntity):
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.cpid)},
-            via_device=(DOMAIN, self.central_system.id),
         )
 
     @property
