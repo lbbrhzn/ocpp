@@ -162,7 +162,10 @@ class CentralSystem:
                 dr = device_registry.async_get(self.hass)
                 dr.async_get_or_create(
                     config_entry_id=self.entry.entry_id,
-                    identifiers={(DOMAIN, cp_settings.cpid)},
+                    identifiers={
+                        (DOMAIN, cp_settings.cpid),
+                        (DOMAIN, cp_id),
+                    },
                     name=cp_settings.cpid,
                     model="Unknown",
                     via_device=(DOMAIN, self.settings.csid),

@@ -179,7 +179,7 @@ class ChargePoint(cp):
 
     def __init__(
         self,
-        id,
+        id,  # is charger cp_id not HA cpid
         connection,
         version: OcppVersion,
         hass: HomeAssistant,
@@ -567,9 +567,7 @@ class ChargePoint(cp):
         self._metrics[cdet.firmware_version.value].value = firmware_version
         self._metrics[cdet.serial.value].value = serial
 
-        identifiers = {
-            (DOMAIN, self.id),
-        }
+        identifiers = {(DOMAIN, self.id), (DOMAIN, self.settings.cpid)}
         if serial is not None:
             identifiers.add((DOMAIN, serial))
 
@@ -806,7 +804,7 @@ class ChargePoint(cp):
     def get_ha_metric(self, measurand: str):
         """Return last known value in HA for given measurand."""
         entity_id = "sensor." + "_".join(
-            [self.id.lower(), measurand.lower().replace(".", "_")]
+            [self.settings.cpid.lower(), measurand.lower().replace(".", "_")]
         )
         try:
             value = self.hass.states.get(entity_id).state

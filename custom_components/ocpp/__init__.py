@@ -108,8 +108,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """ Create Central System Device """
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.data.get(CONF_CSID, DEFAULT_CSID))},
-        name=entry.data.get(CONF_CSID, DEFAULT_CSID),
+        identifiers={(DOMAIN, central_sys.id)},
+        name=central_sys.id,
         model="OCPP Central System",
     )
 
