@@ -38,7 +38,6 @@ from ocpp.v201.enums import (
 )
 
 from .chargepoint import (
-    CentralSystemSettings,
     OcppVersion,
     SetVariableResult,
     MeasurandValue,
@@ -55,7 +54,8 @@ from .enums import (
 )
 
 from .const import (
-    DEFAULT_METER_INTERVAL,
+    CentralSystemSettings,
+    ChargerSystemSettings,
     DOMAIN,
     HA_ENERGY_UNIT,
 )
@@ -90,8 +90,7 @@ class ChargePoint(cp):
         hass: HomeAssistant,
         entry: ConfigEntry,
         central: CentralSystemSettings,
-        interval_meter_metrics: int = 10,
-        skip_schema_validation: bool = False,
+        charger: ChargerSystemSettings,
     ):
         """Instantiate a ChargePoint."""
 
@@ -102,14 +101,13 @@ class ChargePoint(cp):
             hass,
             entry,
             central,
-            interval_meter_metrics,
-            skip_schema_validation,
+            charger,
         )
 
     async def async_update_device_info_v201(self, boot_info: dict):
         """Update device info asynchronuously."""
 
-        _LOGGER.debug("Updating device info %s: %s", self.central.cpid, boot_info)
+        _LOGGER.debug("Updating device info %s: %s", self.settings.cpid, boot_info)
         await self.async_update_device_info(
             boot_info.get("serial_number", None),
             boot_info.get("vendor_name", None),
@@ -145,7 +143,7 @@ class ChargePoint(cp):
                 {
                     "component": {"name": "SampledDataCtrlr"},
                     "variable": {"name": "TxUpdatedInterval"},
-                    "attribute_value": str(DEFAULT_METER_INTERVAL),
+                    "attribute_value": str(self.settings.meter_interval),
                 }
             ]
         )
@@ -447,7 +445,7 @@ class ChargePoint(cp):
             self._metrics[cstat.status_connector.value].extra_attr[evse_id] = (
                 evse_status_str
             )
-        self.hass.async_create_task(self.update(self.central.cpid))
+        self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
     def on_status_notification(
@@ -690,6 +688,6 @@ class ChargePoint(cp):
                 self._metrics[cstat.id_tag.value].value = ""
 
         if not offline:
-            self.hass.async_create_task(self.update(self.central.cpid))
+            self.hass.async_create_task(self.update(self.settings.cpid))
 
         return response

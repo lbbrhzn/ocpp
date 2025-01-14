@@ -8,19 +8,25 @@
                     "host": "Host-Adresse des Zentralsystems",
                     "port": "Portnummer des Zentralsystems",
                     "csid": "Identität des Zentralsystems",
-                    "cpid": "Identität der Ladestation",
-                    "max_current": "Maximaler Ladestrom",
-                    "meter_interval": "Abtastintervall Laden (Sekunden)",
-                    "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
                     "websocket_close_timeout": "Timeout beim Schließen des Websockets (Sekunden)",
                     "websocket_ping_tries": "Verbindungsversuche vor dem Schließen des Websockets",
                     "websocket_ping_interval": "Websocket-Ping-Intervall (Sekunden)",
                     "websocket_ping_timeout": "Websocket-Ping-Timeout (Sekunden)",
-                    "skip_schema_validation": "Überspringe OCPP-Schemavalidierung",
-                    "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil",
                     "ssl": "Verschlüsselte Verbindung",
                     "ssl_certfile_path": "Pfad zum SSL Zertifikat",
-                    "ssl_keyfile_path": "Pfad zum SSL Schlüssel",
+                    "ssl_keyfile_path": "Pfad zum SSL Schlüssel"
+                }
+            },
+            "cp_user": {
+                "title": "OCPP-Konfiguration",
+                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier nach: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "cpid": "Identität der Ladestation",
+                    "max_current": "Maximaler Ladestrom",
+                    "meter_interval": "Abtastintervall Laden (Sekunden)",
+                    "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
+                    "skip_schema_validation": "Überspringe OCPP-Schemavalidierung",
+                    "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil",
                     "monitored_variables_autoconfig": "Automatische Erkennung der OCPP-Messwerte"
                 }
             },
