@@ -116,6 +116,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Don't allow servers to use same websocket port
+            self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
             self._data = user_input
             return await self.async_step_cp_user()
 
@@ -131,6 +133,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._data.get(CONF_CPIDS) is None:
             self._data[CONF_CPIDS] = []
         if user_input is not None:
+            # Don't allow duplicate cpids to be used
+            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             if not user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                 measurands = await self.async_step_measurands()
             else:

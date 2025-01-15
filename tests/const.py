@@ -73,7 +73,7 @@ MOCK_CONFIG_FLOW = {
     ],
 }
 
-# test_cpid_2 configuration with skip schema validation enabled, and auto config false
+# test_cpid configuration with skip schema validation enabled, and auto config false
 MOCK_CONFIG_DATA = {
     CONF_HOST: "127.0.0.1",
     CONF_PORT: 9000,

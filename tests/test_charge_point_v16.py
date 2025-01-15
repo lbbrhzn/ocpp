@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 1.6 chargepoint."""
 
 import asyncio
+import contextlib
 from datetime import datetime, UTC  # timedelta,
 
 import pytest
@@ -34,12 +35,32 @@ from ocpp.v16.enums import (
 )
 
 from .const import MOCK_CONFIG_DATA_1, MOCK_CONFIG_DATA_2
-from .charge_point_test import set_switch, press_button, set_number
-import contextlib
 from .charge_point_test import (
+    set_switch,
+    press_button,
+    set_number,
     create_configuration,
     remove_configuration,
 )
+
+SERVICES = [
+    csvcs.service_update_firmware,
+    csvcs.service_configure,
+    csvcs.service_get_configuration,
+    csvcs.service_get_diagnostics,
+    csvcs.service_clear_profile,
+    csvcs.service_data_transfer,
+    csvcs.service_set_charge_rate,
+]
+
+
+SERVICES_ERROR = [
+    csvcs.service_configure,
+    csvcs.service_get_configuration,
+    csvcs.service_clear_profile,
+    csvcs.service_data_transfer,
+    csvcs.service_set_charge_rate,
+]
 
 
 @pytest.mark.timeout(90)  # Set timeout for this test
@@ -58,18 +79,10 @@ async def test_cms_responses_v16(hass, socket_enabled):
         for button in BUTTONS:
             await press_button(hass, cpid, button.key)
 
-    async def test_services(hass, cpid, socket_enabled):
+    async def test_services(hass, cpid, serv_list, socket_enabled):
         """Test service operations."""
-        SERVICES = [
-            csvcs.service_update_firmware,
-            csvcs.service_configure,
-            csvcs.service_get_configuration,
-            csvcs.service_get_diagnostics,
-            csvcs.service_clear_profile,
-            csvcs.service_data_transfer,
-            csvcs.service_set_charge_rate,
-        ]
-        for service in SERVICES:
+
+        for service in serv_list:
             data = {}
             if service == csvcs.service_update_firmware:
                 data = {"firmware_url": "http://www.charger.com/firmware.bin"}
@@ -122,6 +135,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
 
     # Test MOCK_CONFIG_DATA_1
     # Create a mock entry so we don't have to go through config flow
+    # Both version and minor need to match config flow so as not to trigger migration flow
     config_entry1 = MockConfigEntry(
         domain=OCPP_DOMAIN,
         data=MOCK_CONFIG_DATA_1,
@@ -137,12 +151,16 @@ async def test_cms_responses_v16(hass, socket_enabled):
     # if the charger measurands differ from the config entry
     # which causes the websocket server to close/restart with a
     # ConnectionClosedOK exception, hence it needs to be passed/suppressed
-    async with websockets.connect(
-        "ws://127.0.0.1:9001/CP_1_nosub",
-    ) as ws2:
-        # use a different id for debugging
+    async with (
+        websockets.connect(
+            "ws://127.0.0.1:9001/CP_1_nosub",  # this is the charger cp_id ie CP_1_nosub in the cs
+        ) as ws2
+    ):
         assert ws2.subprotocol is None
-        cp2 = ChargePoint("CP_1_no_subprotocol", ws2)
+        # Note this mocks a real charger and is not the charger representation in the cs, which is accessed by cp_id
+        cp2 = ChargePoint(
+            "CP_1_no_subprotocol", ws2
+        )  # uses a different id for debugging, would normally be cp_id
         with contextlib.suppress(
             asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
         ):
@@ -234,8 +252,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
     assert int(cs.get_metric("test_cpid", "Energy.Meter.Start")) == saved_meter_start
     assert int(cs.get_metric("test_cpid", "Transaction.Id")) == saved_transactionId
 
-    await asyncio.sleep(1)
-
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
         "ws://127.0.0.1:9000/CP_1_norm",
@@ -297,7 +313,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
     # start clean entry for services
     cs = await create_configuration(hass, config_entry2)
 
-    await asyncio.sleep(1)
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
     # test processing of clock aligned meter data
@@ -323,6 +338,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                     test_services(
                         hass,
                         cs.charge_points["CP_1_serv"].settings.cpid,
+                        SERVICES,
                         socket_enabled,
                     ),
                     test_buttons(
@@ -399,11 +415,14 @@ async def test_cms_responses_v16(hass, socket_enabled):
     assert int(cs.get_metric(cpid, "Energy.Session")) == 11
     assert cs.get_unit(cpid, "Energy.Active.Import.Register") == "kWh"
 
+    await remove_configuration(hass, config_entry2)
+    # start clean entry for services
+    cs = await create_configuration(hass, config_entry2)
+
     # test ocpp rejection messages sent from charger to cms
-    cs.charge_points["CP_1_serv"].received_boot_notification = False
-    cs.charge_points["CP_1_serv"].post_connect_success = False
+    # use SERVICES_ERROR as only Core and Smart profiles enabled
     async with websockets.connect(
-        "ws://127.0.0.1:9000/CP_1_error",
+        "ws://127.0.0.1:9000/CP_1_err",
         subprotocols=["ocpp1.6"],
     ) as ws:
         with contextlib.suppress(
@@ -411,34 +430,55 @@ async def test_cms_responses_v16(hass, socket_enabled):
         ):
             cp = ChargePoint("CP_1_error", ws)
             cp.accept = False
+            # Allow charger time to connect before running services
+            await asyncio.wait_for(
+                cp.start(),
+                timeout=5,
+            )
+        await ws.close()
+    # if monitored variables differ cs will restart and charger needs to reconnect
+    async with websockets.connect(
+        "ws://127.0.0.1:9000/CP_1_err",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        with contextlib.suppress(
+            asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
+        ):
+            cp = ChargePoint("CP_1_error", ws)
+            cp.accept = False
+            cp_task = asyncio.create_task(cp.start())
+            await asyncio.sleep(5)
+            # Allow charger time to reconnect bfore running services
             await asyncio.wait_for(
                 asyncio.gather(
-                    cp.start(),
-                    cs.charge_points["CP_1_error"].trigger_boot_notification(),
-                    cs.charge_points["CP_1_error"].trigger_status_notification(),
+                    cs.charge_points["CP_1_err"].trigger_boot_notification(),
+                    cs.charge_points["CP_1_err"].trigger_status_notification(),
                     test_switches(
                         hass,
-                        cs.charge_points["CP_1_serv"].settings.cpid,
+                        cs.charge_points["CP_1_err"].settings.cpid,
                         socket_enabled,
                     ),
                     test_services(
                         hass,
-                        cs.charge_points["CP_1_serv"].settings.cpid,
+                        cs.charge_points["CP_1_err"].settings.cpid,
+                        SERVICES_ERROR,
                         socket_enabled,
                     ),
                     test_buttons(
                         hass,
-                        cs.charge_points["CP_1_serv"].settings.cpid,
+                        cs.charge_points["CP_1_err"].settings.cpid,
                         socket_enabled,
                     ),
                 ),
-                timeout=3,
+                timeout=10,
             )
+            await cs.charge_points["CP_1_err"].stop()
+            cp_task.cancel()
         await ws.close()
 
     # test services when charger is unavailable
     await test_services(
-        hass, cs.charge_points["CP_1_serv"].settings.cpid, socket_enabled
+        hass, cs.charge_points["CP_1_err"].settings.cpid, SERVICES_ERROR, socket_enabled
     )
     await remove_configuration(hass, config_entry2)
 
@@ -498,7 +538,7 @@ class ChargePoint(cpclass):
                     ]
                 )
             else:
-                raise Exception
+                pass
         if key[0] == ConfigurationKey.meter_value_sample_interval.value:
             if self.accept is True:
                 return call_result.GetConfiguration(

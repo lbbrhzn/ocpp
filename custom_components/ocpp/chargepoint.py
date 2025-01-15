@@ -331,6 +331,7 @@ class ChargePoint(cp):
             updated_entry[CONF_CPIDS][self.settings.connection][self.settings.cpid][
                 CONF_MONITORED_VARIABLES
             ] = accepted_measurands
+            # if an entry differs this will unload/reload and stop/restart the central system/websocket
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
             await self.set_standard_configuration()
