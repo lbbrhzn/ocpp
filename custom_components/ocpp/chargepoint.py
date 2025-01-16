@@ -339,30 +339,32 @@ class ChargePoint(cp):
             # Register custom services with home assistant
             self.register_version_specific_services()
             self.hass.services.async_register(
-                DOMAIN,
+                self.settings.cpid,
                 csvcs.service_data_transfer.value,
                 handle_data_transfer,
                 TRANS_SERVICE_DATA_SCHEMA,
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
-                    DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
+                    self.settings.cpid,
+                    csvcs.service_clear_profile.value,
+                    handle_clear_profile,
                 )
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_set_charge_rate.value,
                     handle_set_charge_rate,
                     CHRGR_SERVICE_DATA_SCHEMA,
                 )
             if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_update_firmware.value,
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
                 )
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_get_diagnostics.value,
                     handle_get_diagnostics,
                     GDIAG_SERVICE_DATA_SCHEMA,
