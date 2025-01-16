@@ -799,13 +799,13 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
 
 
 async def _set_variable(
-    hass: HomeAssistant, cs: CentralSystem, cpid: str, key: str, value: str
+    hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint, key: str, value: str
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
     try:
         response = await hass.services.async_call(
-            cpid,
+            OCPP_DOMAIN,
             csvcs.service_configure_v201,
             service_data={"ocpp_key": key, "value": value},
             blocking=True,
@@ -817,13 +817,13 @@ async def _set_variable(
 
 
 async def _get_variable(
-    hass: HomeAssistant, cs: CentralSystem, cpid: str, key: str
+    hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint, key: str
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
     try:
         response = await hass.services.async_call(
-            cpid,
+            OCPP_DOMAIN,
             csvcs.service_get_configuration_v201,
             service_data={"ocpp_key": key},
             blocking=True,
@@ -838,72 +838,71 @@ async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
     service_response: ServiceResponse
     error: HomeAssistantError
 
-    cpid: str = list(cs.cpids.keys())[0]
     service_response, error = await _set_variable(
-        hass, cs, cpid, "SampledDataCtrlr/TxUpdatedInterval", "17"
+        hass, cs, cp, "SampledDataCtrlr/TxUpdatedInterval", "17"
     )
     assert service_response == {"reboot_required": False}
     assert cp.tx_updated_interval == 17
 
     service_response, error = await _set_variable(
-        hass, cs, cpid, "SampledDataCtrlr/RebootRequired", "17"
+        hass, cs, cp, "SampledDataCtrlr/RebootRequired", "17"
     )
     assert service_response == {"reboot_required": True}
 
     service_response, error = await _set_variable(
-        hass, cs, cpid, "TestComponent(CompInstance)/TestVariable(VarInstance)", "17"
+        hass, cs, cp, "TestComponent(CompInstance)/TestVariable(VarInstance)", "17"
     )
     assert service_response == {"reboot_required": False}
     assert cp.component_instance_used == "CompInstance"
     assert cp.variable_instance_used == "VarInstance"
 
     service_response, error = await _set_variable(
-        hass, cs, cpid, "SampledDataCtrlr/BadVariable", "17"
+        hass, cs, cp, "SampledDataCtrlr/BadVariable", "17"
     )
     assert error is not None
     assert str(error).startswith("Failed to set variable")
 
     service_response, error = await _set_variable(
-        hass, cs, cpid, "SampledDataCtrlr/VeryBadVariable", "17"
+        hass, cs, cp, "SampledDataCtrlr/VeryBadVariable", "17"
     )
     assert error is not None
     assert str(error).startswith("OCPP call failed: InternalError")
 
     service_response, error = await _set_variable(
-        hass, cs, cpid, "does not compute", "17"
+        hass, cs, cp, "does not compute", "17"
     )
     assert error is not None
     assert str(error) == "Invalid OCPP key"
 
     service_response, error = await _get_variable(
-        hass, cs, cpid, "SampledDataCtrlr/TxUpdatedInterval"
+        hass, cs, cp, "SampledDataCtrlr/TxUpdatedInterval"
     )
     assert service_response == {"value": "17"}
 
     service_response, error = await _get_variable(
-        hass, cs, cpid, "TestComponent(CompInstance)/TestInstance(VarInstance)"
+        hass, cs, cp, "TestComponent(CompInstance)/TestInstance(VarInstance)"
     )
     assert service_response == {"value": "CompInstance,VarInstance"}
 
     service_response, error = await _get_variable(
-        hass, cs, cpid, "SampledDataCtrlr/BadVariale"
+        hass, cs, cp, "SampledDataCtrlr/BadVariale"
     )
     assert error is not None
     assert str(error).startswith("Failed to get variable")
 
     service_response, error = await _get_variable(
-        hass, cs, cpid, "SampledDataCtrlr/VeryBadVariable"
+        hass, cs, cp, "SampledDataCtrlr/VeryBadVariable"
     )
     assert error is not None
     assert str(error).startswith("OCPP call failed: InternalError")
 
 
 async def _set_charge_rate_service(
-    hass: HomeAssistant, cpid: str, data: dict
+    hass: HomeAssistant, data: dict
 ) -> HomeAssistantError:
     try:
         await hass.services.async_call(
-            cpid,
+            OCPP_DOMAIN,
             csvcs.service_set_charge_rate,
             service_data=data,
             blocking=True,
@@ -916,11 +915,11 @@ async def _set_charge_rate_service(
 async def _test_charge_profiles(
     hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 ):
-    cpid: str = list(cs.cpids.keys())[0]
     error: HomeAssistantError = await _set_charge_rate_service(
-        hass, cpid, {"limit_watts": 3000}
+        hass, {"limit_watts": 3000}
     )
 
+    cpid: str = list(cs.cpids.keys())[0]
     assert error is None
     assert len(cp.charge_profiles_set) == 1
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -938,7 +937,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, cpid, {"limit_amps": 16})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 16})
     assert error is None
     assert len(cp.charge_profiles_set) == 2
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -958,7 +957,6 @@ async def _test_charge_profiles(
 
     error = await _set_charge_rate_service(
         hass,
-        cpid,
         {
             "custom_profile": """{
             'id': 2,
@@ -1007,7 +1005,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, cpid, {"limit_amps": 5})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 5})
     assert error is not None
     assert str(error).startswith("Failed to set variable: Rejected")
 
@@ -1021,7 +1019,6 @@ async def _test_charge_profiles(
 
 
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cpid: str = list(cs.cpids.keys())[0]
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
             {
@@ -1045,11 +1042,12 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
     datetime.fromisoformat(heartbeat_resp.current_time)
 
-    await wait_ready(hass, cpid)
+    await wait_ready(hass)
 
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
 
+    cpid: str = list(cs.cpids.keys())[0]
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
     assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
@@ -1139,7 +1137,6 @@ async def _extra_features_test(
     cs: CentralSystem,
     cp: ChargePointAllFeatures,
 ):
-    cpid = list(cs.cpids.keys())[0]
     await cp.call(
         call.BootNotification(
             {
@@ -1151,7 +1148,7 @@ async def _extra_features_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass, cpid)
+    await wait_ready(hass)
 
     assert (
         cs.get_metric(
@@ -1193,7 +1190,6 @@ async def _unsupported_base_report_test(
     cs: CentralSystem,
     cp: ChargePoint,
 ):
-    cpid = list(cs.cpids.keys())[0]
     await cp.call(
         call.BootNotification(
             {
@@ -1205,10 +1201,10 @@ async def _unsupported_base_report_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass, cpid)
+    await wait_ready(hass)
     assert (
         cs.get_metric(
-            cpid,
+            list(cs.cpids.keys())[0],
             cdet.features.value,
         )
         == Profiles.CORE | Profiles.REM | Profiles.FW

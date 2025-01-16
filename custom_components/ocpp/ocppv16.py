@@ -178,13 +178,13 @@ class ChargePoint(cp):
             await self.get_configuration(key)
 
         self.hass.services.async_register(
-            self.settings.cpid,
+            DOMAIN,
             csvcs.service_configure.value,
             handle_configure,
             CONF_SERVICE_DATA_SCHEMA,
         )
         self.hass.services.async_register(
-            self.settings.cpid,
+            DOMAIN,
             csvcs.service_get_configuration.value,
             handle_get_configuration,
             GCONF_SERVICE_DATA_SCHEMA,
