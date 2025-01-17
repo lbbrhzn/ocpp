@@ -29,6 +29,14 @@ def bypass_setup_fixture():
             "custom_components.ocpp.async_setup_entry",
             return_value=True,
         ),
+        patch(
+            "custom_components.ocpp.config_flow.ConfigFlow.hass.data",
+            return_value={"ocpp":{"dummy":"dummy"}},
+        ),
+        patch(
+            "custom_components.ocpp.api.CentralSystem.cpids",
+            return_value=[{"test_cp_id":"test_cpid_flow"}],
+        ),
     ):
         yield
 
