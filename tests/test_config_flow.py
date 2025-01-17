@@ -46,7 +46,7 @@ def mock_central_sys_fixture():
             "custom_components.ocpp.config_flow.ConfigFlow", "hass"
         ) as m:
             m.config_entries._entries.get_entries_for_domain.return_value = [config_entry]
-            m.data.return_value = {"occp":{"test_cms1":central_sys}}
+            m.data.return_value = {OCPP_DOMAIN:{"test_cms1":central_sys}}
     yield m
 
 
