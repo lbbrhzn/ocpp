@@ -52,19 +52,43 @@ async def test_successful_config_flow(hass, bypass_get_data):
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input=MOCK_CONFIG_CS
     )
+
+    # Check that the config flow is complete and a new entry is created with
+    # the input data
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["title"] == "test_csid_flow"
+    assert result["data"] == MOCK_CONFIG_CS
+    assert result["result"]
+
+async def test_successful_discovery_flow(hass, bypass_get_data):
+    """Test a discovery config flow."""
+    # Initialize a config flow
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=MOCK_CONFIG_CS
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DISCOVERY}
+    )
+
+    # Check that the config flow shows the user form as the first step
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "cp_user"
 
+    # If a user were to enter `test_username` for username and `test_password`
+    # for password, it would result in this function call
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input=MOCK_CONFIG_CP
     )
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["title"] == "test_csid_flow"
     assert result["data"] == MOCK_CONFIG_FLOW
     assert result["result"]
-
 
 # In this case, we want to simulate a failure during the config flow.
 # We use the `error_on_get_data` mock instead of `bypass_get_data`

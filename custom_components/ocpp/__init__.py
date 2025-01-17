@@ -113,19 +113,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         model="OCPP Central System",
     )
 
-    """ Create first Charge Point Device """
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
-    dr.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, cpid)},
-        name=cpid,
-        model="Unknown",
-        via_device=(DOMAIN, central_sys.id),
-    )
-
     hass.data[DOMAIN][entry.entry_id] = central_sys
+    await hass.config_entries.async_forward_entry_setups(entry, ["charger"])
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True

@@ -119,16 +119,21 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             # Don't allow servers to use same websocket port
             self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
             self._data = user_input
-            return await self.async_step_cp_user()
+            return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_CS_DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_cp_user(self, user_input=None) -> ConfigFlowResult:
+    async def async_step_discovery(
+        self, user_input=None
+    ) -> ConfigFlowResult:
         """Handle user charger initiated configuration."""
         errors: dict[str, str] = {}
-
+        entry = self.hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
+        central_sys = self.hass.data[DOMAIN][entry.entry_id]
+        cp_id = central_sys.cpids.values()[-1]
+        self._data = entry.data
         # Create list for charger configuration values
         if self._data.get(CONF_CPIDS) is None:
             self._data[CONF_CPIDS] = []
@@ -140,8 +145,11 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 measurands = DEFAULT_MONITORED_VARIABLES
             user_input[CONF_MONITORED_VARIABLES] = measurands
-            self._data[CONF_CPIDS].append({user_input[CONF_CPID]: user_input})
-            return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
+            self._data[CONF_CPIDS].append({cp_id: user_input})
+            return self.async_update_reload_and_abort(
+                entry,
+                data_updates=self._data,
+            )
 
         return self.async_show_form(
             step_id="cp_user", data_schema=STEP_USER_CP_DATA_SCHEMA, errors=errors

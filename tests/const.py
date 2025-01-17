@@ -59,8 +59,8 @@ MOCK_CONFIG_FLOW = {
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
     CONF_CPIDS: [
         {
-            "test_cpid_flow": {
-                CONF_CPID: "test_cpid_flow",
+            "test_cpid": {
+                CONF_CPID: "test_cpid",
                 CONF_IDLE_INTERVAL: 900,
                 CONF_MAX_CURRENT: 32,
                 CONF_METER_INTERVAL: 60,

@@ -55,7 +55,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
+    cpid = list(entry.data[CONF_CPIDS][0].keys())[-1]
 
     entities = []
 
