@@ -130,8 +130,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle user charger initiated configuration."""
         errors: dict[str, str] = {}
+        # Get entry that was created for the central system
         entry = self.hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
-        central_sys = self.hass.data[DOMAIN].get(entry.entry_id)
+        # Get the cp_id for the charger discovered from the central system
+        central_sys = self.hass.data[DOMAIN][entry.entry_id]
         cp_id = central_sys.cpids.values()[-1]
         self._data = entry.data
         # Create list for charger configuration values
