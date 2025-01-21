@@ -9,14 +9,14 @@ Dynamically adjusting the charge current of an electric vehicle (EV) within a ho
     * When the solar panel production is avaiable in Home Assistent, you can prioritize charging the EV with excess solar energy.
 
 * **Demand Response:** 
-    * When you have dynamic energy pricing you charging rates based on time-of-use electricity pricing. B
+    * When you have dynamic energy pricing you charging rates based on time-of-use electricity pricing.
 
 This page provides several examples and hints to illustrate some of the many potential use cases."
 
 ## Adjusting the charge current
 
-When the OCPP integration is added to your Home Assistent you get a slider to control the maximum charge current named: 
-*number.<name_ocpp_charger>_maximum_current*
+When the OCPP integration is added to your Home Assistent you get a slider to control the maximum charge current named:
+<mark>number.<name_ocpp_charger>_maximum_current</mark>
 
 While using this entity in your automation might seem logical, it could potentially lead to permanent damage to your charger in the long run.
 This entity controls the OCPP ChargePointMaxProfile, which configures the maximum power or current available for the entire charging station.
@@ -68,5 +68,36 @@ This sensor contains the solar current in amps rounded down to the nearest whole
 ## Smart-meter
 The paragraph above suggests that nearly all the solar current is prioritized for the EV charger. However, this can lead to situations where other high-demand appliances, such as a washing machine or hot tub, still draw power from the grid even when solar energy is available.
 
-To avoid this, you can use the data provided by your smart meter sensors. By integrating smart meter data into your home automation system, you can dynamically adjust the EV charging rate based on real-time energy consumption. This ensures that the EV primarily charges using excess solar power while minimizing reliance on grid electricity during periods of high household demand.
+To avoid this, you can use the data provided by your smart meter sensors. By integrating smart meter data into your home automation system, you can dynamically adjust the EV charging rate based on real-time energy consumption. This ensures that the EV primarily charges using excess solar power while minimizing reliance on grid electricity during periods of high household demand.you might have it as power. 
 
+For this it is important to know the current you deliver or receive from the grid. Depending on you smart meter sensors you might have this current available in a sensor or you might have this as power. The example below uses power to and from the grid and converts it to a current which is negative when receiving from the grid.
+In this example the power is in kW and the current is calculated using at actual mains voltage.
+This template sensor gives the right value:
+
+        - platform: template
+          sensors:
+             grid_current_available:  # Calculate the current still available to use, can be negative
+              value_template: >-
+              {{((states('sensor.p1_meter_p1_returned') | float - states('sensor.p1_meter_p1_power') | float )*1000 
+              / (states('sensor.p1_meter_p1_voltage') | float )) }}
+              unit_of_measurement: 'A'
+              device_class: current
+
+For solar charging a positive grid current avaiable means you can increase your EV charge number with this number, when negative you need to decrease. This means you need to know the actual charge current and modify this. To do this easily you can use a variable inside your automation to store the actual charge current.
+
+   variables:
+     achtual_charge_current: "{{ (states('sensor.charge_current') | float) }}"
+     new_amps: "{{ actual_charge_current + (states('sensor.grid_current_available') | float) }}
+
+This could lead to a negative charge current, to avoid this create a new variable with a minimum value:
+
+    charge_current: "{{ [new_amps, 0] | max }}"
+
+"Max" selects the largest value either new_amps or 0
+
+## maximum charge
+A simular solution could be use to check how much power is still available from the grid substracting all power used by other appliances in your house. This way you can charge you EV as fast as possible without overloading your main fuse. 
+
+:exclamation: By specificatiomn your main fuse can withand 1.2 its rate current for at least 1 hour 
+
+So a response time up to a minute is usually no problem if the overload is limited.
