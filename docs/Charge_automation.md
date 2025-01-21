@@ -6,22 +6,24 @@ Dynamically adjusting the charge current of an electric vehicle (EV) within a ho
     * By monitoring real-time energy consumption, you can automatically reduce the EV's charging rate to prevent overloading the household's electrical circuits and potentially tripping the main fuse.
 
 * **Optimizing Solar Power Usage:** 
-    * When the solar panel production is avaiable in Home Assistent, you can prioritize charging the EV with excess solar energy.
+    * When the solar panel production is available in Home Assistant, you can prioritize charging the EV with excess solar energy.
 
 * **Demand Response:** 
-    * When you have dynamic energy pricing you charging rates based on time-of-use electricity pricing.
+    * When you have dynamic energy pricing, you can adjust charging rates based on time-of-use electricity pricing.
 
 This page provides several examples and hints to illustrate some of the many potential use cases."
 
 ## Adjusting the charge current
 
-When the OCPP integration is added to your Home Assistent you get a slider to control the maximum charge current named:
+When the OCPP integration is added to your Home Assistant, you get a slider to control the maximum charge current named:
 <mark>number.<name_ocpp_charger>_maximum_current</mark>
 
 While using this entity in your automation might seem logical, it could potentially lead to permanent damage to your charger in the long run.
 This entity controls the OCPP ChargePointMaxProfile, which configures the maximum power or current available for the entire charging station.
 This setting is typically written to non-volatile storage (like EEPROM or flash memory) to persist across reboots.
-Frequent writes to these types of memory can accelerate wear, potentially shortening the lifespan of your charger.
+Frequent writes to these types of memory can accelerate wear, potentially shortening the lifespan of your charger. Ten updates per day is no problem at all, 1 update per 10s could break your charger somewhere between 3 days and 3 years depending on the HW solution. 
+
+⚠️ **Warning**: Using the maximum current slider in automations can lead to permanent hardware damage due to frequent writes to non-volatile memory.
 
 ### TXprofile
 
@@ -53,7 +55,8 @@ To dynamically set the session-specific charge current within an automation, use
 Where <mark>entity_charge_limit</mark> refers to your chosen entity (e.g., a number or sensor) that holds the desired current value.
 
 ## solar current
-The solar ystem usualy reports its production in Watt or kWatt. To convert this in the amps available for your EV-charger simply devide the Watt by the mains voltage (e.g 230V for the EU)
+The solar system usually reports its production in Watts or kW. To convert this to amps available for your EV charger, simply divide the watts by the mains voltage (e.g., 230V for the EU)
+
 You can create a template sensor for this:
 
     - platform: template
@@ -86,17 +89,17 @@ This template sensor gives the right value:
 For solar charging a positive grid current avaiable means you can increase your EV charge number with this number, when negative you need to decrease. This means you need to know the actual charge current and modify this. To do this easily you can use a variable inside your automation to store the actual charge current.
 
    variables:
-     achtual_charge_current: "{{ (states('sensor.charge_current') | float) }}"
+     actual_charge_current: "{{ (states('sensor.charge_current') | float) }}"
      new_amps: "{{ actual_charge_current + (states('sensor.grid_current_available') | float) }}
 
 This could lead to a negative charge current, to avoid this create a new variable with a minimum value:
 
     charge_current: "{{ [new_amps, 0] | max }}"
 
-"Max" selects the largest value either new_amps or 0
+The `max` filter ensures the charge current never goes below 0 amps, which would be invalid for the charging station.
 
 ## maximum charge
-A simular solution could be use to check how much power is still available from the grid substracting all power used by other appliances in your house. This way you can charge you EV as fast as possible without overloading your main fuse. 
+A simular solution could be used to check how much power is still available from the grid substracting all power used by other appliances in your house. This way you can charge you EV as fast as possible without overloading your main fuse. 
 
 :exclamation: By specificatiomn your main fuse can withand 1.2 its rate current for at least 1 hour 
 
