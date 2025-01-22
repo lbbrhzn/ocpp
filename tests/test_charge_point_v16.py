@@ -66,8 +66,6 @@ SERVICES_ERROR = [
     csvcs.service_set_charge_rate,
 ]
 
-PORT = 9000
-
 
 async def test_switches(hass, cpid, socket_enabled):
     """Test switch operations."""
@@ -169,7 +167,8 @@ async def setup_config_entry(hass, request) -> CentralSystem:
 @pytest.mark.timeout(90)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_nosub","cms":"cms_nosub"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_nosub"])
-async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9001)
+async def test_cms_responses_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system responses to a charger with no subprotocol."""
 
     # no subprotocol central system assumes ocpp1.6 charge point
@@ -180,7 +179,7 @@ async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry
 
     async with (
         websockets.connect(
-            f"ws://127.0.0.1:{PORT}/{cp_id}",  # this is the charger cp_id ie CP_1_nosub in the cs
+            f"ws://127.0.0.1:{port}/{cp_id}",  # this is the charger cp_id ie CP_1_nosub in the cs
         ) as ws2
     ):
         assert ws2.subprotocol is None
@@ -214,13 +213,14 @@ async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_unsup","cms":"cms_unsup"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_unsup"])
-async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9002)
+async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system unsupported protocol."""
 
     # unsupported subprotocol raises websockets exception
     with pytest.raises(websockets.exceptions.InvalidStatus):
         await websockets.connect(
-            f"ws://127.0.0.1:{PORT}/{cp_id}",
+            f"ws://127.0.0.1:{port}/{cp_id}",
             subprotocols=["ocpp0.0"],
         )
 
@@ -228,14 +228,15 @@ async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, setup_confi
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_restore_values","cms":"cms_restore_values"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_restore_values"])
-async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9003)
+async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system restoring values for a charger."""
 
     cs = setup_config_entry
     cpid = cs.charge_points[cp_id].settings.cpid
 
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -292,14 +293,15 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, setup_conf
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_norm","cms":"cms_norm"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_norm"])
-async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9004)
+async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system responses to a charger under normal operation."""
 
     cs = setup_config_entry
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -359,7 +361,8 @@ async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, setup_confi
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_services","cms":"cms_services"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_services"])
-async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9005)
+async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system responses to actions and multi charger under normal operation."""
     # start clean entry for services
     cs = setup_config_entry
@@ -369,7 +372,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_conf
     # should reconnect as already started above
     # test processing of clock aligned meter data
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         cp = ChargePoint(f"{cp_id}_client", ws)
@@ -419,7 +422,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_conf
     # reports starting from 0 Wh for every new transaction id. Total main meter values are without transaction id.
     
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -450,7 +453,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_conf
 
     # test ocpp messages sent from charger that don't support errata 3.9 with meter values with kWh as energy unit
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
@@ -478,7 +481,8 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_conf
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_error","cms":"cms_error"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_error"])
-async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, setup_config_entry):
+@pytest.mark.parametrize("port", 9006)
+async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system responses to actions and multi charger under error operation."""
     # start clean entry for services
     cs = setup_config_entry
@@ -486,7 +490,7 @@ async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, setup_confi
     # test ocpp rejection messages sent from charger to cms
     # use SERVICES_ERROR as only Core and Smart profiles enabled
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         with contextlib.suppress(
@@ -502,7 +506,7 @@ async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, setup_confi
         await ws.close()
     # if monitored variables differ cs will restart and charger needs to reconnect
     async with websockets.connect(
-        f"ws://127.0.0.1:{PORT}/{cp_id}",
+        f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         with contextlib.suppress(
