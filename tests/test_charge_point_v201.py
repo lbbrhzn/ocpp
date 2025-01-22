@@ -1246,17 +1246,18 @@ async def test_cms_responses_v201(hass, socket_enabled):
     cp_id = "CP_2"
     config_data = MOCK_CONFIG_DATA.copy()
     config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
     cp_id2 = "CP_2_allfeatures"
     config_data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
-    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_cpid2"
+    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
 
     config_data[CONF_PORT] = 9010
 
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
         data=config_data,
-        entry_id="test_cms_v201",
-        title="test_cms_v201",
+        entry_id="test_v201_cms",
+        title="test_v201_cms",
         version=2,
         minor_version=0,
     )
@@ -1284,17 +1285,18 @@ async def test_cms_responses_v201(hass, socket_enabled):
     cp_id = "CP_2_noreport"
     config_data = MOCK_CONFIG_DATA_3.copy()
     config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND})
+    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid"
     cp_id2 = "CP_2_report_fail"
     config_data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND})
-    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_cpid2"
+    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
 
     config_data[CONF_PORT] = 9011
 
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
         data=config_data,
-        entry_id="test_cms_v201",
-        title="test_cms_v201",
+        entry_id="test_v201_cms",
+        title="test_v201_cms",
         version=2,
         minor_version=0,
     )

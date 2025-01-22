@@ -26,7 +26,7 @@ async def test_sensor(hass, socket_enabled):
     """Test sensor."""
 
     cp_id = "CP_1_sens"
-    cpid = "test_sens"
+    cpid = "test_cpid_sens"
     data = MOCK_CONFIG_DATA.copy()
     cp_data = MOCK_CONFIG_CP_APPEND.copy()
     cp_data[CONF_CPID] = cpid
