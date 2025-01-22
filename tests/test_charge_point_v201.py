@@ -1247,9 +1247,6 @@ async def test_cms_responses_v201(hass, socket_enabled):
     config_data = MOCK_CONFIG_DATA.copy()
     config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
-    cp_id2 = "CP_2_allfeatures"
-    config_data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
-    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
 
     config_data[CONF_PORT] = 9010
 
@@ -1272,6 +1269,12 @@ async def test_cms_responses_v201(hass, socket_enabled):
         [lambda cp: _run_test(hass, cs, cp)],
     )
 
+    # add second charger to config entry
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    cp_id2 = "CP_2_allfeatures"
+    entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+
     await run_charge_point_test(
         config_entry,
         cp_id2,
@@ -1286,9 +1289,6 @@ async def test_cms_responses_v201(hass, socket_enabled):
     config_data = MOCK_CONFIG_DATA_3.copy()
     config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
-    cp_id2 = "CP_2_report_fail"
-    config_data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
-    config_data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
 
     config_data[CONF_PORT] = 9011
 
@@ -1309,6 +1309,11 @@ async def test_cms_responses_v201(hass, socket_enabled):
         lambda ws: ChargePointReportUnsupported("CP_2_noreport_client", ws),
         [lambda cp: _unsupported_base_report_test(hass, cs, cp)],
     )
+
+    cp_id2 = "CP_2_report_fail"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
 
     await run_charge_point_test(
         config_entry,

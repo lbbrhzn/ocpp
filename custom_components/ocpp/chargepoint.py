@@ -114,6 +114,7 @@ async def async_setup_charger(hass, entry, cs_id, cpid, cp_id):
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
         name=cpid,
+        suggested_area="Garage",
         via_device=(DOMAIN, cs_id),
     )
 
@@ -595,7 +596,6 @@ class ChargePoint(cp):
             identifiers=identifiers,
             manufacturer=vendor,
             model=model,
-            suggested_area="Garage",
             sw_version=firmware_version,
         )
 
