@@ -18,6 +18,7 @@ from homeassistant.helpers.entity import DeviceInfo
 
 from .api import CentralSystem
 from .const import (
+    CONF_CPID,
     CONF_CPIDS,
     CONF_MAX_CURRENT,
     DATA_UPDATED,
@@ -55,7 +56,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[-1]
+    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
+    cpid = cp_id_settings[CONF_CPID]
 
     entities = []
 
