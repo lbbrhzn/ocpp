@@ -34,6 +34,7 @@ MOCK_CONFIG_CS = {
     CONF_WEBSOCKET_PING_TRIES: 0,
     CONF_WEBSOCKET_PING_INTERVAL: 1,
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
+    CONF_CPIDS: [],
 }
 
 MOCK_CONFIG_CP = {
@@ -85,20 +86,19 @@ MOCK_CONFIG_DATA = {
     CONF_WEBSOCKET_PING_TRIES: 0,
     CONF_WEBSOCKET_PING_INTERVAL: 1,
     CONF_WEBSOCKET_PING_TIMEOUT: 1,
-    CONF_CPIDS: [
-        {
-            "test_cpid": {
-                CONF_CPID: "test_cpid",
-                CONF_IDLE_INTERVAL: 900,
-                CONF_MAX_CURRENT: 32,
-                CONF_METER_INTERVAL: 60,
-                CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
-                CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
-                CONF_SKIP_SCHEMA_VALIDATION: False,
-                CONF_FORCE_SMART_CHARGING: True,
-            }
-        },
-    ],
+    CONF_CPIDS: [],
+}
+
+# Mock a charger that can be appended to config data
+MOCK_CONFIG_CP_APPEND = {
+    CONF_CPID: "test_cpid",
+    CONF_IDLE_INTERVAL: 900,
+    CONF_MAX_CURRENT: 32,
+    CONF_METER_INTERVAL: 60,
+    CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+    CONF_SKIP_SCHEMA_VALIDATION: False,
+    CONF_FORCE_SMART_CHARGING: True,
 }
 
 # different port with skip schema validation enabled, and auto config false
@@ -108,7 +108,7 @@ MOCK_CONFIG_DATA_1 = {
     CONF_PORT: 9001,
     CONF_CPIDS: [
         {
-            "test_cpid_9001": {
+            "CP_1_nosub": {
                 CONF_CPID: "test_cpid_9001",
                 CONF_IDLE_INTERVAL: 900,
                 CONF_MAX_CURRENT: 32,

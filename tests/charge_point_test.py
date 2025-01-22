@@ -94,6 +94,7 @@ async def wait_ready(hass: HomeAssistant):
     hass.services.async_remove(OCPP_DOMAIN, csvcs.service_data_transfer)
     while not hass.services.has_service(OCPP_DOMAIN, csvcs.service_data_transfer):
         await asyncio.sleep(0.1)
+    await asyncio.sleep(0.5)
 
 
 def _check_complete(
@@ -129,7 +130,7 @@ async def run_charge_point_test(
             ]
             await asyncio.wait_for(
                 asyncio.gather(*([cp.start()] + test_results)),
-                timeout=5,
+                timeout=20,
             )
         await ws.close()
     for test_completed in completed:

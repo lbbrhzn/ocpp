@@ -57,6 +57,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    PLATFORMS,
     UNITS_OCCP_TO_HA,
 )
 
@@ -101,6 +102,22 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
+
+
+async def async_setup_charger(hass, entry, cs_id, cpid, cp_id):
+    """Configure the charger device and its platforms."""
+
+    dr = device_registry.async_get(hass)
+
+    """ Create Central System Device """
+    dr.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
+        name=cpid,
+        via_device=(DOMAIN, cs_id),
+    )
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
 
 class Metric:
@@ -328,9 +345,11 @@ class ChargePoint(cp):
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
-            updated_entry[CONF_CPIDS][self.settings.connection][self.settings.cpid][
-                CONF_MONITORED_VARIABLES
-            ] = accepted_measurands
+            for i in range(len(updated_entry[CONF_CPIDS])):
+                if self.id in updated_entry[CONF_CPIDS][i]:
+                    updated_entry[CONF_CPIDS][i][self.id][CONF_MONITORED_VARIABLES] = (
+                        accepted_measurands
+                    )
             # if an entry differs this will unload/reload and stop/restart the central system/websocket
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
@@ -569,8 +588,6 @@ class ChargePoint(cp):
         self._metrics[cdet.serial.value].value = serial
 
         identifiers = {(DOMAIN, self.id), (DOMAIN, self.settings.cpid)}
-        if serial is not None:
-            identifiers.add((DOMAIN, serial))
 
         registry = device_registry.async_get(self.hass)
         registry.async_get_or_create(
@@ -591,7 +608,7 @@ class ChargePoint(cp):
         """Update sensors values in HA."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cpid)}
+        identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
         dev = dr.async_get_device(identifiers)
         # _LOGGER.info("Device id: %s updating", dev.name)
         for ent in entity_registry.async_entries_for_device(er, dev.id):

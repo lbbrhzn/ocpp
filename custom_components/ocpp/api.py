@@ -6,7 +6,7 @@ import logging
 import ssl
 
 from functools import partial
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import STATE_OK
 from homeassistant.core import HomeAssistant
 from websockets import Subprotocol, NegotiationError
@@ -25,7 +25,7 @@ from .const import (
 from .enums import (
     HAChargerServices as csvcs,
 )
-from .config_flow import ConfigFlow
+from .chargepoint import async_setup_charger
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
@@ -127,15 +127,17 @@ class CentralSystem:
                     _LOGGER.debug(f"Central settings: {self.settings}")
 
             if not config_flow:
-                # placeholder before using flow to get settings and setup platforms
-                # self.settings.cpids.append(self.settings.cpids[0])
-                cfg_flow = ConfigFlow
-                await cfg_flow.async_step_discovery()
+                # discovery_info for flow
+                info = {"cp_id": cp_id, "entry": self.entry}
+                await self.hass.config_entries.flow.async_init(
+                    DOMAIN, context={"source": SOURCE_INTEGRATION_DISCOVERY}, data=info
+                )
 
-            # default to 0 until multi-charger properly implemented
-            # cp_settings.connection = self.connections
-            cp_settings.connection = 0
             self.cpids.update({cp_settings.cpid: cp_id})
+            await async_setup_charger(
+                self.hass, self.entry, cs_id=self.id, cpid=cp_settings.cpid, cp_id=cp_id
+            )
+
             if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
                 charge_point = ChargePointv201(
                     cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
@@ -160,9 +162,6 @@ class CentralSystem:
             )
             charge_point = self.charge_points[cp_id]
             await charge_point.reconnect(websocket)
-        _LOGGER.info(
-            f"Charger {cp_id} disconnected from {self.settings.host}:{self.settings.port}."
-        )
 
     def get_metric(self, id: str, measurand: str):
         """Return last known value for given measurand."""

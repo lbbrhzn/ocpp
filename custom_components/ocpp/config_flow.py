@@ -1,6 +1,8 @@
 """Adds config flow for ocpp."""
 
+from typing import Any
 from homeassistant.config_entries import (
+    ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     CONN_CLASS_LOCAL_PUSH,
@@ -110,6 +112,9 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self):
         """Initialize."""
         self._data = {}
+        self._cp_id: str
+        self._entry: ConfigEntry
+        self._measurands: str
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         """Handle user central system initiated configuration."""
@@ -119,54 +124,62 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             # Don't allow servers to use same websocket port
             self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
             self._data = user_input
+            # Add placeholder for cpid settings
+            self._data[CONF_CPIDS] = []
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_CS_DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_discovery(
-        self, user_input=None
+    async def async_step_integration_discovery(
+        self, discovery_info=None
     ) -> ConfigFlowResult:
-        """Handle user charger initiated configuration."""
+        """Handle charger discovery initiated configuration."""
+
+        self._entry = discovery_info["entry"]
+        self._cp_id = discovery_info["cp_id"]
+        self._data = {**self._entry.data}
+
+        await self.async_set_unique_id(self._cp_id)
+        return await self.async_step_cp_user()
+
+    async def async_step_cp_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure charger by user."""
         errors: dict[str, str] = {}
-        # Get entry that was created for the central system
-        entry = self.hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
-        # Get the cp_id for the charger discovered from the central system
-        central_sys = self.hass.data[DOMAIN][entry.entry_id]
-        cp_id = central_sys.cpids.values()[-1]
-        self._data = entry.data
-        # Create list for charger configuration values
-        if self._data.get(CONF_CPIDS) is None:
-            self._data[CONF_CPIDS] = []
+
         if user_input is not None:
             # Don't allow duplicate cpids to be used
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             if not user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                measurands = await self.async_step_measurands()
+                await self.async_step_measurands()
+                measurands = self._measurands
             else:
                 measurands = DEFAULT_MONITORED_VARIABLES
             user_input[CONF_MONITORED_VARIABLES] = measurands
-            self._data[CONF_CPIDS].append({cp_id: user_input})
+            self._data[CONF_CPIDS].append({self._cp_id: user_input})
             return self.async_update_reload_and_abort(
-                entry,
-                data_updates=self._data,
+                self._entry,
+                data_updates={**self._data},
             )
 
         return self.async_show_form(
             step_id="cp_user", data_schema=STEP_USER_CP_DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_measurands(self, user_input=None) -> ConfigFlowResult | str:
+    async def async_step_measurands(self, user_input=None):
         """Select the measurands to be shown."""
 
         errors: dict[str, str] = {}
         if user_input is not None:
             selected_measurands = [m for m, value in user_input.items() if value]
             if set(selected_measurands).issubset(set(MEASURANDS)):
-                return ",".join(selected_measurands)
+                self._measurands = ",".join(selected_measurands)
             else:
                 errors["base"] = "measurand"
+            return
         return self.async_show_form(
             step_id="measurands",
             data_schema=STEP_USER_MEASURANDS_SCHEMA,
