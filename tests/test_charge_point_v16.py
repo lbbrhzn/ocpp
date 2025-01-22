@@ -8,6 +8,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import websockets
 
+from custom_components.ocpp.api import CentralSystem
 from custom_components.ocpp.button import BUTTONS
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, CONF_CPIDS, CONF_CPID
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
@@ -145,27 +146,31 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 
 test_services.__test__ = False
 
-
-# @pytest.mark.skip(reason="skip")
-@pytest.mark.timeout(90)  # Set timeout for this test
-async def test_cms_responses_v16(hass, socket_enabled):
-    """Test central system responses to a charger with no subprotocol."""
-
-    # Test MOCK_CONFIG_DATA_1
+@pytest.fixture
+async def setup_config_entry(cp_id, cms) -> CentralSystem:
+    """Setup/teardown mock config entry and central system."""
     # Create a mock entry so we don't have to go through config flow
     # Both version and minor need to match config flow so as not to trigger migration flow
-    cp_id = "CP_1_nosub"
-    data = MOCK_CONFIG_DATA.copy()
-    data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = MOCK_CONFIG_DATA.copy()
+    config_data[CONF_CPIDS].append({cp_id.param: MOCK_CONFIG_CP_APPEND.copy()})
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
+        data=config_data,
+        entry_id=cms.param,
+        title=cms.param,
         version=2,
         minor_version=0,
     )
-    await create_configuration(hass, config_entry)
+    yield await create_configuration(hass, config_entry)
+    # tear down
+    await remove_configuration(hass, config_entry)
+
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(90)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_nosub","cms_nosub")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_nosub"])
+async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system responses to a charger with no subprotocol."""
 
     # no subprotocol central system assumes ocpp1.6 charge point
     # NB each new config entry will trigger async_update_entry
@@ -181,7 +186,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         assert ws2.subprotocol is None
         # Note this mocks a real charger and is not the charger representation in the cs, which is accessed by cp_id
         cp2 = ChargePoint(
-            "CP_1_no_subprotocol", ws2
+            f"{cp_id}_client", ws2
         )  # uses a different id for debugging, would normally be cp_id
         with contextlib.suppress(
             asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
@@ -203,61 +208,38 @@ async def test_cms_responses_v16(hass, socket_enabled):
             )
         await ws2.close()
 
-    await remove_configuration(hass, config_entry)
+    
 
     # @pytest.mark.skip(reason="skip")
-    # @pytest.mark.timeout(20)  # Set timeout for this test
-    # async def test_cms_responses_unsupp_v16(hass, socket_enabled):
-    #     """Test central system unsupported protocol."""
-    #     global PORT
-    #     PORT += 1
-    # Create a mock entry so we don't have to go through config flow
-    data = MOCK_CONFIG_DATA.copy()
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
-        version=2,
-        minor_version=0,
-    )
-    await create_configuration(hass, config_entry)
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_unsup","cms_unsup")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_unsup"])
+async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system unsupported protocol."""
 
     # unsupported subprotocol raises websockets exception
     with pytest.raises(websockets.exceptions.InvalidStatus):
         await websockets.connect(
-            f"ws://127.0.0.1:{PORT}/CP_1_unsup",
+            f"ws://127.0.0.1:{PORT}/{cp_id}",
             subprotocols=["ocpp0.0"],
         )
 
-    await remove_configuration(hass, config_entry)
-
     # @pytest.mark.skip(reason="skip")
-    # @pytest.mark.timeout(20)  # Set timeout for this test
-    # async def test_cms_responses_restore_v16(hass, socket_enabled):
-    #     """Test central system restoring values for a charger."""
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_restore_values","cms_restore_values")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_restore_values"])
+async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system restoring values for a charger."""
 
-    # test restore feature of meter_start and active_tranasction_id.
-    cp_id = "CP_1_res_vals"
-    data = MOCK_CONFIG_DATA.copy()
-    data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
-        version=2,
-        minor_version=0,
-    )
-
-    cs = await create_configuration(hass, config_entry)
+    cs = setup_config_entry
+    cpid = cs.charge_points[cp_id].settings.cpid
 
     async with websockets.connect(
         f"ws://127.0.0.1:{PORT}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_restore_values", ws)
+        cp = ChargePoint(f"{cp_id}_client", ws)
         cp.active_transactionId = None
         # send None values
         with contextlib.suppress(asyncio.TimeoutError):
@@ -269,8 +251,8 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 timeout=3,
             )
         # check if None
-        assert cs.get_metric("test_cpid", "Energy.Meter.Start") is None
-        assert cs.get_metric("test_cpid", "Transaction.Id") is None
+        assert cs.get_metric(cpid, "Energy.Meter.Start") is None
+        assert cs.get_metric(cpid, "Transaction.Id") is None
 
         # send new data
         with contextlib.suppress(asyncio.TimeoutError):
@@ -284,12 +266,12 @@ async def test_cms_responses_v16(hass, socket_enabled):
             )
 
         # save for reference the values for meter_start and transaction_id
-        saved_meter_start = int(cs.get_metric("test_cpid", "Energy.Meter.Start"))
-        saved_transactionId = int(cs.get_metric("test_cpid", "Transaction.Id"))
+        saved_meter_start = int(cs.get_metric(cpid, "Energy.Meter.Start"))
+        saved_transactionId = int(cs.get_metric(cpid, "Transaction.Id"))
 
         # delete current values from api memory
-        cs.del_metric("test_cpid", "Energy.Meter.Start")
-        cs.del_metric("test_cpid", "Transaction.Id")
+        cs.del_metric(cpid, "Energy.Meter.Start")
+        cs.del_metric(cpid, "Transaction.Id")
         # send new data
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
@@ -302,37 +284,26 @@ async def test_cms_responses_v16(hass, socket_enabled):
         await ws.close()
 
     # check if restored old values from HA when api have lost the values, i.e. simulated reboot of HA
-    assert int(cs.get_metric("test_cpid", "Energy.Meter.Start")) == saved_meter_start
-    assert int(cs.get_metric("test_cpid", "Transaction.Id")) == saved_transactionId
+    assert int(cs.get_metric(cpid, "Energy.Meter.Start")) == saved_meter_start
+    assert int(cs.get_metric(cpid, "Transaction.Id")) == saved_transactionId
 
-    await remove_configuration(hass, config_entry)
 
-    # @pytest.mark.skip(reason="skip")
-    # @pytest.mark.timeout(20)  # Set timeout for this test
-    # async def test_cms_responses_normal_v16(hass, socket_enabled):
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_norm","cms_norm")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_norm"])
+async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system responses to a charger under normal operation."""
 
-    #     """Test central system responses to a charger under normal operation."""
-    cp_id = "CP_1_norm"
-    data = MOCK_CONFIG_DATA.copy()
-    data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
-        version=2,
-        minor_version=0,
-    )
-
-    cs = await create_configuration(hass, config_entry)
+    cs = setup_config_entry
 
     # test ocpp messages sent from charger to cms
     async with websockets.connect(
-        f"ws://127.0.0.1:9000/{cp_id}",
+        f"ws://127.0.0.1:{PORT}/{cp_id}",
         subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_normal", ws)
+        cp = ChargePoint(f"{cp_id}_client", ws)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
@@ -383,29 +354,16 @@ async def test_cms_responses_v16(hass, socket_enabled):
         is False
     )
 
-    await remove_configuration(hass, config_entry)
 
-    # @pytest.mark.skip(reason="skip")
-    # @pytest.mark.timeout(20)  # Set timeout for this test
-    # async def test_cms_responses_actions_v16(hass, socket_enabled):
-    #     """Test central system responses to actions and multi charger under normal operation."""
+@pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_services","cms_services")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_services"])
+async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system responses to actions and multi charger under normal operation."""
     # start clean entry for services
-    cp_id = "CP_1_serv"
-    data = MOCK_CONFIG_DATA.copy()
-    data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
-    # add second charger details to config entry
-    data[CONF_CPIDS].append({"CP_1_non_er_3.9": MOCK_CONFIG_CP_APPEND.copy()})
-    data[CONF_CPIDS][-1]["CP_1_non_er_3.9"][CONF_CPID] = "test_cpid2"
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
-        version=2,
-        minor_version=0,
-    )
-
-    cs = await create_configuration(hass, config_entry)
+    cs = setup_config_entry
+    cpid = cs.charge_points[cp_id].settings.cpid
 
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
@@ -414,7 +372,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         f"ws://127.0.0.1:{PORT}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
-        cp = ChargePoint("CP_1_services", ws)
+        cp = ChargePoint(f"{cp_id}_client", ws)
         with contextlib.suppress(asyncio.TimeoutError):
             cp_task = asyncio.create_task(cp.start())
             await asyncio.sleep(5)
@@ -446,20 +404,26 @@ async def test_cms_responses_v16(hass, socket_enabled):
             cp_task.cancel()
         await ws.close()
 
-    cpid = cs.charge_points[cp_id].settings.cpid
+    
     assert int(cs.get_metric(cpid, "Frequency")) == 50
     assert float(cs.get_metric(cpid, "Energy.Active.Import.Register")) == 1101.452
 
+    # add new charger to config entry
+    cp_id = "CP_1_non_er_3.9"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "cpid2"
+    cpid = cs.charge_points[cp_id].settings.cpid
     # test ocpp messages sent from charger that don't support errata 3.9
     # i.e. "Energy.Meter.Start" starts from 0 for each session and "Energy.Active.Import.Register"
     # reports starting from 0 Wh for every new transaction id. Total main meter values are without transaction id.
-    cp_id = "CP_1_non_er_3.9"
+    
     async with websockets.connect(
         f"ws://127.0.0.1:{PORT}/{cp_id}",
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_non_errata_3.9", ws)
+        cp = ChargePoint(f"{cp_id}_client", ws)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
@@ -473,7 +437,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
                 timeout=5,
             )
         await ws.close()
-    cpid = cs.charge_points[cp_id].settings.cpid
+    
     # Last sent "Energy.Active.Import.Register" value without transaction id should be here.
     assert int(cs.get_metric(cpid, "Energy.Active.Import.Register")) == int(
         67230012 / 1000
@@ -490,7 +454,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         subprotocols=["ocpp1.6"],
     ) as ws:
         # use a different id for debugging
-        cp = ChargePoint("CP_1_non_errata_3.9", ws)
+        cp = ChargePoint(f"{cp_id}_client", ws)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(
@@ -505,31 +469,19 @@ async def test_cms_responses_v16(hass, socket_enabled):
             )
         await ws.close()
 
-    cpid = cs.charge_points[cp_id].settings.cpid
     assert int(cs.get_metric(cpid, "Energy.Active.Import.Register")) == 1101
     assert int(cs.get_metric(cpid, "Energy.Session")) == 11
     assert cs.get_unit(cpid, "Energy.Active.Import.Register") == "kWh"
 
-    await remove_configuration(hass, config_entry)
 
-    # @pytest.mark.skip(reason="skip")
-    # @pytest.mark.timeout(20)  # Set timeout for this test
-    # async def test_cms_responses_errors_v16(hass, socket_enabled):
-    #     """Test central system responses to actions and multi charger under normal operation."""
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize("setup_config_entry", [("CP_1_error","cms_error")], indirect=True)
+@pytest.mark.parametrize("cp_id", ["CP_1_error"])
+async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, setup_config_entry):
+    """Test central system responses to actions and multi charger under error operation."""
     # start clean entry for services
-    cp_id = "CP_1_err"
-    data = MOCK_CONFIG_DATA.copy()
-    data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=data,
-        entry_id="test_cms_v16",
-        title="test_cms_v16",
-        version=2,
-        minor_version=0,
-    )
-
-    cs = await create_configuration(hass, config_entry)
+    cs = setup_config_entry
 
     # test ocpp rejection messages sent from charger to cms
     # use SERVICES_ERROR as only Core and Smart profiles enabled
@@ -540,7 +492,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         with contextlib.suppress(
             asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
         ):
-            cp = ChargePoint("CP_1_error", ws)
+            cp = ChargePoint(f"{cp_id}_client", ws)
             cp.accept = False
             # Allow charger time to connect before running services
             await asyncio.wait_for(
@@ -556,7 +508,7 @@ async def test_cms_responses_v16(hass, socket_enabled):
         with contextlib.suppress(
             asyncio.TimeoutError, websockets.exceptions.ConnectionClosedOK
         ):
-            cp = ChargePoint("CP_1_error", ws)
+            cp = ChargePoint(f"{cp_id}_client", ws)
             cp.accept = False
             cp_task = asyncio.create_task(cp.start())
             await asyncio.sleep(5)
@@ -592,7 +544,6 @@ async def test_cms_responses_v16(hass, socket_enabled):
     await test_services(
         hass, cs.charge_points[cp_id].settings.cpid, SERVICES_ERROR, socket_enabled
     )
-    await remove_configuration(hass, config_entry)
 
 
 class ChargePoint(cpclass):
