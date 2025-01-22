@@ -147,7 +147,7 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 test_services.__test__ = False
 
 @pytest.fixture
-async def setup_config_entry(request) -> CentralSystem:
+async def setup_config_entry(hass, request) -> CentralSystem:
     """Setup/teardown mock config entry and central system."""
     # Create a mock entry so we don't have to go through config flow
     # Both version and minor need to match config flow so as not to trigger migration flow
