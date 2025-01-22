@@ -147,17 +147,17 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 test_services.__test__ = False
 
 @pytest.fixture
-async def setup_config_entry(cp_id, cms) -> CentralSystem:
+async def setup_config_entry(request) -> CentralSystem:
     """Setup/teardown mock config entry and central system."""
     # Create a mock entry so we don't have to go through config flow
     # Both version and minor need to match config flow so as not to trigger migration flow
     config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id.param: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data[CONF_CPIDS].append({request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()})
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
         data=config_data,
-        entry_id=cms.param,
-        title=cms.param,
+        entry_id=request.param["cms"],
+        title=request.param["cms"],
         version=2,
         minor_version=0,
     )
@@ -167,7 +167,7 @@ async def setup_config_entry(cp_id, cms) -> CentralSystem:
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(90)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_nosub","cms_nosub")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_nosub","cms":"cms_nosub"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_nosub"])
 async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system responses to a charger with no subprotocol."""
@@ -212,7 +212,7 @@ async def test_cms_responses_v16(hass, socket_enabled, cp_id, setup_config_entry
 
     # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_unsup","cms_unsup")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_unsup","cms":"cms_unsup"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_unsup"])
 async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system unsupported protocol."""
@@ -226,7 +226,7 @@ async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, setup_confi
 
     # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_restore_values","cms_restore_values")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_restore_values","cms":"cms_restore_values"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_restore_values"])
 async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system restoring values for a charger."""
@@ -290,7 +290,7 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, setup_conf
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_norm","cms_norm")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_norm","cms":"cms_norm"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_norm"])
 async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system responses to a charger under normal operation."""
@@ -357,7 +357,7 @@ async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, setup_confi
 
 @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_services","cms_services")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_services","cms":"cms_services"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_services"])
 async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system responses to actions and multi charger under normal operation."""
@@ -476,7 +476,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, setup_conf
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [("CP_1_error","cms_error")], indirect=True)
+@pytest.mark.parametrize("setup_config_entry", [{"cp_id":"CP_1_error","cms":"cms_error"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_error"])
 async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, setup_config_entry):
     """Test central system responses to actions and multi charger under error operation."""
