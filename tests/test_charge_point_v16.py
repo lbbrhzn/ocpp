@@ -251,6 +251,9 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
                 ),
                 timeout=3,
             )
+        # cpid set in cs after websocket connection
+        cpid = cs.charge_points[cp_id].settings.cpid
+        
         # check if None
         assert cs.get_metric(cpid, "Energy.Meter.Start") is None
         assert cs.get_metric(cpid, "Transaction.Id") is None
@@ -265,8 +268,6 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
                 ),
                 timeout=3,
             )
-        # cpid set in cs after websocket connection
-        cpid = cs.charge_points[cp_id].settings.cpid
 
         # save for reference the values for meter_start and transaction_id
         saved_meter_start = int(cs.get_metric(cpid, "Energy.Meter.Start"))
@@ -359,7 +360,7 @@ async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, port, setup
     )
 
 
-@pytest.mark.skip(reason="skip")
+# @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize("setup_config_entry", [{"port":9005,"cp_id":"CP_1_services","cms":"cms_services"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_services"])
