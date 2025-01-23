@@ -42,41 +42,43 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     # setup last charger added to config
-    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
-    cpid = cp_id_settings[CONF_CPID]
-    entities = []
-    SENSORS = []
-    for metric in list(
-        set(
-            cp_id_settings[CONF_MONITORED_VARIABLES].split(",") + list(HAChargerSession)
-        )
-    ):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
+    for charger in entry.data[CONF_CPIDS]:
+        cp_id_settings = list(charger.values())[0]
+        cpid = cp_id_settings[CONF_CPID]
+        entities = []
+        SENSORS = []
+        for metric in list(
+            set(
+                cp_id_settings[CONF_MONITORED_VARIABLES].split(",")
+                + list(HAChargerSession)
             )
-        )
-    for metric in list(HAChargerStatuses) + list(HAChargerDetails):
-        SENSORS.append(
-            OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
-                entity_category=EntityCategory.DIAGNOSTIC,
+        ):
+            SENSORS.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                )
             )
-        )
+        for metric in list(HAChargerStatuses) + list(HAChargerDetails):
+            SENSORS.append(
+                OcppSensorDescription(
+                    key=metric.lower(),
+                    name=metric.replace(".", " "),
+                    metric=metric,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                )
+            )
 
-    for ent in SENSORS:
-        entities.append(
-            ChargePointMetric(
-                hass,
-                central_system,
-                cpid,
-                ent,
+        for ent in SENSORS:
+            entities.append(
+                ChargePointMetric(
+                    hass,
+                    central_system,
+                    cpid,
+                    ent,
+                )
             )
-        )
 
     async_add_devices(entities, False)
 

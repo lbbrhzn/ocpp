@@ -47,13 +47,14 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
-    cpid = cp_id_settings[CONF_CPID]
+    for charger in entry.data[CONF_CPIDS]:
+        cp_id_settings = list(charger.values())[0]
+        cpid = cp_id_settings[CONF_CPID]
 
-    entities = []
+        entities = []
 
-    for ent in BUTTONS:
-        entities.append(ChargePointButton(central_system, cpid, ent))
+        for ent in BUTTONS:
+            entities.append(ChargePointButton(central_system, cpid, ent))
 
     async_add_devices(entities, False)
 
