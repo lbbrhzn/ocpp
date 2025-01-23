@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant import config_entries, data_entry_flow
 import pytest
 
@@ -9,9 +10,7 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW
-
-# from pytest_homeassistant_custom_component.common import MockConfigEntry
+from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW, CONF_CPIDS
 
 
 # This fixture bypasses the actual setup of the integration
@@ -47,23 +46,61 @@ async def test_successful_config_flow(hass, bypass_get_data):
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
 
-    # If a user were to enter `test_username` for username and `test_password`
-    # for password, it would result in this function call
+    # Remove cpids key as it gets added in flow
+    config = MOCK_CONFIG_CS.copy()
+    config.pop(CONF_CPIDS)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=MOCK_CONFIG_CS
-    )
-    assert result["step_id"] == "cp_user"
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=MOCK_CONFIG_CP
+        result["flow_id"], user_input=config
     )
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["title"] == "test_csid_flow"
-    assert result["data"] == MOCK_CONFIG_FLOW
+    assert result["data"] == MOCK_CONFIG_CS
     assert result["result"]
+
+
+async def test_successful_discovery_flow(hass, bypass_get_data):
+    """Test a discovery config flow."""
+    # Mock the config flow for the central system
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_CS,
+        entry_id="test_cms_disc",
+        title="test_cms_disc",
+        version=2,
+        minor_version=0,
+    )
+    # Need to ensure data entry exists as skipped init.py setup
+    if hass.data.get(DOMAIN) is None:
+        hass.data.setdefault(DOMAIN, {})
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
+    info = {"cp_id": "test_cp_id", "entry": entry}
+    # Need to find out how to pass in discovery_info
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data=info,
+    )
+
+    # Check that the config flow shows the user form as the first step
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "cp_user"
+    result["discovery_info"] = info
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=MOCK_CONFIG_CP
+    )
+
+    # Check that the config flow is complete and a new entry is created with
+    # the input data
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
+    assert entry.data == MOCK_CONFIG_FLOW
 
 
 # In this case, we want to simulate a failure during the config flow.

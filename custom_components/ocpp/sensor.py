@@ -20,6 +20,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
 from .const import (
+    CONF_CPID,
     CONF_CPIDS,
     DATA_UPDATED,
     DEFAULT_CLASS_UNITS_HA,
@@ -40,13 +41,14 @@ class OcppSensorDescription(SensorEntityDescription):
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
+    # setup last charger added to config
+    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
+    cpid = cp_id_settings[CONF_CPID]
     entities = []
     SENSORS = []
     for metric in list(
         set(
-            entry.data[CONF_CPIDS][0][cpid][CONF_MONITORED_VARIABLES].split(",")
-            + list(HAChargerSession)
+            cp_id_settings[CONF_MONITORED_VARIABLES].split(",") + list(HAChargerSession)
         )
     ):
         SENSORS.append(

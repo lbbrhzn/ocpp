@@ -1,13 +1,13 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
-import copy
 from datetime import datetime, timedelta, UTC
 
 from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v16.enums import Measurand
 
+from custom_components.ocpp.const import CONF_CPIDS, CONF_CPID
 from custom_components.ocpp import CentralSystem
 from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
@@ -25,7 +25,7 @@ from .charge_point_test import (
     remove_configuration,
     wait_ready,
 )
-from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_3
+from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_3, MOCK_CONFIG_CP_APPEND
 from custom_components.ocpp.const import (
     DEFAULT_METER_INTERVAL,
     DOMAIN as OCPP_DOMAIN,
@@ -410,7 +410,8 @@ class ChargePoint(cpclass):
 
 
 async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cpid: str = list(cs.cpids.keys())[0]
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
 
     await set_switch(hass, cpid, "charge_control", True)
     assert len(cp.remote_starts) == 1
@@ -803,9 +804,11 @@ async def _set_variable(
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_configure_v201,
             service_data={"ocpp_key": key, "value": value},
             blocking=True,
@@ -821,9 +824,11 @@ async def _get_variable(
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_get_configuration_v201,
             service_data={"ocpp_key": key},
             blocking=True,
@@ -898,11 +903,11 @@ async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 
 
 async def _set_charge_rate_service(
-    hass: HomeAssistant, data: dict
+    hass: HomeAssistant, data: dict, cpid: str
 ) -> HomeAssistantError:
     try:
         await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_set_charge_rate,
             service_data=data,
             blocking=True,
@@ -915,11 +920,13 @@ async def _set_charge_rate_service(
 async def _test_charge_profiles(
     hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 ):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
     error: HomeAssistantError = await _set_charge_rate_service(
-        hass, {"limit_watts": 3000}
+        hass, {"limit_watts": 3000}, cpid
     )
 
-    cpid: str = list(cs.cpids.keys())[0]
     assert error is None
     assert len(cp.charge_profiles_set) == 1
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -937,7 +944,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 16})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 16}, cpid)
     assert error is None
     assert len(cp.charge_profiles_set) == 2
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -970,6 +977,7 @@ async def _test_charge_profiles(
             }]
         }"""
         },
+        cpid,
     )
     assert error is None
     assert len(cp.charge_profiles_set) == 3
@@ -1005,7 +1013,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 5})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 5}, cpid)
     assert error is not None
     assert str(error).startswith("Failed to set variable: Rejected")
 
@@ -1019,6 +1027,8 @@ async def _test_charge_profiles(
 
 
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
             {
@@ -1042,12 +1052,11 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
     datetime.fromisoformat(heartbeat_resp.current_time)
 
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
 
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
 
-    cpid: str = list(cs.cpids.keys())[0]
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
     assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
@@ -1137,6 +1146,9 @@ async def _extra_features_test(
     cs: CentralSystem,
     cp: ChargePointAllFeatures,
 ):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
     await cp.call(
         call.BootNotification(
             {
@@ -1148,11 +1160,11 @@ async def _extra_features_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
 
     assert (
         cs.get_metric(
-            list(cs.cpids.keys())[0],
+            cpid,
             cdet.features.value,
         )
         == Profiles.CORE
@@ -1190,6 +1202,9 @@ async def _unsupported_base_report_test(
     cs: CentralSystem,
     cp: ChargePoint,
 ):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
     await cp.call(
         call.BootNotification(
             {
@@ -1201,10 +1216,10 @@ async def _unsupported_base_report_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
     assert (
         cs.get_metric(
-            list(cs.cpids.keys())[0],
+            cpid,
             cdet.features.value,
         )
         == Profiles.CORE | Profiles.REM | Profiles.FW
@@ -1219,15 +1234,19 @@ async def test_cms_responses_v201(hass, socket_enabled):
     # restarts if measurands reported by the charger differ from the list
     # from the configuration, which a real charger can deal with but this
     # test cannot
-    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
     # config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
+    cp_id = "CP_2"
+    config_data = MOCK_CONFIG_DATA.copy()
+    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9010
+
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
         data=config_data,
-        entry_id="test_cms",
-        title="test_cms",
+        entry_id="test_v201_cms",
+        title="test_v201_cms",
         version=2,
         minor_version=0,
     )
@@ -1236,15 +1255,21 @@ async def test_cms_responses_v201(hass, socket_enabled):
     ocpp.messages.ASYNC_VALIDATION = False
     await run_charge_point_test(
         config_entry,
-        "CP_2",
+        cp_id,
         ["ocpp2.0.1"],
         lambda ws: ChargePoint("CP_2_client", ws),
         [lambda cp: _run_test(hass, cs, cp)],
     )
 
+    # add second charger to config entry
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    cp_id2 = "CP_2_allfeatures"
+    entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+
     await run_charge_point_test(
         config_entry,
-        "CP_2_allfeatures",
+        cp_id2,
         ["ocpp2.0.1"],
         lambda ws: ChargePointAllFeatures("CP_2_allfeatures_client", ws),
         [lambda cp: _extra_features_test(hass, cs, cp)],
@@ -1252,11 +1277,18 @@ async def test_cms_responses_v201(hass, socket_enabled):
 
     await remove_configuration(hass, config_entry)
 
+    cp_id = "CP_2_noreport"
+    config_data = MOCK_CONFIG_DATA_3.copy()
+    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
+
+    config_data[CONF_PORT] = 9011
+
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
-        data=MOCK_CONFIG_DATA_3,
-        entry_id="test_cms",
-        title="test_cms",
+        data=config_data,
+        entry_id="test_v201_cms",
+        title="test_v201_cms",
         version=2,
         minor_version=0,
     )
@@ -1264,15 +1296,20 @@ async def test_cms_responses_v201(hass, socket_enabled):
 
     await run_charge_point_test(
         config_entry,
-        "CP_2_noreport",
+        cp_id,
         ["ocpp2.0.1"],
         lambda ws: ChargePointReportUnsupported("CP_2_noreport_client", ws),
         [lambda cp: _unsupported_base_report_test(hass, cs, cp)],
     )
 
+    cp_id2 = "CP_2_report_fail"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+
     await run_charge_point_test(
         config_entry,
-        "CP_2_report_fail",
+        cp_id2,
         ["ocpp2.0.1"],
         lambda ws: ChargePointReportFailing("CP_2_report_fail_client", ws),
         [lambda cp: _unsupported_base_report_test(hass, cs, cp)],

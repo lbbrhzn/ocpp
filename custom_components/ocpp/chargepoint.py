@@ -57,6 +57,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    PLATFORMS,
     UNITS_OCCP_TO_HA,
 )
 
@@ -101,6 +102,23 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
+
+
+async def async_setup_charger(hass, entry, cs_id, cpid, cp_id):
+    """Configure the charger device and its platforms."""
+
+    dr = device_registry.async_get(hass)
+
+    """ Create Central System Device """
+    dr.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
+        name=cpid,
+        suggested_area="Garage",
+        via_device=(DOMAIN, cs_id),
+    )
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
 
 class Metric:
@@ -328,9 +346,12 @@ class ChargePoint(cp):
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
-            updated_entry[CONF_CPIDS][self.settings.connection][self.settings.cpid][
-                CONF_MONITORED_VARIABLES
-            ] = accepted_measurands
+            for i in range(len(updated_entry[CONF_CPIDS])):
+                if self.id in updated_entry[CONF_CPIDS][i]:
+                    updated_entry[CONF_CPIDS][i][self.id][CONF_MONITORED_VARIABLES] = (
+                        accepted_measurands
+                    )
+                    break
             # if an entry differs this will unload/reload and stop/restart the central system/websocket
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
@@ -339,30 +360,32 @@ class ChargePoint(cp):
             # Register custom services with home assistant
             self.register_version_specific_services()
             self.hass.services.async_register(
-                DOMAIN,
+                self.settings.cpid,
                 csvcs.service_data_transfer.value,
                 handle_data_transfer,
                 TRANS_SERVICE_DATA_SCHEMA,
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
-                    DOMAIN, csvcs.service_clear_profile.value, handle_clear_profile
+                    self.settings.cpid,
+                    csvcs.service_clear_profile.value,
+                    handle_clear_profile,
                 )
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_set_charge_rate.value,
                     handle_set_charge_rate,
                     CHRGR_SERVICE_DATA_SCHEMA,
                 )
             if prof.FW in self._attr_supported_features:
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_update_firmware.value,
                     handle_update_firmware,
                     UFW_SERVICE_DATA_SCHEMA,
                 )
                 self.hass.services.async_register(
-                    DOMAIN,
+                    self.settings.cpid,
                     csvcs.service_get_diagnostics.value,
                     handle_get_diagnostics,
                     GDIAG_SERVICE_DATA_SCHEMA,
@@ -569,8 +592,6 @@ class ChargePoint(cp):
         self._metrics[cdet.serial.value].value = serial
 
         identifiers = {(DOMAIN, self.id), (DOMAIN, self.settings.cpid)}
-        if serial is not None:
-            identifiers.add((DOMAIN, serial))
 
         registry = device_registry.async_get(self.hass)
         registry.async_get_or_create(
@@ -578,7 +599,6 @@ class ChargePoint(cp):
             identifiers=identifiers,
             manufacturer=vendor,
             model=model,
-            suggested_area="Garage",
             sw_version=firmware_version,
         )
 
@@ -591,7 +611,7 @@ class ChargePoint(cp):
         """Update sensors values in HA."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
-        identifiers = {(DOMAIN, cpid)}
+        identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
         dev = dr.async_get_device(identifiers)
         # _LOGGER.info("Device id: %s updating", dev.name)
         for ent in entity_registry.async_entries_for_device(er, dev.id):

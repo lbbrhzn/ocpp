@@ -14,7 +14,7 @@ from homeassistant.components.button import (
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPIDS, DOMAIN
+from .const import CONF_CPID, CONF_CPIDS, DOMAIN
 from .enums import HAChargerServices
 
 
@@ -47,7 +47,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
+    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
+    cpid = cp_id_settings[CONF_CPID]
 
     entities = []
 

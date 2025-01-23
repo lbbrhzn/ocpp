@@ -113,19 +113,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         model="OCPP Central System",
     )
 
-    """ Create first Charge Point Device """
-    cpid = list(entry.data[CONF_CPIDS][0].keys())[0]
-    dr.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, cpid)},
-        name=cpid,
-        model="Unknown",
-        via_device=(DOMAIN, central_sys.id),
-    )
-
     hass.data[DOMAIN][entry.entry_id] = central_sys
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
@@ -139,7 +128,7 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
         config_entry.minor_version,
     )
 
-    if config_entry.version > 1:
+    if config_entry.version > 2:
         # This means the user has downgraded from a future version
         return False
 
@@ -203,10 +192,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Unload services
             for service in hass.services.async_services_for_domain(DOMAIN):
                 hass.services.async_remove(DOMAIN, service)
-            # Unload platforms
-            unloaded = await hass.config_entries.async_unload_platforms(
-                entry, PLATFORMS
-            )
+            for charger in central_sys.cpids:
+                for service in hass.services.async_services_for_domain(charger):
+                    hass.services.async_remove(charger, service)
+            # Unload platforms if a charger connected
+            if central_sys.connections == 0:
+                unloaded = True
+            else:
+                unloaded = await hass.config_entries.async_unload_platforms(
+                    entry, PLATFORMS
+                )
             # Remove entry
             if unloaded:
                 hass.data[DOMAIN].pop(entry.entry_id)
