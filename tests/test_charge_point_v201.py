@@ -804,9 +804,11 @@ async def _set_variable(
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_configure_v201,
             service_data={"ocpp_key": key, "value": value},
             blocking=True,
@@ -822,9 +824,11 @@ async def _get_variable(
 ) -> tuple[ServiceResponse, HomeAssistantError]:
     response: ServiceResponse | None = None
     error: HomeAssistantError | None = None
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_get_configuration_v201,
             service_data={"ocpp_key": key},
             blocking=True,
@@ -899,11 +903,11 @@ async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 
 
 async def _set_charge_rate_service(
-    hass: HomeAssistant, data: dict
+    hass: HomeAssistant, data: dict, cpid: str
 ) -> HomeAssistantError:
     try:
         await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             csvcs.service_set_charge_rate,
             service_data=data,
             blocking=True,
@@ -916,12 +920,12 @@ async def _set_charge_rate_service(
 async def _test_charge_profiles(
     hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 ):
-    error: HomeAssistantError = await _set_charge_rate_service(
-        hass, {"limit_watts": 3000}
-    )
-
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
+
+    error: HomeAssistantError = await _set_charge_rate_service(
+        hass, {"limit_watts": 3000}, cpid
+    )
 
     assert error is None
     assert len(cp.charge_profiles_set) == 1
@@ -940,7 +944,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 16})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 16}, cpid)
     assert error is None
     assert len(cp.charge_profiles_set) == 2
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -972,7 +976,7 @@ async def _test_charge_profiles(
                 'charging_schedule_period': [{'start_period': 0, 'limit': 6}]
             }]
         }"""
-        },
+        }, cpid
     )
     assert error is None
     assert len(cp.charge_profiles_set) == 3
@@ -1008,7 +1012,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 5})
+    error = await _set_charge_rate_service(hass, {"limit_amps": 5}, cpid)
     assert error is not None
     assert str(error).startswith("Failed to set variable: Rejected")
 
@@ -1022,6 +1026,8 @@ async def _test_charge_profiles(
 
 
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
             {
@@ -1045,13 +1051,10 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
     datetime.fromisoformat(heartbeat_resp.current_time)
 
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
 
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
-
-    cp_id = cp.id[:-7]
-    cpid = cs.charge_points[cp_id].settings.cpid
 
     assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
     assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
@@ -1144,7 +1147,7 @@ async def _extra_features_test(
 ):
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
-    
+
     await cp.call(
         call.BootNotification(
             {
@@ -1156,7 +1159,7 @@ async def _extra_features_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
 
     assert (
         cs.get_metric(
@@ -1212,7 +1215,7 @@ async def _unsupported_base_report_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass)
+    await wait_ready(hass, cpid)
     assert (
         cs.get_metric(
             cpid,

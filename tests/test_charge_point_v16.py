@@ -106,14 +106,14 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
             data = {"limit_amps": 30}
 
         await hass.services.async_call(
-            OCPP_DOMAIN,
+            cpid,
             service.value,
             service_data=data,
             blocking=True,
         )
     # test additional set charge rate options
     await hass.services.async_call(
-        OCPP_DOMAIN,
+        cpid,
         csvcs.service_set_charge_rate,
         service_data={"limit_watts": 3000},
         blocking=True,
@@ -131,7 +131,7 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
     }
     data = {"custom_profile": str(prof)}
     await hass.services.async_call(
-        OCPP_DOMAIN,
+        cpid,
         csvcs.service_set_charge_rate,
         service_data=data,
         blocking=True,
