@@ -234,7 +234,6 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
     """Test central system restoring values for a charger."""
 
     cs = setup_config_entry
-    cpid = cs.charge_points[cp_id].settings.cpid
 
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}",
@@ -266,6 +265,8 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
                 ),
                 timeout=3,
             )
+        # cpid set in cs after websocket connection
+        cpid = cs.charge_points[cp_id].settings.cpid
 
         # save for reference the values for meter_start and transaction_id
         saved_meter_start = int(cs.get_metric(cpid, "Energy.Meter.Start"))
@@ -367,7 +368,6 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
     """Test central system responses to actions and multi charger under normal operation."""
     # start clean entry for services
     cs = setup_config_entry
-    cpid = cs.charge_points[cp_id].settings.cpid
 
     # test ocpp messages sent from cms to charger, through HA switches/services
     # should reconnect as already started above
@@ -408,6 +408,8 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
             cp_task.cancel()
         await ws.close()
 
+    # cpid set in cs after websocket connection
+    cpid = cs.charge_points[cp_id].settings.cpid
     
     assert int(cs.get_metric(cpid, "Frequency")) == 50
     assert float(cs.get_metric(cpid, "Energy.Active.Import.Register")) == 1101.452
@@ -417,7 +419,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
     entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
     entry.data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
     entry.data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "cpid2"
-    cpid = cs.charge_points[cp_id].settings.cpid
+
     # test ocpp messages sent from charger that don't support errata 3.9
     # i.e. "Energy.Meter.Start" starts from 0 for each session and "Energy.Active.Import.Register"
     # reports starting from 0 Wh for every new transaction id. Total main meter values are without transaction id.
@@ -441,7 +443,8 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
                 timeout=5,
             )
         await ws.close()
-    
+
+    cpid = cs.charge_points[cp_id].settings.cpid
     # Last sent "Energy.Active.Import.Register" value without transaction id should be here.
     assert int(cs.get_metric(cpid, "Energy.Active.Import.Register")) == int(
         67230012 / 1000
