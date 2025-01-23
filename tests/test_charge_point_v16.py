@@ -169,7 +169,7 @@ async def setup_config_entry(hass, request) -> CentralSystem:
 @pytest.mark.parametrize("setup_config_entry", [{"port":9001,"cp_id":"CP_1_nosub","cms":"cms_nosub"}], indirect=True)
 @pytest.mark.parametrize("cp_id", ["CP_1_nosub"])
 @pytest.mark.parametrize("port", [9001])
-async def test_cms_responses_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_nosub_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
     """Test central system responses to a charger with no subprotocol."""
 
     # no subprotocol central system assumes ocpp1.6 charge point
@@ -253,7 +253,7 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
             )
         # cpid set in cs after websocket connection
         cpid = cs.charge_points[cp_id].settings.cpid
-        
+
         # check if None
         assert cs.get_metric(cpid, "Energy.Meter.Start") is None
         assert cs.get_metric(cpid, "Transaction.Id") is None
