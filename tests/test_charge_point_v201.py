@@ -976,7 +976,8 @@ async def _test_charge_profiles(
                 'charging_schedule_period': [{'start_period': 0, 'limit': 6}]
             }]
         }"""
-        }, cpid
+        },
+        cpid,
     )
     assert error is None
     assert len(cp.charge_profiles_set) == 3

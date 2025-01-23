@@ -367,7 +367,9 @@ class ChargePoint(cp):
             )
             if prof.SMART in self._attr_supported_features:
                 self.hass.services.async_register(
-                    self.settings.cpid, csvcs.service_clear_profile.value, handle_clear_profile
+                    self.settings.cpid,
+                    csvcs.service_clear_profile.value,
+                    handle_clear_profile,
                 )
                 self.hass.services.async_register(
                     self.settings.cpid,

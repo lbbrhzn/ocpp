@@ -10,7 +10,12 @@ import websockets
 
 from custom_components.ocpp.api import CentralSystem
 from custom_components.ocpp.button import BUTTONS
-from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN, CONF_CPIDS, CONF_CPID, CONF_PORT
+from custom_components.ocpp.const import (
+    DOMAIN as OCPP_DOMAIN,
+    CONF_CPIDS,
+    CONF_CPID,
+    CONF_PORT,
+)
 from custom_components.ocpp.enums import ConfigurationKey, HAChargerServices as csvcs
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
@@ -144,13 +149,16 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 
 test_services.__test__ = False
 
+
 @pytest.fixture
 async def setup_config_entry(hass, request) -> CentralSystem:
     """Setup/teardown mock config entry and central system."""
     # Create a mock entry so we don't have to go through config flow
     # Both version and minor need to match config flow so as not to trigger migration flow
     config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data[CONF_CPIDS].append(
+        {request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()}
+    )
     config_data[CONF_PORT] = request.param["port"]
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
@@ -164,12 +172,19 @@ async def setup_config_entry(hass, request) -> CentralSystem:
     # tear down
     await remove_configuration(hass, config_entry)
 
+
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(90)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9001,"cp_id":"CP_1_nosub","cms":"cms_nosub"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9001, "cp_id": "CP_1_nosub", "cms": "cms_nosub"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_nosub"])
 @pytest.mark.parametrize("port", [9001])
-async def test_cms_responses_nosub_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_nosub_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system responses to a charger with no subprotocol."""
 
     # no subprotocol central system assumes ocpp1.6 charge point
@@ -208,14 +223,20 @@ async def test_cms_responses_nosub_v16(hass, socket_enabled, cp_id, port, setup_
             )
         await ws2.close()
 
-    
-
     # @pytest.mark.skip(reason="skip")
+
+
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9002,"cp_id":"CP_1_unsup","cms":"cms_unsup"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9002, "cp_id": "CP_1_unsup", "cms": "cms_unsup"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_unsup"])
 @pytest.mark.parametrize("port", [9002])
-async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_unsupp_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system unsupported protocol."""
 
     # unsupported subprotocol raises websockets exception
@@ -226,11 +247,19 @@ async def test_cms_responses_unsupp_v16(hass, socket_enabled, cp_id, port, setup
         )
 
     # @pytest.mark.skip(reason="skip")
+
+
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9003,"cp_id":"CP_1_restore_values","cms":"cms_restore_values"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9003, "cp_id": "CP_1_restore_values", "cms": "cms_restore_values"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_restore_values"])
 @pytest.mark.parametrize("port", [9003])
-async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_restore_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system restoring values for a charger."""
 
     cs = setup_config_entry
@@ -294,10 +323,16 @@ async def test_cms_responses_restore_v16(hass, socket_enabled, cp_id, port, setu
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9004,"cp_id":"CP_1_norm","cms":"cms_norm"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9004, "cp_id": "CP_1_norm", "cms": "cms_norm"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_norm"])
 @pytest.mark.parametrize("port", [9004])
-async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_normal_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system responses to a charger under normal operation."""
 
     cs = setup_config_entry
@@ -362,10 +397,16 @@ async def test_cms_responses_normal_v16(hass, socket_enabled, cp_id, port, setup
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9005,"cp_id":"CP_1_services","cms":"cms_services"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9005, "cp_id": "CP_1_services", "cms": "cms_services"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_services"])
 @pytest.mark.parametrize("port", [9005])
-async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_actions_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system responses to actions and multi charger under normal operation."""
     # start clean entry for services
     cs = setup_config_entry
@@ -411,7 +452,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
 
     # cpid set in cs after websocket connection
     cpid = cs.charge_points[cp_id].settings.cpid
-    
+
     assert int(cs.get_metric(cpid, "Frequency")) == 50
     assert float(cs.get_metric(cpid, "Energy.Active.Import.Register")) == 1101.452
 
@@ -424,7 +465,7 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
     # test ocpp messages sent from charger that don't support errata 3.9
     # i.e. "Energy.Meter.Start" starts from 0 for each session and "Energy.Active.Import.Register"
     # reports starting from 0 Wh for every new transaction id. Total main meter values are without transaction id.
-    
+
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.6"],
@@ -484,10 +525,16 @@ async def test_cms_responses_actions_v16(hass, socket_enabled, cp_id, port, setu
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
-@pytest.mark.parametrize("setup_config_entry", [{"port":9006,"cp_id":"CP_1_error","cms":"cms_error"}], indirect=True)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9006, "cp_id": "CP_1_error", "cms": "cms_error"}],
+    indirect=True,
+)
 @pytest.mark.parametrize("cp_id", ["CP_1_error"])
 @pytest.mark.parametrize("port", [9006])
-async def test_cms_responses_errors_v16(hass, socket_enabled, cp_id, port, setup_config_entry):
+async def test_cms_responses_errors_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
     """Test central system responses to actions and multi charger under error operation."""
     # start clean entry for services
     cs = setup_config_entry
