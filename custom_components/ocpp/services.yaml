@@ -13,7 +13,7 @@ set_charge_rate:
     # Key of the field
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -57,7 +57,7 @@ clear_profile:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -68,7 +68,7 @@ update_firmware:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -92,7 +92,7 @@ configure:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -101,7 +101,7 @@ configure:
       description: v1.6: Write-enabled key name supported v2.0.1:Component name/Key name
       required: true
       advanced: true
-      example: "v1.6:WebSocketPingInterval v2.0.1:OCPPCommCtrlr/WebSocketPingInterval"
+      example: "WebSocketPingInterval"
     value:
       name: Key value
       description: Value to write to key
@@ -115,7 +115,7 @@ get_configuration:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -124,7 +124,7 @@ get_configuration:
       description: v1.6:Key name v2.0.1:Component name/Key name
       required: true
       advanced: true
-      example: "v1.6:WebSocketPingInterval v2.0.1:OCPPCommCtrlr/WebSocketPingInterval"
+      example: "WebSocketPingInterval"
 
 get_diagnostics:
   name: Request diagnostic data from charger
