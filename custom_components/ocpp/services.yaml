@@ -4,13 +4,19 @@ set_charge_rate:
   name: Set maximum charge rate
   # Description of the service
   description: Sets the maximum charge rate in Amps or Watts (dependent on charger support)
-  # If the service accepts entity IDs, target allows the user to specify entities by entity, device, or area. If `target` is specified, `entity_id` should not be defined in the `fields` map. By default it shows only targets matching entities from the same domain as the service, but if further customization is required, target supports the entity, device, and area selectors (https://www.home-assistant.io/docs/blueprint/selectors/). Entity selector parameters will automatically be applied to device and area, and device selector parameters will automatically be applied to area. 
+  # If the service accepts entity IDs, target allows the user to specify entities by entity, device, or area. If `target` is specified, `entity_id` should not be defined in the `fields` map. By default it shows only targets matching entities from the same domain as the service, but if further customization is required, target supports the entity, device, and area selectors (https://www.home-assistant.io/docs/blueprint/selectors/). Entity selector parameters will automatically be applied to device and area, and device selector parameters will automatically be applied to area.
   #target:
   #   entity:
   #     integration: ocpp
   # Different fields that your service accepts
   fields:
     # Key of the field
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     limit_amps:
       # Field name as shown in UI
       name: Limit (A)
@@ -32,7 +38,7 @@ set_charge_rate:
       example: 1500
       default: 22000
     conn_id:
-      name: Connector identifier 
+      name: Connector identifier
       description: Optional, 0 = all connectors (default), 1 is first connector
       required: false
       advanced: true
@@ -48,11 +54,24 @@ set_charge_rate:
 clear_profile:
   name: Clear charging profiles
   description: Clears all charging profiles (limits) set (dependent on charger support)
+  fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
 
 update_firmware:
   name: Update charger firmware
   description: Specify server to download firmware and time to delay updating (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols
   fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     firmware_url:
       name: Url of firmware
       description: Full url of firmware file (http or https)
@@ -66,34 +85,23 @@ update_firmware:
       advanced: true
       example: 12
       default: 0
-      
+
 configure:
   name: Configure charger features
-  description: Change supported Ocpp v1.6 configuration values
+  description: Change supported Ocpp configuration values
   fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     ocpp_key:
-      name: Configuration key name 
-      description: Write-enabled key name supported 
+      name: Write-enabled configuration key name
+      description: v1.6- Key name supported v2.0.1- Component name/Key name
       required: true
       advanced: true
       example: "WebSocketPingInterval"
-    value:
-      name: Key value
-      description: Value to write to key
-      required: true
-      advanced: true
-      example: "60"
-      
-configure_v201:
-  name: Configure charger features
-  description: Change supported Ocpp v2.0.1 configuration values
-  fields:
-    ocpp_key:
-      name: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
-      description: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
-      required: true
-      advanced: true
-      example: "OCPPCommCtrlr/WebSocketPingInterval"
     value:
       name: Key value
       description: Value to write to key
@@ -103,41 +111,48 @@ configure_v201:
 
 get_configuration:
   name: Get configuration values for charger
-  description: Get supported Ocpp v1.6 configuration values
+  description: Get supported Ocpp configuration values
   fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     ocpp_key:
-      name: Configuration key name 
-      description: Key name supported 
+      name: Configuration key name
+      description: v1.6- Key name v2.0.1- Component name/Key name
       required: true
       advanced: true
       example: "WebSocketPingInterval"
-      
-get_configuration_v201:
-  name: Get configuration values for charger
-  description: Get supported Ocpp v2.0.1 configuration values
-  fields:
-    ocpp_key:
-      name: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
-      description: <ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
-      required: true
-      advanced: true
-      example: "OCPPCommCtrlr/WebSocketPingInterval"
 
 get_diagnostics:
   name: Request diagnostic data from charger
   description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols
   fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     upload_url:
       name: Url for upload
       description: Full url to upload to
       required: true
       advanced: true
       example: "https://webhook.site/abc"
-      
+
 data_transfer:
   name: Request data transfer from charger
   description: Note this is specific to charger, see manufacturer's documentation
   fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: true
+      advanced: true
+      example: charger
     vendor_id:
       name: vendorId
       description: Defined by charger manufacturer

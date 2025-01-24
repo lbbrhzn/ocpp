@@ -4,7 +4,6 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-import json
 import logging
 from math import sqrt
 import secrets
@@ -17,8 +16,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
 from homeassistant.helpers import device_registry, entity_component, entity_registry
-import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
@@ -34,7 +31,6 @@ from ocpp.exceptions import NotImplementedError
 
 from .enums import (
     HAChargerDetails as cdet,
-    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     OcppMisc as om,
@@ -61,44 +57,6 @@ from .const import (
     UNITS_OCCP_TO_HA,
 )
 
-UFW_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("firmware_url"): cv.string,
-        vol.Optional("delay_hours"): cv.positive_int,
-    }
-)
-CONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-        vol.Required("value"): cv.string,
-    }
-)
-GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("ocpp_key"): cv.string,
-    }
-)
-GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("upload_url"): cv.string,
-    }
-)
-TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("vendor_id"): cv.string,
-        vol.Optional("message_id"): cv.string,
-        vol.Optional("data"): cv.string,
-    }
-)
-CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional("limit_amps"): cv.positive_float,
-        vol.Optional("limit_watts"): cv.positive_int,
-        vol.Optional("conn_id"): cv.positive_int,
-        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
-    }
-)
-
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
@@ -118,6 +76,7 @@ async def async_setup_charger(hass, entry, cs_id, cpid, cp_id):
         via_device=(DOMAIN, cs_id),
     )
 
+    # await hass.config_entries.async_reload(entry.entry_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
 
@@ -263,10 +222,6 @@ class ChargePoint(cp):
         """Send configuration values to the charger."""
         pass
 
-    def register_version_specific_services(self):
-        """Register HA services that differ depending on OCPP version."""
-        pass
-
     async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""
         return prof.NONE
@@ -278,62 +233,6 @@ class ChargePoint(cp):
         _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
 
     async def post_connect(self):
-        """Logic to be executed right after a charger connects."""
-
-        # Define custom service handles for charge point
-        async def handle_clear_profile(call):
-            """Handle the clear profile service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            await self.clear_profile()
-
-        async def handle_update_firmware(call):
-            """Handle the firmware update service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            url = call.data.get("firmware_url")
-            delay = int(call.data.get("delay_hours", 0))
-            await self.update_firmware(url, delay)
-
-        async def handle_get_diagnostics(call):
-            """Handle the get get diagnostics service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            url = call.data.get("upload_url")
-            await self.get_diagnostics(url)
-
-        async def handle_data_transfer(call):
-            """Handle the data transfer service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            vendor = call.data.get("vendor_id")
-            message = call.data.get("message_id", "")
-            data = call.data.get("data", "")
-            await self.data_transfer(vendor, message, data)
-
-        async def handle_set_charge_rate(call):
-            """Handle the data transfer service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            amps = call.data.get("limit_amps", None)
-            watts = call.data.get("limit_watts", None)
-            id = call.data.get("conn_id", 0)
-            custom_profile = call.data.get("custom_profile", None)
-            if custom_profile is not None:
-                if type(custom_profile) is str:
-                    custom_profile = custom_profile.replace("'", '"')
-                    custom_profile = json.loads(custom_profile)
-                await self.set_charge_rate(profile=custom_profile, conn_id=id)
-            elif watts is not None:
-                await self.set_charge_rate(limit_watts=watts, conn_id=id)
-            elif amps is not None:
-                await self.set_charge_rate(limit_amps=amps, conn_id=id)
-
         """Logic to be executed right after a charger connects."""
 
         try:
@@ -357,39 +256,6 @@ class ChargePoint(cp):
 
             await self.set_standard_configuration()
 
-            # Register custom services with home assistant
-            self.register_version_specific_services()
-            self.hass.services.async_register(
-                self.settings.cpid,
-                csvcs.service_data_transfer.value,
-                handle_data_transfer,
-                TRANS_SERVICE_DATA_SCHEMA,
-            )
-            if prof.SMART in self._attr_supported_features:
-                self.hass.services.async_register(
-                    self.settings.cpid,
-                    csvcs.service_clear_profile.value,
-                    handle_clear_profile,
-                )
-                self.hass.services.async_register(
-                    self.settings.cpid,
-                    csvcs.service_set_charge_rate.value,
-                    handle_set_charge_rate,
-                    CHRGR_SERVICE_DATA_SCHEMA,
-                )
-            if prof.FW in self._attr_supported_features:
-                self.hass.services.async_register(
-                    self.settings.cpid,
-                    csvcs.service_update_firmware.value,
-                    handle_update_firmware,
-                    UFW_SERVICE_DATA_SCHEMA,
-                )
-                self.hass.services.async_register(
-                    self.settings.cpid,
-                    csvcs.service_get_diagnostics.value,
-                    handle_get_diagnostics,
-                    GDIAG_SERVICE_DATA_SCHEMA,
-                )
             self.post_connect_success = True
             _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
 

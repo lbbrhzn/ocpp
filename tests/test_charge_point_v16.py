@@ -6,6 +6,7 @@ from datetime import datetime, UTC  # timedelta,
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 import websockets
 
 from custom_components.ocpp.api import CentralSystem
@@ -96,31 +97,47 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
     """Test service operations."""
 
     for service in serv_list:
-        data = {}
+        data = {"devid": cpid}
         if service == csvcs.service_update_firmware:
-            data = {"firmware_url": "http://www.charger.com/firmware.bin"}
+            data.update({"firmware_url": "http://www.charger.com/firmware.bin"})
         if service == csvcs.service_configure:
-            data = {"ocpp_key": "WebSocketPingInterval", "value": "60"}
+            data.update({"ocpp_key": "WebSocketPingInterval", "value": "60"})
+            await hass.services.async_call(
+                OCPP_DOMAIN,
+                service.value,
+                service_data=data,
+                blocking=True,
+                return_response=True,
+            )
+            break
         if service == csvcs.service_get_configuration:
-            data = {"ocpp_key": "UnknownKeyTest"}
+            data.update({"ocpp_key": "UnknownKeyTest"})
+            await hass.services.async_call(
+                OCPP_DOMAIN,
+                service.value,
+                service_data=data,
+                blocking=True,
+                return_response=True,
+            )
+            break
         if service == csvcs.service_get_diagnostics:
-            data = {"upload_url": "https://webhook.site/abc"}
+            data.update({"upload_url": "https://webhook.site/abc"})
         if service == csvcs.service_data_transfer:
-            data = {"vendor_id": "ABC"}
+            data.update({"vendor_id": "ABC"})
         if service == csvcs.service_set_charge_rate:
-            data = {"limit_amps": 30}
+            data.update({"limit_amps": 30})
 
         await hass.services.async_call(
-            cpid,
+            OCPP_DOMAIN,
             service.value,
             service_data=data,
             blocking=True,
         )
     # test additional set charge rate options
     await hass.services.async_call(
-        cpid,
+        OCPP_DOMAIN,
         csvcs.service_set_charge_rate,
-        service_data={"limit_watts": 3000},
+        service_data={"devid": cpid, "limit_watts": 3000},
         blocking=True,
     )
     # test custom charge profile for advanced use
@@ -134,9 +151,9 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
             "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16.0}],
         },
     }
-    data = {"custom_profile": str(prof)}
+    data = {"devid": cpid, "custom_profile": str(prof)}
     await hass.services.async_call(
-        cpid,
+        OCPP_DOMAIN,
         csvcs.service_set_charge_rate,
         service_data=data,
         blocking=True,
@@ -174,7 +191,7 @@ async def setup_config_entry(hass, request) -> CentralSystem:
 
 
 # @pytest.mark.skip(reason="skip")
-@pytest.mark.timeout(90)  # Set timeout for this test
+@pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9001, "cp_id": "CP_1_nosub", "cms": "cms_nosub"}],
@@ -223,9 +240,8 @@ async def test_cms_responses_nosub_v16(
             )
         await ws2.close()
 
-    # @pytest.mark.skip(reason="skip")
 
-
+# @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
@@ -246,9 +262,8 @@ async def test_cms_responses_unsupp_v16(
             subprotocols=["ocpp0.0"],
         )
 
-    # @pytest.mark.skip(reason="skip")
 
-
+# @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
@@ -597,9 +612,10 @@ async def test_cms_responses_errors_v16(
         await ws.close()
 
     # test services when charger is unavailable
-    await test_services(
-        hass, cs.charge_points[cp_id].settings.cpid, SERVICES_ERROR, socket_enabled
-    )
+    with pytest.raises(HomeAssistantError):
+        await test_services(
+            hass, cs.charge_points[cp_id].settings.cpid, SERVICES_ERROR, socket_enabled
+        )
 
 
 class ChargePoint(cpclass):

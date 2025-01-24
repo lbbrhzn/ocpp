@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta, UTC
 import logging
 
-from homeassistant.const import STATE_UNAVAILABLE
 import time
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,14 +38,13 @@ from ocpp.v16.enums import (
 from .chargepoint import (
     OcppVersion,
     MeasurandValue,
+    SetVariableResult,
 )
 from .chargepoint import ChargePoint as cp
-from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
 from .enums import (
     ConfigurationKey as ckey,
     HAChargerDetails as cdet,
-    HAChargerServices as csvcs,
     HAChargerSession as csess,
     HAChargerStatuses as cstat,
     OcppMisc as om,
@@ -155,39 +153,6 @@ class ChargePoint(cp):
         await self.configure(
             ckey.clock_aligned_data_interval.value,
             str(self.settings.idle_interval),
-        )
-
-    def register_version_specific_services(self):
-        """Register HA services that differ depending on OCPP version."""
-
-        async def handle_configure(call):
-            """Handle the configure service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            value = call.data.get("value")
-            await self.configure(key, value)
-
-        async def handle_get_configuration(call):
-            """Handle the get configuration service call."""
-            if self.status == STATE_UNAVAILABLE:
-                _LOGGER.warning("%s charger is currently unavailable", self.id)
-                return
-            key = call.data.get("ocpp_key")
-            await self.get_configuration(key)
-
-        self.hass.services.async_register(
-            self.settings.cpid,
-            csvcs.service_configure.value,
-            handle_configure,
-            CONF_SERVICE_DATA_SCHEMA,
-        )
-        self.hass.services.async_register(
-            self.settings.cpid,
-            csvcs.service_get_configuration.value,
-            handle_get_configuration,
-            GCONF_SERVICE_DATA_SCHEMA,
         )
 
     async def get_supported_features(self) -> prof:
@@ -502,7 +467,7 @@ class ChargePoint(cp):
             )
             return False
 
-    async def get_configuration(self, key: str = ""):
+    async def get_configuration(self, key: str = "") -> str:
         """Get Configuration of charger for supported keys else return None."""
         if key == "":
             req = call.GetConfiguration()
@@ -518,7 +483,7 @@ class ChargePoint(cp):
         if resp.unknown_key:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
-            return None
+            return "Unknown"
 
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
@@ -537,7 +502,7 @@ class ChargePoint(cp):
         if resp.unknown_key is not None:
             if key in resp.unknown_key:
                 _LOGGER.warning("%s is unknown (not supported)", key)
-                return
+                return "Unknown"
 
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
@@ -561,10 +526,14 @@ class ChargePoint(cp):
             await self.notify_ha(
                 f"Warning: charger reported {resp.status} while setting {key}={value}"
             )
+            return resp.status
 
         if resp.status == ConfigurationStatus.reboot_required:
             self._requires_reboot = True
             await self.notify_ha(f"A reboot is required to apply {key}={value}")
+            return SetVariableResult.reboot_required
+
+        return SetVariableResult.accepted
 
     async def async_update_device_info_v16(self, boot_info: dict):
         """Update device info asynchronuously."""

@@ -56,16 +56,21 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id_settings = list(entry.data[CONF_CPIDS][-1].values())[0]
-    cpid = cp_id_settings[CONF_CPID]
+    for charger in entry.data[CONF_CPIDS]:
+        cp_id_settings = list(charger.values())[0]
+        cpid = cp_id_settings[CONF_CPID]
 
-    entities = []
+        entities = []
 
-    for ent in NUMBERS:
-        if ent.key == "maximum_current":
-            ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-            ent.native_max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-        entities.append(OcppNumber(hass, central_system, cpid, ent))
+        for ent in NUMBERS:
+            if ent.key == "maximum_current":
+                ent.initial_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+                ent.native_max_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+            entities.append(OcppNumber(hass, central_system, cpid, ent))
 
     async_add_devices(entities, False)
 

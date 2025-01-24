@@ -190,11 +190,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             central_sys._server.close()
             await central_sys._server.wait_closed()
             # Unload services
+            # print(hass.services.async_services_for_domain(DOMAIN))
             for service in hass.services.async_services_for_domain(DOMAIN):
                 hass.services.async_remove(DOMAIN, service)
-            for charger in central_sys.cpids:
-                for service in hass.services.async_services_for_domain(charger):
-                    hass.services.async_remove(charger, service)
             # Unload platforms if a charger connected
             if central_sys.connections == 0:
                 unloaded = True

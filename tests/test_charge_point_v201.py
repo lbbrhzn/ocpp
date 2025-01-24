@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v16.enums import Measurand
 
-from custom_components.ocpp.const import CONF_CPIDS, CONF_CPID
+from custom_components.ocpp.const import CONF_CPIDS, CONF_CPID, DOMAIN
 from custom_components.ocpp import CentralSystem
 from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
@@ -808,9 +808,9 @@ async def _set_variable(
     cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            cpid,
-            csvcs.service_configure_v201,
-            service_data={"ocpp_key": key, "value": value},
+            DOMAIN,
+            csvcs.service_configure,
+            service_data={"devid": cpid, "ocpp_key": key, "value": value},
             blocking=True,
             return_response=True,
         )
@@ -828,9 +828,9 @@ async def _get_variable(
     cpid = cs.charge_points[cp_id].settings.cpid
     try:
         response = await hass.services.async_call(
-            cpid,
-            csvcs.service_get_configuration_v201,
-            service_data={"ocpp_key": key},
+            DOMAIN,
+            csvcs.service_get_configuration,
+            service_data={"devid": cpid, "ocpp_key": key},
             blocking=True,
             return_response=True,
         )
@@ -903,11 +903,11 @@ async def _test_services(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint
 
 
 async def _set_charge_rate_service(
-    hass: HomeAssistant, data: dict, cpid: str
+    hass: HomeAssistant, data: dict
 ) -> HomeAssistantError:
     try:
         await hass.services.async_call(
-            cpid,
+            DOMAIN,
             csvcs.service_set_charge_rate,
             service_data=data,
             blocking=True,
@@ -924,7 +924,7 @@ async def _test_charge_profiles(
     cpid = cs.charge_points[cp_id].settings.cpid
 
     error: HomeAssistantError = await _set_charge_rate_service(
-        hass, {"limit_watts": 3000}, cpid
+        hass, {"devid": cpid, "limit_watts": 3000}
     )
 
     assert error is None
@@ -944,7 +944,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 16}, cpid)
+    error = await _set_charge_rate_service(hass, {"devid": cpid, "limit_amps": 16})
     assert error is None
     assert len(cp.charge_profiles_set) == 2
     assert cp.charge_profiles_set[-1].evse_id == 0
@@ -965,6 +965,7 @@ async def _test_charge_profiles(
     error = await _set_charge_rate_service(
         hass,
         {
+            "devid": cpid,
             "custom_profile": """{
             'id': 2,
             'stack_level': 1,
@@ -975,9 +976,8 @@ async def _test_charge_profiles(
                 'charging_rate_unit': 'A',
                 'charging_schedule_period': [{'start_period': 0, 'limit': 6}]
             }]
-        }"""
+        }""",
         },
-        cpid,
     )
     assert error is None
     assert len(cp.charge_profiles_set) == 3
@@ -1013,7 +1013,7 @@ async def _test_charge_profiles(
         ],
     }
 
-    error = await _set_charge_rate_service(hass, {"limit_amps": 5}, cpid)
+    error = await _set_charge_rate_service(hass, {"devid": cpid, "limit_amps": 5})
     assert error is not None
     assert str(error).startswith("Failed to set variable: Rejected")
 
@@ -1027,8 +1027,6 @@ async def _test_charge_profiles(
 
 
 async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
-    cp_id = cp.id[:-7]
-    cpid = cs.charge_points[cp_id].settings.cpid
     boot_res: call_result.BootNotification = await cp.call(
         call.BootNotification(
             {
@@ -1052,7 +1050,10 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
     datetime.fromisoformat(heartbeat_resp.current_time)
 
-    await wait_ready(hass, cpid)
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
+    await wait_ready(cs.charge_points[cp_id])
 
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
@@ -1160,7 +1161,7 @@ async def _extra_features_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass, cpid)
+    await wait_ready(cs.charge_points[cp_id])
 
     assert (
         cs.get_metric(
@@ -1216,7 +1217,7 @@ async def _unsupported_base_report_test(
             BootReasonEnumType.power_up.value,
         )
     )
-    await wait_ready(hass, cpid)
+    await wait_ready(cs.charge_points[cp_id])
     assert (
         cs.get_metric(
             cpid,
@@ -1226,7 +1227,7 @@ async def _unsupported_base_report_test(
     )
 
 
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(150)
 async def test_cms_responses_v201(hass, socket_enabled):
     """Test central system responses to a charger."""
 
@@ -1266,6 +1267,9 @@ async def test_cms_responses_v201(hass, socket_enabled):
     cp_id2 = "CP_2_allfeatures"
     entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
     entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+    # need to reload to setup sensors etc for new charger
+    await hass.config_entries.async_reload(entry.entry_id)
+    cs = hass.data[DOMAIN][entry.entry_id]
 
     await run_charge_point_test(
         config_entry,
@@ -1306,6 +1310,9 @@ async def test_cms_responses_v201(hass, socket_enabled):
     entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
     entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
     entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+    # need to reload to setup sensors etc for new charger
+    await hass.config_entries.async_reload(entry.entry_id)
+    cs = hass.data[DOMAIN][entry.entry_id]
 
     await run_charge_point_test(
         config_entry,

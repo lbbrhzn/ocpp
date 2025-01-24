@@ -9,7 +9,7 @@ from ocpp.exceptions import OCPPError
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant, SupportsResponse, ServiceResponse
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError, HomeAssistantError
 from websockets.asyncio.server import ServerConnection
 
@@ -43,13 +43,11 @@ from .chargepoint import (
     MeasurandValue,
 )
 from .chargepoint import ChargePoint as cp
-from .chargepoint import CONF_SERVICE_DATA_SCHEMA, GCONF_SERVICE_DATA_SCHEMA
 
 from .enums import Profiles
 
 from .enums import (
     HAChargerStatuses as cstat,
-    HAChargerServices as csvcs,
     HAChargerSession as csess,
 )
 
@@ -148,37 +146,6 @@ class ChargePoint(cp):
             ]
         )
         await self.call(req)
-
-    def register_version_specific_services(self):
-        """Register HA services that differ depending on OCPP version."""
-
-        async def handle_configure(call) -> ServiceResponse:
-            """Handle the configure service call."""
-            key = call.data.get("ocpp_key")
-            value = call.data.get("value")
-            result: SetVariableResult = await self.configure(key, value)
-            return {"reboot_required": result == SetVariableResult.reboot_required}
-
-        async def handle_get_configuration(call) -> ServiceResponse:
-            """Handle the get configuration service call."""
-            key = call.data.get("ocpp_key")
-            value = await self.get_configuration(key)
-            return {"value": value}
-
-        self.hass.services.async_register(
-            self.settings.cpid,
-            csvcs.service_configure_v201.value,
-            handle_configure,
-            CONF_SERVICE_DATA_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-        self.hass.services.async_register(
-            self.settings.cpid,
-            csvcs.service_get_configuration_v201.value,
-            handle_get_configuration,
-            GCONF_SERVICE_DATA_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
 
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
