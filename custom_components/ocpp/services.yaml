@@ -98,7 +98,7 @@ configure:
       example: charger
     ocpp_key:
       name: Configuration key name
-      description: v1.6: Write-enabled key name supported v2.0.1:<ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      description: v1.6: Write-enabled key name supported v2.0.1:Component name/Key name
       required: true
       advanced: true
       example: "v1.6:WebSocketPingInterval v2.0.1:OCPPCommCtrlr/WebSocketPingInterval"
@@ -121,7 +121,7 @@ get_configuration:
       example: charger
     ocpp_key:
       name: Configuration key name
-      description: v1.6:Key name v2.0.1:<ComponentName>[(<ComponentInstance>)]/<VariableName>[(<VariableInstance>)]
+      description: v1.6:Key name v2.0.1:Component name/Key name
       required: true
       advanced: true
       example: "v1.6:WebSocketPingInterval v2.0.1:OCPPCommCtrlr/WebSocketPingInterval"
