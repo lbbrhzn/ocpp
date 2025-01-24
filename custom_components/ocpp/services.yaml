@@ -132,7 +132,7 @@ get_diagnostics:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
@@ -149,7 +149,7 @@ data_transfer:
   fields:
     devid:
       name: Charger identifier
-      description: Either HA charger id or Ocpp Id
+      description: Either HA charger id or Ocpp id
       required: true
       advanced: true
       example: charger
