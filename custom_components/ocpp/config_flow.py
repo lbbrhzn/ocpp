@@ -153,17 +153,17 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Don't allow duplicate cpids to be used
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
-            if not user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                await self.async_step_measurands()
-                measurands = self._measurands
-            else:
-                measurands = DEFAULT_MONITORED_VARIABLES
-            user_input[CONF_MONITORED_VARIABLES] = measurands
             self._data[CONF_CPIDS].append({self._cp_id: user_input})
-            return self.async_update_reload_and_abort(
-                self._entry,
-                data_updates={**self._data},
-            )
+            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
+                    DEFAULT_MONITORED_VARIABLES
+                )
+                return self.async_update_reload_and_abort(
+                    self._entry,
+                    data_updates={**self._data},
+                )
+            else:
+                return await self.async_step_measurands()
 
         return self.async_show_form(
             step_id="cp_user", data_schema=STEP_USER_CP_DATA_SCHEMA, errors=errors
@@ -179,7 +179,14 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._measurands = ",".join(selected_measurands)
             else:
                 errors["base"] = "measurand"
-            return
+            self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
+                self._measurands
+            )
+            return self.async_update_reload_and_abort(
+                self._entry,
+                data_updates={**self._data},
+            )
+
         return self.async_show_form(
             step_id="measurands",
             data_schema=STEP_USER_MEASURANDS_SCHEMA,
