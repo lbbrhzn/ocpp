@@ -155,7 +155,9 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             self._data[CONF_CPIDS].append({self._cp_id: user_input})
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = DEFAULT_MONITORED_VARIABLES
+                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
+                    DEFAULT_MONITORED_VARIABLES
+                )
                 return self.async_update_reload_and_abort(
                     self._entry,
                     data_updates={**self._data},
@@ -177,7 +179,9 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._measurands = ",".join(selected_measurands)
             else:
                 errors["base"] = "measurand"
-            self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = self._measurands
+            self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
+                self._measurands
+            )
             return self.async_update_reload_and_abort(
                 self._entry,
                 data_updates={**self._data},
