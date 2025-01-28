@@ -10,7 +10,14 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW, CONF_CPIDS, CONF_MONITORED_VARIABLES_AUTOCONFIG
+from .const import (
+    MOCK_CONFIG_CS,
+    MOCK_CONFIG_CP,
+    MOCK_CONFIG_FLOW,
+    CONF_CPIDS,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_MONITORED_VARIABLES,
+)
 
 
 # This fixture bypasses the actual setup of the integration
@@ -100,7 +107,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     )
 
     result3 = await hass.config_entries.flow.async_configure(
-        result2["flow_id"], user_input=DEFAULT_MONITORED_VARIABLES.split(',')
+        result2["flow_id"], user_input=DEFAULT_MONITORED_VARIABLES.split(",")
     )
 
     # Check that the config flow is complete and a new entry is created with
