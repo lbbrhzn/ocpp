@@ -122,6 +122,44 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     assert entry.data == flow_output
 
 
+async def test_duplicate_cpid_discovery_flow(hass, bypass_get_data):
+    """Test discovery flow with duplicate CP ID."""
+    # Setup first charger
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_CS,
+        entry_id="test_cms_disc",
+        title="test_cms_disc",
+        version=2,
+    )
+    if hass.data.get(DOMAIN) is None:
+        hass.data.setdefault(DOMAIN, {})
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Try to add same CP ID twice
+    entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
+    info = {"cp_id": "test_cp_id", "entry": entry}
+
+    # First discovery should succeed
+    result1 = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data=info,
+    )
+    assert result1["type"] == data_entry_flow.FlowResultType.FORM
+
+    # Second discovery with same CP ID should abort
+    result2 = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data=info,
+    )
+    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["reason"] == "already_in_progress"
+
+
 # In this case, we want to simulate a failure during the config flow.
 # We use the `error_on_get_data` mock instead of `bypass_get_data`
 # (note the function parameters) to raise an Exception during
