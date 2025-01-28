@@ -111,10 +111,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize."""
-        self._data = {}
+        self._data: dict[str, Any] = {}
         self._cp_id: str
         self._entry: ConfigEntry
-        self._measurands: str
+        self._measurands: str = ""
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         """Handle user central system initiated configuration."""
@@ -142,6 +142,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._data = {**self._entry.data}
 
         await self.async_set_unique_id(self._cp_id)
+        # Abort the flow if a config entry with the same unique ID exists
+        self._abort_if_unique_id_configured()
         return await self.async_step_cp_user()
 
     async def async_step_cp_user(
@@ -175,17 +177,22 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             selected_measurands = [m for m, value in user_input.items() if value]
-            if set(selected_measurands).issubset(set(MEASURANDS)):
-                self._measurands = ",".join(selected_measurands)
+            if not set(selected_measurands).issubset(set(MEASURANDS)):
+                errors["base"] = "no_measurands_selected"
+                return self.async_show_form(
+                    step_id="measurands",
+                    data_schema=STEP_USER_MEASURANDS_SCHEMA,
+                    errors=errors,
+                )
             else:
-                errors["base"] = "measurand"
-            self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
-                self._measurands
-            )
-            return self.async_update_reload_and_abort(
-                self._entry,
-                data_updates={**self._data},
-            )
+                self._measurands = ",".join(selected_measurands)
+                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
+                    self._measurands
+                )
+                return self.async_update_reload_and_abort(
+                    self._entry,
+                    data_updates={**self._data},
+                )
 
         return self.async_show_form(
             step_id="measurands",

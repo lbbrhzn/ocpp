@@ -10,7 +10,14 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW, CONF_CPIDS
+from .const import (
+    MOCK_CONFIG_CS,
+    MOCK_CONFIG_CP,
+    MOCK_CONFIG_FLOW,
+    CONF_CPIDS,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_MONITORED_VARIABLES,
+)
 
 
 # This fixture bypasses the actual setup of the integration
@@ -80,27 +87,39 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     await hass.async_block_till_done()
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
     info = {"cp_id": "test_cp_id", "entry": entry}
-    # Need to find out how to pass in discovery_info
-    result = await hass.config_entries.flow.async_init(
+    # data here is discovery_info not user_input
+    result_disc = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
         data=info,
     )
 
     # Check that the config flow shows the user form as the first step
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "cp_user"
-    result["discovery_info"] = info
+    assert result_disc["type"] == data_entry_flow.FlowResultType.FORM
+    assert result_disc["step_id"] == "cp_user"
+    result_disc["discovery_info"] = info
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=MOCK_CONFIG_CP
+    # Switch to manual measurand selection to test full flow
+    cp_input = MOCK_CONFIG_CP.copy()
+    cp_input[CONF_MONITORED_VARIABLES_AUTOCONFIG] = False
+    result_cp = await hass.config_entries.flow.async_configure(
+        result_disc["flow_id"], user_input=cp_input
+    )
+
+    measurand_input = {value: True for value in DEFAULT_MONITORED_VARIABLES.split(",")}
+    result_meas = await hass.config_entries.flow.async_configure(
+        result_cp["flow_id"], user_input=measurand_input
     )
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    flow_output = MOCK_CONFIG_FLOW.copy()
+    flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = (
+        False
+    )
+    assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
-    assert entry.data == MOCK_CONFIG_FLOW
+    assert entry.data == flow_output
 
 
 # In this case, we want to simulate a failure during the config flow.
