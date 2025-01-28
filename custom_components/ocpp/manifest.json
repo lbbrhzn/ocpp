@@ -16,5 +16,5 @@
 		"ocpp>=2.0.0",
 		"websockets>=14.1"
 	],
-	"version": "0.7.0"
+	"version": "0.8.0"
 }
