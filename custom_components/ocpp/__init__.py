@@ -165,7 +165,10 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             csid_data.update({key: old_data.get(key, value)})
 
         new_data = csid_data
-        new_data.update({CONF_CPIDS: [{cpid_data[CONF_CPID]: cpid_data}]})
+        cp_id = hass.states.get(f"sensor.{cpid_data[CONF_CPID]}_id")
+        if cp_id is None:
+            return False
+        new_data.update({CONF_CPIDS: [{cp_id: cpid_data}]})
 
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, minor_version=0, version=2
