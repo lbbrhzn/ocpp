@@ -10,7 +10,7 @@ from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR
     DOMAIN,
 )
 
-from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW, CONF_CPIDS
+from .const import MOCK_CONFIG_CS, MOCK_CONFIG_CP, MOCK_CONFIG_FLOW, CONF_CPIDS, CONF_MONITORED_VARIABLES_AUTOCONFIG
 
 
 # This fixture bypasses the actual setup of the integration
@@ -80,7 +80,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     await hass.async_block_till_done()
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
     info = {"cp_id": "test_cp_id", "entry": entry}
-    # Need to find out how to pass in discovery_info
+    # data here is discovery_info not user_input
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
@@ -92,15 +92,24 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     assert result["step_id"] == "cp_user"
     result["discovery_info"] = info
 
+    # Switch to manual measurand selection to test full flow
+    input = MOCK_CONFIG_CP.copy()
+    input[CONF_MONITORED_VARIABLES_AUTOCONFIG] = False
     result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=MOCK_CONFIG_CP
+        result["flow_id"], user_input=input
+    )
+
+    result3 = await hass.config_entries.flow.async_configure(
+        result2["flow_id"], user_input=DEFAULT_MONITORED_VARIABLES
     )
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    output = MOCK_CONFIG_FLOW.copy()
+    output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = False
+    assert result3["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
-    assert entry.data == MOCK_CONFIG_FLOW
+    assert entry.data == output
 
 
 # In this case, we want to simulate a failure during the config flow.

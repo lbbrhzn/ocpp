@@ -61,7 +61,7 @@
         },
         "error": {
             "auth": "Username/Password is wrong.",
-            "measurand": "Unknown measurand"
+            "no_measurands_selected": "No measurand selected: please select at least one"
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed."
