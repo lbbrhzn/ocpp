@@ -16,7 +16,6 @@ from .const import (
     MOCK_CONFIG_CP,
     MOCK_CONFIG_FLOW,
     CONF_CPIDS,
-    CONF_HOST,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_MONITORED_VARIABLES,
 )
@@ -172,9 +171,8 @@ async def test_failed_config_flow(hass, error_on_get_data):
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
 
-    # Test with invalid URL
+    # Test with invalid input data, includes cpids
     invalid_config = MOCK_CONFIG_CS.copy()
-    invalid_config[CONF_HOST] = "127.0.0"
 
     with pytest.raises(InvalidData):
         result = await hass.config_entries.flow.async_configure(
