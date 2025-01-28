@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant import config_entries, data_entry_flow
+from homeassistant.data_entry_flow import InvalidData
 import pytest
 
 from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR,; SWITCH,
@@ -15,6 +16,7 @@ from .const import (
     MOCK_CONFIG_CP,
     MOCK_CONFIG_FLOW,
     CONF_CPIDS,
+    CONF_HOST,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_MONITORED_VARIABLES,
 )
@@ -160,28 +162,28 @@ async def test_duplicate_cpid_discovery_flow(hass, bypass_get_data):
     assert result2["reason"] == "already_in_progress"
 
 
-# In this case, we want to simulate a failure during the config flow.
-# We use the `error_on_get_data` mock instead of `bypass_get_data`
-# (note the function parameters) to raise an Exception during
-# validation of the input config.
-# async def test_failed_config_flow(hass, error_on_get_data):
-#     """Test a failed config flow due to credential validation failure."""
-#
-#     result = await hass.config_entries.flow.async_init(
-#         DOMAIN, context={"source": config_entries.SOURCE_USER}
-#     )
-#
-#     assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
-#     assert result["step_id"] == "user"
-#
-#     result = await hass.config_entries.flow.async_configure(
-#         result["flow_id"], user_input=MOCK_CONFIG
-#     )
-#
-#     assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
-#     assert result["errors"] == {"base": "auth"}
-#
-#
+async def test_failed_config_flow(hass, error_on_get_data):
+    """Test failed config flow scenarios."""
+    # Test invalid central system configuration
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    # Test with invalid URL
+    invalid_config = MOCK_CONFIG_CS.copy()
+    invalid_config[CONF_HOST] = "127.0.0"
+
+    with pytest.raises(InvalidData):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=invalid_config
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+
+
 # # Our config flow also has an options flow, so we must test it as well.
 # async def test_options_flow(hass):
 #     """Test an options flow."""
