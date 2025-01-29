@@ -7,9 +7,7 @@ from homeassistant import config_entries, data_entry_flow
 from homeassistant.data_entry_flow import InvalidData
 import pytest
 
-from custom_components.ocpp.const import (  # BINARY_SENSOR,; PLATFORMS,; SENSOR,; SWITCH,
-    DOMAIN,
-)
+from custom_components.ocpp.const import DOMAIN
 
 from .const import (
     MOCK_CONFIG_CS,
@@ -121,6 +119,27 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
     assert entry.data == flow_output
+
+    # Test different CP IDs are allowed
+    info2 = {"cp_id": "different_cp_id", "entry": entry}
+    result2_disc = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data=info2,
+    )
+    # Check that the config flow shows the user form as the first step
+    assert result2_disc["type"] == data_entry_flow.FlowResultType.FORM
+    assert result2_disc["step_id"] == "cp_user"
+    result2_disc["discovery_info"] = info2
+
+    cp2_input = MOCK_CONFIG_CP.copy()
+    result_cp2 = await hass.config_entries.flow.async_configure(
+        result2_disc["flow_id"], user_input=cp2_input
+    )
+
+    assert result_cp2["type"] == data_entry_flow.FlowResultType.ABORT
+    # Check there are 2 cpid entries
+    assert len(entry.data[CONF_CPIDS]) == 2
 
 
 async def test_duplicate_cpid_discovery_flow(hass, bypass_get_data):
