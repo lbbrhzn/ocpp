@@ -210,28 +210,31 @@ class CentralSystem:
         cp_id = websocket.request.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         if cp_id not in self.charge_points:
-            # check if charger already has config entry
-            config_flow = False
-            for cfg in self.settings.cpids:
-                if cfg.get(cp_id):
-                    config_flow = True
-                    cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
-                    _LOGGER.info(f"Charger match found for {cp_settings.cpid}:{cp_id}")
-                    _LOGGER.debug(f"Central settings: {self.settings}")
+            try:
+                config_flow = False
+                for cfg in self.settings.cpids:
+                    if cfg.get(cp_id):
+                        config_flow = True
+                        cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
+                        _LOGGER.info(f"Charger match found for {cp_settings.cpid}:{cp_id}")
+                        _LOGGER.debug(f"Central settings: {self.settings}")
 
-            if not config_flow:
-                # discovery_info for flow
-                info = {"cp_id": cp_id, "entry": self.entry}
-                await self.hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_INTEGRATION_DISCOVERY}, data=info
+                if not config_flow:
+                    # discovery_info for flow
+                    info = {"cp_id": cp_id, "entry": self.entry}
+                    await self.hass.config_entries.flow.async_init(
+                        DOMAIN, context={"source": SOURCE_INTEGRATION_DISCOVERY}, data=info
+                    )
+                    # use return to wait for config entry to reload after discovery
+                    return
+
+                self.cpids.update({cp_settings.cpid: cp_id})
+                await async_setup_charger(
+                    self.hass, self.entry, cs_id=self.id, cpid=cp_settings.cpid, cp_id=cp_id
                 )
-                # use return to wait for config entry to reload after discovery
+            except Exception as e:
+                _LOGGER.error(f"Failed to setup charger {cp_id}: {str(e)}")
                 return
-
-            self.cpids.update({cp_settings.cpid: cp_id})
-            await async_setup_charger(
-                self.hass, self.entry, cs_id=self.id, cpid=cp_settings.cpid, cp_id=cp_id
-            )
 
             if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
                 charge_point = ChargePointv201(
