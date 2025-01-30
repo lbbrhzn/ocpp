@@ -56,11 +56,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
+    entities = []
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
-
-        entities = []
 
         for ent in NUMBERS:
             if ent.key == "maximum_current":
@@ -71,9 +70,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                     CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
                 )
             cpx = ChargePointNumber(hass, central_system, cpid, ent)
-            # Only add if entity does not exist
-            if hass.states.get(cpx._attr_unique_id) is None:
-                entities.append(cpx)
+            entities.append(cpx)
 
     async_add_devices(entities, False)
 

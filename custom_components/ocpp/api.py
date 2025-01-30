@@ -29,7 +29,7 @@ from .const import (
 from .enums import (
     HAChargerServices as csvcs,
 )
-from .chargepoint import async_setup_charger, SetVariableResult
+from .chargepoint import SetVariableResult
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
@@ -233,13 +233,6 @@ class CentralSystem:
                     return
 
                 self.cpids.update({cp_settings.cpid: cp_id})
-                await async_setup_charger(
-                    self.hass,
-                    self.entry,
-                    cs_id=self.id,
-                    cpid=cp_settings.cpid,
-                    cp_id=cp_id,
-                )
             except Exception as e:
                 _LOGGER.error(f"Failed to setup charger {cp_id}: {str(e)}")
                 return
@@ -253,8 +246,6 @@ class CentralSystem:
                     cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
                 )
             self.charge_points[cp_id] = charge_point
-
-            await charge_point.start()
             self.connections += 1
             _LOGGER.info(
                 f"Charger {cp_settings.cpid}:{cp_id} connected to {self.settings.host}:{self.settings.port}."
@@ -262,6 +253,7 @@ class CentralSystem:
             _LOGGER.info(
                 f"{self.connections} charger(s): {self.cpids} now connected to central system:{self.settings.csid}."
             )
+            await charge_point.start()
         else:
             _LOGGER.info(
                 f"Charger {cp_id} reconnected to {self.settings.host}:{self.settings.port}."

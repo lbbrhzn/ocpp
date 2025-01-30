@@ -105,7 +105,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     dr = device_registry.async_get(hass)
 
-    """ Create Central System Device """
+    # Create Central System device
     dr.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, central_sys.id)},
@@ -113,7 +113,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         model="OCPP Central System",
     )
 
+    # Create charger devices
+    for cp_data in entry.data[CONF_CPIDS]:
+        for cp_id, cp_settings in cp_data.items():
+            cpid = cp_settings[CONF_CPID]
+            dr.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
+                name=cpid,
+                suggested_area="Garage",
+                via_device=(DOMAIN, central_sys.id),
+            )
+
     hass.data[DOMAIN][entry.entry_id] = central_sys
+
+    if entry.data[CONF_CPIDS]:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
