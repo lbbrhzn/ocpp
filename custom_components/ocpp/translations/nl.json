@@ -8,13 +8,19 @@
                     "host": "Host",
                     "port": "Poort",
                     "csid": "Central system identifier",
-                    "cpid": "Charge point identifier",
-                    "max_current": "Maximale laadstroom",
-                    "meter_interval": "Meetinterval (secondes)",
                     "websocket_close_timeout": "Websocket close timeout (secondes)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (secondes)",
-                    "websocket_ping_timeout": "Websocket ping timeout (secondes)",
+                    "websocket_ping_timeout": "Websocket ping timeout (secondes)"
+                }
+            },
+            "cp_user": {
+                "title": "OCPP Configuratie",
+                "description": "Voor hulp bij configuratie zie: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "cpid": "Charge point identifier",
+                    "max_current": "Maximale laadstroom",
+                    "meter_interval": "Meetinterval (secondes)",
                     "skip_schema_validation": "Skip OCPP schema validation",
                     "force_smart_charging": "Functieprofiel Smart Charging forceren"
                 }
