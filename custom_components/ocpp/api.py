@@ -216,21 +216,29 @@ class CentralSystem:
                     if cfg.get(cp_id):
                         config_flow = True
                         cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
-                        _LOGGER.info(f"Charger match found for {cp_settings.cpid}:{cp_id}")
+                        _LOGGER.info(
+                            f"Charger match found for {cp_settings.cpid}:{cp_id}"
+                        )
                         _LOGGER.debug(f"Central settings: {self.settings}")
 
                 if not config_flow:
                     # discovery_info for flow
                     info = {"cp_id": cp_id, "entry": self.entry}
                     await self.hass.config_entries.flow.async_init(
-                        DOMAIN, context={"source": SOURCE_INTEGRATION_DISCOVERY}, data=info
+                        DOMAIN,
+                        context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                        data=info,
                     )
                     # use return to wait for config entry to reload after discovery
                     return
 
                 self.cpids.update({cp_settings.cpid: cp_id})
                 await async_setup_charger(
-                    self.hass, self.entry, cs_id=self.id, cpid=cp_settings.cpid, cp_id=cp_id
+                    self.hass,
+                    self.entry,
+                    cs_id=self.id,
+                    cpid=cp_settings.cpid,
+                    cp_id=cp_id,
                 )
             except Exception as e:
                 _LOGGER.error(f"Failed to setup charger {cp_id}: {str(e)}")
@@ -358,80 +366,57 @@ class CentralSystem:
             "identifiers": {(DOMAIN, self.id)},
         }
 
+    def check_charger_available(func):
+        """Check charger is available before executing service with Decorator."""
+
+        async def wrapper(self, call, *args, **kwargs):
+            cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
+            cp = self.charge_points[cp_id]
+            if cp.status == STATE_UNAVAILABLE:
+                _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="unavailable",
+                    translation_placeholders={"message": cp_id},
+                )
+            return await func(self, call, cp, *args, **kwargs)
+
+        return wrapper
+
     # Define custom service handles for charge point
-    async def handle_clear_profile(self, call):
+    @check_charger_available
+    async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         await cp.clear_profile()
 
-    async def handle_update_firmware(self, call):
+    @check_charger_available
+    async def handle_update_firmware(self, call, cp):
         """Handle the firmware update service call."""
         url = call.data.get("firmware_url")
         delay = int(call.data.get("delay_hours", 0))
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         await cp.update_firmware(url, delay)
 
-    async def handle_get_diagnostics(self, call):
+    @check_charger_available
+    async def handle_get_diagnostics(self, call, cp):
         """Handle the get get diagnostics service call."""
         url = call.data.get("upload_url")
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         await cp.get_diagnostics(url)
 
-    async def handle_data_transfer(self, call):
+    @check_charger_available
+    async def handle_data_transfer(self, call, cp):
         """Handle the data transfer service call."""
         vendor = call.data.get("vendor_id")
         message = call.data.get("message_id", "")
         data = call.data.get("data", "")
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         await cp.data_transfer(vendor, message, data)
 
-    async def handle_set_charge_rate(self, call):
+    @check_charger_available
+    async def handle_set_charge_rate(self, call, cp):
         """Handle the data transfer service call."""
         amps = call.data.get("limit_amps", None)
         watts = call.data.get("limit_watts", None)
         id = call.data.get("conn_id", 0)
         custom_profile = call.data.get("custom_profile", None)
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         if custom_profile is not None:
             if type(custom_profile) is str:
                 custom_profile = custom_profile.replace("'", '"')
@@ -442,33 +427,17 @@ class CentralSystem:
         elif amps is not None:
             await cp.set_charge_rate(limit_amps=amps, conn_id=id)
 
-    async def handle_configure(self, call) -> ServiceResponse:
+    @check_charger_available
+    async def handle_configure(self, call, cp) -> ServiceResponse:
         """Handle the configure service call."""
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
         key = call.data.get("ocpp_key")
         value = call.data.get("value")
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         result: SetVariableResult = await cp.configure(key, value)
         return {"reboot_required": result == SetVariableResult.reboot_required}
 
-    async def handle_get_configuration(self, call) -> ServiceResponse:
+    @check_charger_available
+    async def handle_get_configuration(self, call, cp) -> ServiceResponse:
         """Handle the get configuration service call."""
         key = call.data.get("ocpp_key")
-        cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-        cp = self.charge_points[cp_id]
-        if cp.status == STATE_UNAVAILABLE:
-            _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unavailable",
-                translation_placeholders={"message": cp_id},
-            )
         value = await cp.get_configuration(key)
         return {"value": value}
