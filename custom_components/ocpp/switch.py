@@ -72,7 +72,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
         entities = []
 
         for ent in SWITCHES:
-            entities.append(ChargePointSwitch(central_system, cpid, ent))
+            cpx = ChargePointSwitch(central_system, cpid, ent)
+            # Only add if entity does not exist
+            if hass.states.get(cpx._attr_unique_id) is None:
+                entities.append(cpx)
 
     async_add_devices(entities, False)
 

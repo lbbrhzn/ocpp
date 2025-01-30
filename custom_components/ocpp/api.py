@@ -225,6 +225,8 @@ class CentralSystem:
                 await self.hass.config_entries.flow.async_init(
                     DOMAIN, context={"source": SOURCE_INTEGRATION_DISCOVERY}, data=info
                 )
+                # use return to wait for config entry to reload after discovery
+                return
 
             self.cpids.update({cp_settings.cpid: cp_id})
             await async_setup_charger(
@@ -242,7 +244,7 @@ class CentralSystem:
             self.charge_points[cp_id] = charge_point
 
             await charge_point.start()
-            self.connections = +1
+            self.connections += 1
             _LOGGER.info(
                 f"Charger {cp_settings.cpid}:{cp_id} connected to {self.settings.host}:{self.settings.port}."
             )

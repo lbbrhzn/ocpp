@@ -64,7 +64,8 @@
             "no_measurands_selected": "No measurand selected: please select at least one"
         },
         "abort": {
-            "single_instance_allowed": "Only a single instance is allowed."
+            "single_instance_allowed": "Only a single instance is allowed",
+            "reauth_successful": "New charger configured"
         }
     },
     "exceptions": {

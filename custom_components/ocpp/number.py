@@ -70,12 +70,15 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 ent.native_max_value = entry.data.get(
                     CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
                 )
-            entities.append(OcppNumber(hass, central_system, cpid, ent))
+            cpx = ChargePointNumber(hass, central_system, cpid, ent)
+            # Only add if entity does not exist
+            if hass.states.get(cpx._attr_unique_id) is None:
+                entities.append(cpx)
 
     async_add_devices(entities, False)
 
 
-class OcppNumber(RestoreNumber, NumberEntity):
+class ChargePointNumber(RestoreNumber, NumberEntity):
     """Individual slider for setting charge rate."""
 
     _attr_has_entity_name = True
