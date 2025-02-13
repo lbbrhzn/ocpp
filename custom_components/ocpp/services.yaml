@@ -14,7 +14,7 @@ set_charge_rate:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     limit_amps:
@@ -58,7 +58,7 @@ clear_profile:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
 
@@ -69,7 +69,7 @@ update_firmware:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     firmware_url:
@@ -93,7 +93,7 @@ configure:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     ocpp_key:
@@ -116,7 +116,7 @@ get_configuration:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     ocpp_key:
@@ -133,7 +133,7 @@ get_diagnostics:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     upload_url:
@@ -150,7 +150,7 @@ data_transfer:
     devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
-      required: true
+      required: false
       advanced: true
       example: charger
     vendor_id:
