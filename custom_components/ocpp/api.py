@@ -362,8 +362,8 @@ class CentralSystem:
         """Check charger is available before executing service with Decorator."""
 
         async def wrapper(self, call, *args, **kwargs):
-            cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
             try:
+                cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
                 cp = self.charge_points[cp_id]
             except KeyError:
                 cp = list(self.charge_points.values())[0]
