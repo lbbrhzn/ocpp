@@ -598,7 +598,7 @@ async def test_cms_responses_errors_v16(
                     ),
                     test_services(
                         hass,
-                        "",  # Test with no devid supplied
+                        "xxx",  # Test with incorrect devid supplied
                         SERVICES_ERROR,
                         socket_enabled,
                     ),
