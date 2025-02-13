@@ -39,33 +39,33 @@ logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Required("firmware_url"): cv.string,
         vol.Optional("delay_hours"): cv.positive_int,
     }
 )
 CONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Required("ocpp_key"): cv.string,
         vol.Required("value"): cv.string,
     }
 )
 GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Required("ocpp_key"): cv.string,
     }
 )
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Required("upload_url"): cv.string,
     }
 )
 TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Required("vendor_id"): cv.string,
         vol.Optional("message_id"): cv.string,
         vol.Optional("data"): cv.string,
@@ -73,7 +73,7 @@ TRANS_SERVICE_DATA_SCHEMA = vol.Schema(
 )
 CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("devid"): cv.string,
+        vol.Optional("devid"): cv.string,
         vol.Optional("limit_amps"): cv.positive_float,
         vol.Optional("limit_watts"): cv.positive_int,
         vol.Optional("conn_id"): cv.positive_int,
@@ -363,7 +363,10 @@ class CentralSystem:
 
         async def wrapper(self, call, *args, **kwargs):
             cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-            cp = self.charge_points[cp_id]
+            try:
+                cp = self.charge_points[cp_id]
+            except KeyError:
+                cp = list(self.charge_points.values())[0]
             if cp.status == STATE_UNAVAILABLE:
                 _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
                 raise HomeAssistantError(
