@@ -53,6 +53,32 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 ## [CTEK Chargestorm Connected 2](https://www.ctek.com/uk/ev-charging/chargestorm%C2%AE-connected-2)
 [Jonas Karlsson](https://github.com/jonasbkarlsson) has written a [getting started guide](https://github.com/jonasbkarlsson/ocpp/wiki/CTEK-Chargestorm-Connected-2) for connecting CTEK Chargestorm Connected 2.
 
+## [EN+ Caro Series Home Wallbox](https://www.en-plustech.com/product/caro-series-wallbox/)
+Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant.  If required, re-configure this with the correct Charge point identity (by removing and re-adding the integration) to change from the default `charger` Charge point identity before configuring the charger.
+
+Connect to the charger's access point (AP) by powering down the charger (i.e. switch off the charger's isolator or circuit breaker) and powering it back on a few seconds later.  The charger's accesss point becomes available for 15 minutes, and the SSID matches the chargers serial number (starting with SN).  Log in to the configuration interface on the IP address 192.168.4.1.
+
+If doing this from a phone, you may need to set the phone to _Flight Mode_ first, and enable WiFi if required to enable the rest of the configuration to complete.
+
+The username and password for the web interface are provided in the charger manual (case sensitive).
+
+Configure the network mode to WiFi or Ethernet, and (in the field with an icon that looks like a router with three aerials) enter the address of your Home Assistant server including the port and protocal (e.g. `ws://myhomeassistant.tld:9000` or `wss://myhomeassistant.tld:9000` if you are using secure sockets).
+
+The charger user interface will append the serial number when you leave the field - this is correct and expected.
+
+Save, and the charger will reboot.
+
+Reconnect to the charger's SSID, and log in again to 192.168.4.1 to confirm that the Network Status is online.  This confirms that charger has an internet connection via Ethernet or WiFi and is connected to your OCPP server in Home Assistant.  Once enabled, charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
+
+Even though the device accepts all measurands, the key working ones are 
+   - `Current.Import`
+   - `Current.Offered`
+   - `Energy.Active.Import.Register`
+   - `Voltage`
+   - `Transaction.ID`
+
+You may wish to disable sensors that show Unknown after you've completed a charging session as they will never provide data with the current firmware 1.4.859.
+
 ## [Etrel - Inch Pro](https://etrel.com/charging-solutions/inch-pro/)
 To allow a custom OCPP server such as HA to set up a transaction ID, it is necessary to set under Users > Charging Authorization the
 authorization type to either `Central system only` or `Charger whitelist and central system` otherwise the OCPP integration won't
