@@ -74,7 +74,7 @@ Even though the device accepts all measurands, the key working ones are
    - `Current.Import`
    - `Current.Offered`
    - `Energy.Active.Import.Register`
-   - `Voltage`
+   - `Voltage` - although this shows a constant voltage, so should be considered spurious.
    - `Transaction.ID`
 
 You may wish to disable sensors that show Unknown after you've completed a charging session, as they will never provide data with the current firmware 1.4.859.
