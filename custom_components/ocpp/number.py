@@ -19,9 +19,9 @@ from homeassistant.helpers.entity import DeviceInfo
 from .api import CentralSystem
 from .const import (
     CONF_CPID,
+    CONF_CPIDS,
     CONF_MAX_CURRENT,
     DATA_UPDATED,
-    DEFAULT_CPID,
     DEFAULT_MAX_CURRENT,
     DOMAIN,
     ICON,
@@ -56,20 +56,26 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
 
     central_system = hass.data[DOMAIN][entry.entry_id]
-    cp_id = entry.data.get(CONF_CPID, DEFAULT_CPID)
-
     entities = []
+    for charger in entry.data[CONF_CPIDS]:
+        cp_id_settings = list(charger.values())[0]
+        cpid = cp_id_settings[CONF_CPID]
 
-    for ent in NUMBERS:
-        if ent.key == "maximum_current":
-            ent.initial_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-            ent.native_max_value = entry.data.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
-        entities.append(OcppNumber(hass, central_system, cp_id, ent))
+        for ent in NUMBERS:
+            if ent.key == "maximum_current":
+                ent.initial_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+                ent.native_max_value = entry.data.get(
+                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
+                )
+            cpx = ChargePointNumber(hass, central_system, cpid, ent)
+            entities.append(cpx)
 
     async_add_devices(entities, False)
 
 
-class OcppNumber(RestoreNumber, NumberEntity):
+class ChargePointNumber(RestoreNumber, NumberEntity):
     """Individual slider for setting charge rate."""
 
     _attr_has_entity_name = True
@@ -79,20 +85,20 @@ class OcppNumber(RestoreNumber, NumberEntity):
         self,
         hass: HomeAssistant,
         central_system: CentralSystem,
-        cp_id: str,
+        cpid: str,
         description: OcppNumberDescription,
     ):
         """Initialize a Number instance."""
-        self.cp_id = cp_id
+        self.cpid = cpid
         self._hass = hass
         self.central_system = central_system
         self.entity_description = description
         self._attr_unique_id = ".".join(
-            [NUMBER_DOMAIN, self.cp_id, self.entity_description.key]
+            [NUMBER_DOMAIN, self.cpid, self.entity_description.key]
         )
         self._attr_name = self.entity_description.name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cp_id)},
+            identifiers={(DOMAIN, self.cpid)},
         )
         self._attr_native_value = self.entity_description.initial_value
         self._attr_should_poll = False
@@ -115,19 +121,19 @@ class OcppNumber(RestoreNumber, NumberEntity):
     # def available(self) -> bool:
     #    """Return if entity is available."""
     #    if not (
-    #        Profiles.SMART & self.central_system.get_supported_features(self.cp_id)
+    #        Profiles.SMART & self.central_system.get_supported_features(self.cpid)
     #    ):
     #        return False
-    #    return self.central_system.get_available(self.cp_id)  # type: ignore [no-any-return]
+    #    return self.central_system.get_available(self.cpid)  # type: ignore [no-any-return]
 
     async def async_set_native_value(self, value):
         """Set new value."""
         num_value = float(value)
         if self.central_system.get_available(
-            self.cp_id
-        ) and Profiles.SMART & self.central_system.get_supported_features(self.cp_id):
+            self.cpid
+        ) and Profiles.SMART & self.central_system.get_supported_features(self.cpid):
             resp = await self.central_system.set_max_charge_rate_amps(
-                self.cp_id, num_value
+                self.cpid, num_value
             )
             if resp is True:
                 self._attr_native_value = num_value

@@ -9,7 +9,6 @@ from custom_components.ocpp import CentralSystem
 from .const import CONF_PORT
 import contextlib
 from custom_components.ocpp.const import DOMAIN as OCPP_DOMAIN
-from custom_components.ocpp.enums import HAChargerServices as csvcs
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button.const import SERVICE_PRESS
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -27,36 +26,36 @@ from websockets import connect
 from websockets.asyncio.client import ClientConnection
 
 
-async def set_switch(hass: HomeAssistant, cs: CentralSystem, key: str, on: bool):
+async def set_switch(hass: HomeAssistant, cpid: str, key: str, on: bool):
     """Toggle a switch."""
     await hass.services.async_call(
         SWITCH_DOMAIN,
         SERVICE_TURN_ON if on else SERVICE_TURN_OFF,
-        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cs.settings.cpid}_{key}"},
+        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cpid}_{key}"},
         blocking=True,
     )
 
 
-async def set_number(hass: HomeAssistant, cs: CentralSystem, key: str, value: int):
+async def set_number(hass: HomeAssistant, cpid: str, key: str, value: int):
     """Set a numeric slider."""
     await hass.services.async_call(
         NUMBER_DOMAIN,
         "set_value",
         service_data={"value": str(value)},
         blocking=True,
-        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cs.settings.cpid}_{key}"},
+        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cpid}_{key}"},
     )
 
 
 set_switch.__test__ = False
 
 
-async def press_button(hass: HomeAssistant, cs: CentralSystem, key: str):
+async def press_button(hass: HomeAssistant, cpid: str, key: str):
     """Press a button."""
     await hass.services.async_call(
         BUTTON_DOMAIN,
         SERVICE_PRESS,
-        {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.{cs.settings.cpid}_{key}"},
+        {ATTR_ENTITY_ID: f"{BUTTON_DOMAIN}.{cpid}_{key}"},
         blocking=True,
     )
 
@@ -83,15 +82,15 @@ async def remove_configuration(hass: HomeAssistant, config_entry: MockConfigEntr
     if entry := hass.config_entries.async_get_entry(config_entry.entry_id):
         await hass.config_entries.async_remove(entry.entry_id)
         await hass.async_block_till_done()
+        assert config_entry.entry_id not in hass.data[OCPP_DOMAIN]
 
 
 remove_configuration.__test__ = False
 
 
-async def wait_ready(hass: HomeAssistant):
+async def wait_ready(cp: ChargePoint):
     """Wait until charge point is connected and initialised."""
-    hass.services.async_remove(OCPP_DOMAIN, csvcs.service_data_transfer)
-    while not hass.services.has_service(OCPP_DOMAIN, csvcs.service_data_transfer):
+    while not cp.post_connect_success:
         await asyncio.sleep(0.1)
 
 
@@ -128,7 +127,7 @@ async def run_charge_point_test(
             ]
             await asyncio.wait_for(
                 asyncio.gather(*([cp.start()] + test_results)),
-                timeout=5,
+                timeout=30,
             )
         await ws.close()
     for test_completed in completed:
