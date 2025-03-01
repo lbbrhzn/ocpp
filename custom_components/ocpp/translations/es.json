@@ -8,13 +8,19 @@
                     "host": "Dirección de host del sistema central",
                     "port": "Número de puerto del sistema central",
                     "csid": "Nombre del sistema central",
-                    "cpid": "Nombre del punto de carga",
-                    "meter_interval": "Intervalo de mediciones (segundos)",
-                    "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
                     "websocket_close_timeout": "Tiempo de espera Websocket (segundos)",
                     "websocket_ping_tries": "Reintentos de conexión Websocket",
                     "websocket_ping_interval": "Intervalo ping Websocket (segundos)",
-                    "websocket_ping_timeout": "Tiempo de espera ping Websocket (segundos)",
+                    "websocket_ping_timeout": "Tiempo de espera ping Websocket (segundos)"
+                }
+            },
+            "cp_user": {
+                "title": "Configuración OCPP",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un vistazo en: https://github.com/lbbrhzn/ocpp",
+                "data": {
+                    "cpid": "Nombre del punto de carga",
+                    "meter_interval": "Intervalo de mediciones (segundos)",
+                    "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
                     "skip_schema_validation": "Omitir validación esquema OCPP",
                     "force_smart_charging": "Forzar perfil de función Smart Charging"
                 }
