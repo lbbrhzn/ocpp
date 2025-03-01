@@ -31,6 +31,7 @@ def skip_notifications_fixture():
 
 # This fixture, when used, will result in calls to websockets to be bypassed. To have the call
 # return a value, we would add the `return_value=<VALUE_TO_RETURN>` parameter to the patch call.
+# include patch for hass.states.get for use with migration to return cp_id
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
@@ -40,6 +41,7 @@ def bypass_get_data_fixture():
         patch("websockets.asyncio.server.serve", return_value=future),
         patch("websockets.asyncio.server.Server.close"),
         patch("websockets.asyncio.server.Server.wait_closed"),
+        patch("homeassistant.core.StateMachine.get", return_value="test_cp_id"),
     ):
         yield
 
