@@ -23,7 +23,13 @@ from websockets.protocol import State
 from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
-from ocpp.v16.enums import UnitOfMeasure, AuthorizationStatus, Measurand, Phase
+from ocpp.v16.enums import (
+    UnitOfMeasure,
+    AuthorizationStatus,
+    Measurand,
+    Phase,
+    ReadingContext,
+)
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
@@ -626,15 +632,19 @@ class ChargePoint(cp):
                         measurand == DEFAULT_MEASURAND
                         and self._charger_reports_session_energy
                     ):
-                        if is_transaction:
-                            self._metrics[csess.session_energy.value].value = value
-                            self._metrics[csess.session_energy.value].unit = unit
-                            self._metrics[csess.session_energy.value].extra_attr[
-                                cstat.id_tag.name
-                            ] = self._metrics[cstat.id_tag.value].value
+                        # Ignore messages with Transaction Begin context
+                        if context != ReadingContext.transaction_begin.value:
+                            if is_transaction:
+                                self._metrics[csess.session_energy.value].value = value
+                                self._metrics[csess.session_energy.value].unit = unit
+                                self._metrics[csess.session_energy.value].extra_attr[
+                                    cstat.id_tag.name
+                                ] = self._metrics[cstat.id_tag.value].value
+                            else:
+                                self._metrics[measurand].value = value
+                                self._metrics[measurand].unit = unit
                         else:
-                            self._metrics[measurand].value = value
-                            self._metrics[measurand].unit = unit
+                            continue
                     else:
                         self._metrics[measurand].value = value
                         self._metrics[measurand].unit = unit
