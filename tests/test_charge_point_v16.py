@@ -51,6 +51,7 @@ from .charge_point_test import (
     set_number,
     create_configuration,
     remove_configuration,
+    wait_ready,
 )
 
 SERVICES = [
@@ -307,6 +308,7 @@ async def test_cms_responses_restore_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    cp.send_boot_notification(),
                     cp.send_start_transaction(12344),
                     cp.send_meter_periodic_data(),
                 ),
@@ -325,6 +327,7 @@ async def test_cms_responses_restore_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    cp.send_boot_notification(),
                     cp.send_meter_periodic_data(),
                 ),
                 timeout=3,
@@ -436,8 +439,9 @@ async def test_cms_responses_actions_v16(
         cp = ChargePoint(f"{cp_id}_client", ws)
         with contextlib.suppress(asyncio.TimeoutError):
             cp_task = asyncio.create_task(cp.start())
-            await asyncio.sleep(5)
-            # Allow charger time to connect bfore running services
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            # Confirm charger completed post_connect before running services
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.send_meter_clock_data(),
@@ -494,6 +498,7 @@ async def test_cms_responses_actions_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    cp.send_boot_notification(),
                     cp.send_start_transaction(0),
                     cp.send_meter_periodic_data(),
                     cp.send_main_meter_clock_data(),
@@ -526,6 +531,7 @@ async def test_cms_responses_actions_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.start(),
+                    cp.send_boot_notification(),
                     cp.send_start_transaction(0),
                     cp.send_meter_energy_kwh(),
                     cp.send_meter_clock_data(),
@@ -585,8 +591,9 @@ async def test_cms_responses_errors_v16(
             cp = ChargePoint(f"{cp_id}_client", ws)
             cp.accept = False
             cp_task = asyncio.create_task(cp.start())
-            await asyncio.sleep(5)
-            # Allow charger time to reconnect bfore running services
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            # Confirm charger completed post_connect before running services
             await asyncio.wait_for(
                 asyncio.gather(
                     cs.charge_points[cp_id].trigger_boot_notification(),
