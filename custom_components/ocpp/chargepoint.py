@@ -341,6 +341,11 @@ class ChargePoint(cp):
         self._metrics[cstat.latency_pong.value].unit = "ms"
         connection = self._connection
         timeout_counter = 0
+        # Add backstop to start post connect for non-compliant chargers
+        # after 10s to allow for when a boot notification has not been received
+        await asyncio.sleep(10)
+        if not self.post_connect_success:
+            self.hass.async_create_task(self.post_connect())
         while connection.state is State.OPEN:
             try:
                 await asyncio.sleep(self.cs_settings.websocket_ping_interval)
@@ -388,6 +393,7 @@ class ChargePoint(cp):
 
     async def start(self):
         """Start charge point."""
+        # post connect now handled on receiving boot notification or with backstop in monitor connection
         await self.run([super().start(), self.monitor_connection()])
 
     async def run(self, tasks):
@@ -424,10 +430,8 @@ class ChargePoint(cp):
         self.status = STATE_OK
         self._connection = connection
         self._metrics[cstat.reconnects.value].value += 1
-        if self.post_connect_success is True:
-            await self.run([super().start(), self.monitor_connection()])
-        else:
-            await self.run([super().start(), self.monitor_connection()])
+        # post connect now handled on receiving boot notification or with backstop in monitor connection
+        await self.run([super().start(), self.monitor_connection()])
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str
@@ -453,7 +457,8 @@ class ChargePoint(cp):
     def _register_boot_notification(self):
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
-            self.hass.async_create_task(self.post_connect())
+            if not self.post_connect_success:
+                self.hass.async_create_task(self.post_connect())
 
     async def update(self, cpid: str):
         """Update sensors values in HA."""
