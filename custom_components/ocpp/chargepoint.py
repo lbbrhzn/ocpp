@@ -224,7 +224,6 @@ class ChargePoint(cp):
 
         try:
             self.status = STATE_OK
-            await asyncio.sleep(2)
             await self.fetch_supported_features()
             num_connectors: int = await self.get_number_of_connectors()
             self._metrics[cdet.connectors.value].value = num_connectors
@@ -389,9 +388,7 @@ class ChargePoint(cp):
 
     async def start(self):
         """Start charge point."""
-        await self.run(
-            [super().start(), self.post_connect(), self.monitor_connection()]
-        )
+        await self.run([super().start(), self.monitor_connection()])
 
     async def run(self, tasks):
         """Run a specified list of tasks."""
@@ -430,9 +427,7 @@ class ChargePoint(cp):
         if self.post_connect_success is True:
             await self.run([super().start(), self.monitor_connection()])
         else:
-            await self.run(
-                [super().start(), self.post_connect(), self.monitor_connection()]
-            )
+            await self.run([super().start(), self.monitor_connection()])
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str
