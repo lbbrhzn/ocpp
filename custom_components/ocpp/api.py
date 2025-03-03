@@ -150,8 +150,8 @@ class CentralSystem:
         if self.settings.ssl:
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             # see https://community.home-assistant.io/t/certificate-authority-and-self-signed-certificate-for-ssl-tls/196970
-            localhost_certfile = self.settings.certfile
-            localhost_keyfile = self.settings.keyfile
+            localhost_certfile = self.settings.ssl_certfile_path
+            localhost_keyfile = self.settings.ssl_keyfile_path
             await self.hass.async_add_executor_job(
                 partial(
                     self.ssl_context.load_cert_chain,
