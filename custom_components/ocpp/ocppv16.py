@@ -232,6 +232,18 @@ class ChargePoint(cp):
                 break
         return return_value
 
+    async def trigger_custom_message(
+        self,
+        requested_message: str = "StatusNotification",
+    ):
+        """Trigger Custom Message."""
+        req = call.TriggerMessage(requested_message)
+        resp = await self.call(req)
+        if resp.status != TriggerMessageStatus.accepted:
+            _LOGGER.warning("Failed with response: %s", resp.status)
+            return False
+        return True
+
     async def clear_profile(self):
         """Clear all charging profiles."""
         req = call.ClearChargingProfile()
