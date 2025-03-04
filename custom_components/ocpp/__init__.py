@@ -180,7 +180,7 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             csid_data.update({key: old_data.get(key, value)})
 
         new_data = csid_data
-        cp_id = hass.states.get(f"sensor.{cpid_data[CONF_CPID]}_id")
+        cp_id = hass.states.get(f"sensor.{cpid_data[CONF_CPID].lower()}_id")
         if cp_id is None:
             _LOGGER.warning(
                 "Could not find charger id during migration, try a clean install"
