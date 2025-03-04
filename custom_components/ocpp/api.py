@@ -120,6 +120,11 @@ class CentralSystem:
         )
         self.hass.services.async_register(
             DOMAIN,
+            csvcs.service_trigger_custom_message.value,
+            self.trigger_custom_message,
+        )
+        self.hass.services.async_register(
+            DOMAIN,
             csvcs.service_clear_profile.value,
             self.handle_clear_profile,
         )
@@ -379,6 +384,12 @@ class CentralSystem:
         return wrapper
 
     # Define custom service handles for charge point
+    @check_charger_available
+    async def handle_trigger_custom_message(self, call, cp):
+        """Handle the message request with a custom message."""
+        requested_message = call.data.get("requested_message")
+        await cp.update_trigger_custom_message(requested_message)
+
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
