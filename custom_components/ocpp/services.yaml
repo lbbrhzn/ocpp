@@ -52,16 +52,16 @@ set_charge_rate:
       example: '{"chargingProfileId":8,"stackLevel":0,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16}]}}'
 
 trigger_custom_message:
-  name: Trigger Message  
-  description: Request a specific message from the charger  
-  fields:    
-   devid:
+  name: Trigger Message
+  description: Request a specific message from the charger
+  fields:
+    devid:
       name: Charger identifier
       description: Either HA charger id or Ocpp id
       required: false
       advanced: true
       example: charger
-   requested_message:
+    requested_message:
       name: Requested Message
       description: Message Requested from the charger
       required: true

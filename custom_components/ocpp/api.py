@@ -389,6 +389,13 @@ class CentralSystem:
         """Handle the message request with a custom message."""
         requested_message = call.data.get("requested_message")
         await cp.trigger_custom_message(requested_message)
+        if not requested_message:
+            _LOGGER.error("Missing required parameter: requested_message")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_parameter",
+                translation_placeholders={"message": "requested_message is required"},
+            )
 
     @check_charger_available
     async def handle_clear_profile(self, call, cp):

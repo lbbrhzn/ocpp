@@ -128,6 +128,8 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
             data.update({"vendor_id": "ABC"})
         if service == csvcs.service_set_charge_rate:
             data.update({"limit_amps": 30})
+        if service == csvcs.service_trigger_custom_message:
+            data.update({"requested_message:": "StatusNotification"})
 
         await hass.services.async_call(
             OCPP_DOMAIN,
