@@ -2,7 +2,7 @@ colorlog==6.9.0
 uv>=0.4
 ruff==0.9.9
 ocpp==2.0.0
-websockets==15.0
+websockets==15.0.1
 jsonschema==4.23.0
 pre-commit==4.1.0
 pytest-homeassistant-custom-component==0.13.220
