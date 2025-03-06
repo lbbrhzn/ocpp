@@ -80,6 +80,12 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Optional("custom_profile"): vol.Any(cv.string, dict),
     }
 )
+CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+        vol.Required("requested_message"): cv.string,
+    }
+)
 
 
 class CentralSystem:
@@ -122,6 +128,7 @@ class CentralSystem:
             DOMAIN,
             csvcs.service_trigger_custom_message.value,
             self.handle_trigger_custom_message,
+            CUSTMSG_SERVICE_DATA_SCHEMA,
         )
         self.hass.services.async_register(
             DOMAIN,

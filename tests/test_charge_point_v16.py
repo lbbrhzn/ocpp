@@ -69,6 +69,7 @@ SERVICES = [
 SERVICES_ERROR = [
     csvcs.service_configure,
     csvcs.service_get_configuration,
+    csvcs.service_trigger_custom_message,
     csvcs.service_clear_profile,
     csvcs.service_data_transfer,
     csvcs.service_set_charge_rate,
