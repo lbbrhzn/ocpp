@@ -5,6 +5,6 @@ ocpp==2.0.0
 websockets==15.0
 jsonschema==4.23.0
 pre-commit==4.1.0
-pytest-homeassistant-custom-component==0.13.219
+pytest-homeassistant-custom-component==0.13.220
 setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
 zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
