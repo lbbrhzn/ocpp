@@ -130,7 +130,7 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
         if service == csvcs.service_set_charge_rate:
             data.update({"limit_amps": 30})
         if service == csvcs.service_trigger_custom_message:
-            data.update({"requested_message:": "MeterValues"})
+            data.update({"requested_message:": "StatusNotification"})
 
         await hass.services.async_call(
             OCPP_DOMAIN,
@@ -161,6 +161,13 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
         OCPP_DOMAIN,
         csvcs.service_set_charge_rate,
         service_data=data,
+        blocking=True,
+    )
+    # test custom message request for MeterValues
+    await hass.services.async_call(
+        OCPP_DOMAIN,
+        csvcs.service_trigger_custom_message,
+        service_data={"devid": cpid, "requested_message": "MeterValues"},
         blocking=True,
     )
 
