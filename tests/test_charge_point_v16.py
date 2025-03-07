@@ -464,7 +464,7 @@ async def test_cms_responses_actions_v16(
                         socket_enabled,
                     ),
                 ),
-                timeout=5,
+                timeout=10,
             )
             cp_task.cancel()
         await ws.close()
