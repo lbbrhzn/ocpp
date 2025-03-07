@@ -134,6 +134,7 @@ DEFAULT_CLASS_UNITS_HA = {
     SensorDeviceClass.POWER: ha.UnitOfPower.KILO_WATT,
     SensorDeviceClass.REACTIVE_POWER: ha.UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
     SensorDeviceClass.ENERGY: ha.UnitOfEnergy.KILO_WATT_HOUR,
+    SensorDeviceClass.TEMPERATURE: ha.UnitOfTemperature.CELSIUS,
 }
 
 
