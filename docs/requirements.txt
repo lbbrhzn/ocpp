@@ -1,5 +1,5 @@
 myst-parser==3.0.1
 docutils==0.18.1
-Jinja2==3.1.5
+Jinja2==3.1.6
 sphinx==7.1.2
 sphinx_rtd_theme==3.0.2
