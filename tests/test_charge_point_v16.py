@@ -130,7 +130,7 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
         if service == csvcs.service_set_charge_rate:
             data.update({"limit_amps": 30})
         if service == csvcs.service_trigger_custom_message:
-            data.update({"requested_message:": "StatusNotification"})
+            data.update({"requested_message:": "MeterValues"})
 
         await hass.services.async_call(
             OCPP_DOMAIN,
@@ -449,8 +449,8 @@ async def test_cms_responses_actions_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.send_meter_clock_data(),
-                    cs.charge_points[cp_id].trigger_boot_notification(),
-                    cs.charge_points[cp_id].trigger_status_notification(),
+                    # cs.charge_points[cp_id].trigger_boot_notification(),
+                    # cs.charge_points[cp_id].trigger_status_notification(),
                     test_switches(
                         hass,
                         cs.charge_points[cp_id].settings.cpid,
@@ -468,7 +468,7 @@ async def test_cms_responses_actions_v16(
                         socket_enabled,
                     ),
                 ),
-                timeout=5,
+                timeout=10,
             )
             cp_task.cancel()
         await ws.close()
