@@ -163,7 +163,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             device_class = SensorDeviceClass.VOLTAGE
         elif self.metric.lower().startswith("energy.r"):
             device_class = None
-        elif self.metric.lower().startswith("energy."):
+        elif self.metric.lower().startswith("energy"):
             device_class = SensorDeviceClass.ENERGY
         elif self.metric in [
             Measurand.frequency,
@@ -174,9 +174,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             device_class = SensorDeviceClass.POWER
         elif self.metric.lower().startswith("power.r"):
             device_class = SensorDeviceClass.REACTIVE_POWER
-        elif self.metric.lower().startswith("temperature."):
+        elif self.metric.lower().startswith("temperature"):
             device_class = SensorDeviceClass.TEMPERATURE
-        elif self.metric.lower().startswith("timestamp.") or self.metric in [
+        elif self.metric.lower().startswith("timestamp") or self.metric in [
             HAChargerDetails.config_response.value,
             HAChargerDetails.data_response.value,
             HAChargerStatuses.heartbeat.value,

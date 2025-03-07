@@ -121,6 +121,9 @@ If the devices loses connection to Home Assistant (due to Wi-Fi disconnection or
 The Wallbox Pulsar and Copper SB have been verified.
 In the OCPP-config, leave the password field empty.
 
+## [ZJ Beny BCP-A2N-P](https://ultipower.com.au/products/zj-beny-home-charging-station-ac-7kw-32a-type-2-ocpp)
+Note that there are different models with similar model names, some of which support OCPP and some with other features.
+
 ## Others
 When a charger is not listed as a supported charger it simply means that it has not been reported to work. Whether it will work or not in practice really depends on whether it is compliant with the OCPP standard. Some vendors claim their device is compliant without bothering to do a compliance test, because that takes time and costs money!
 
