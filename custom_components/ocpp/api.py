@@ -80,6 +80,12 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Optional("custom_profile"): vol.Any(cv.string, dict),
     }
 )
+CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+        vol.Required("requested_message"): cv.string,
+    }
+)
 
 
 class CentralSystem:
@@ -117,6 +123,12 @@ class CentralSystem:
             csvcs.service_data_transfer.value,
             self.handle_data_transfer,
             TRANS_SERVICE_DATA_SCHEMA,
+        )
+        self.hass.services.async_register(
+            DOMAIN,
+            csvcs.service_trigger_custom_message.value,
+            self.handle_trigger_custom_message,
+            CUSTMSG_SERVICE_DATA_SCHEMA,
         )
         self.hass.services.async_register(
             DOMAIN,
@@ -379,6 +391,12 @@ class CentralSystem:
         return wrapper
 
     # Define custom service handles for charge point
+    @check_charger_available
+    async def handle_trigger_custom_message(self, call, cp):
+        """Handle the message request with a custom message."""
+        requested_message = call.data.get("requested_message")
+        await cp.trigger_custom_message(requested_message)
+
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
