@@ -14,8 +14,8 @@ jobs:
 
     - name: Update version in Manifest
       env:
-            GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-      run: |      
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      run: |
         VERSION=${GITHUB_REF#refs/tags/}
         MANIFEST=custom_components/ocpp/manifest.json
         jq --arg version "$VERSION" '.version = $version' $MANIFEST > tmp.json && mv tmp.json $MANIFEST
