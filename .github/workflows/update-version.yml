@@ -12,7 +12,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Update version in Manifest
+    - name: Update version in manifest.json and commit
       env:
         GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
       run: |
