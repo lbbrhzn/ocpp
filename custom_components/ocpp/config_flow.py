@@ -2,7 +2,6 @@
 
 from typing import Any
 from copy import deepcopy
-import logging
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -55,10 +54,6 @@ from .const import (
     DOMAIN,
     MEASURANDS,
 )
-
-
-_LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 STEP_USER_CS_DATA_SCHEMA = vol.Schema(
     {
@@ -169,8 +164,6 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     DEFAULT_MONITORED_VARIABLES
                 )
-                _LOGGER.error(f"****updating entry {self._entry.data} with {self._data}")
-                # self.hass.config_entries._async_schedule_save()
                 return self.async_update_reload_and_abort(
                     self._entry,
                     data_updates=self._data,
