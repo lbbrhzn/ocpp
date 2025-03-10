@@ -1,6 +1,8 @@
 """Adds config flow for ocpp."""
 
 from typing import Any
+from copy import deepcopy
+import logging
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -8,6 +10,8 @@ from homeassistant.config_entries import (
     CONN_CLASS_LOCAL_PUSH,
 )
 import voluptuous as vol
+
+
 
 from .const import (
     CONF_CPID,
@@ -51,6 +55,10 @@ from .const import (
     DOMAIN,
     MEASURANDS,
 )
+
+
+_LOGGER: logging.Logger = logging.getLogger(__package__)
+logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 STEP_USER_CS_DATA_SCHEMA = vol.Schema(
     {
@@ -140,6 +148,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._entry = discovery_info["entry"]
         self._cp_id = discovery_info["cp_id"]
         self._data = {**self._entry.data}
+        self._data = deepcopy(self._data)
 
         await self.async_set_unique_id(self._cp_id)
         # Abort the flow if a config entry with the same unique ID exists
@@ -154,16 +163,19 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Don't allow duplicate cpids to be used
-            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
+            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})            
             self._data[CONF_CPIDS].append({self._cp_id: user_input})
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     DEFAULT_MONITORED_VARIABLES
                 )
+                _LOGGER.error(f"****updating entry {self._entry.data} with {self._data}")
+                # self.hass.config_entries._async_schedule_save()
                 return self.async_update_reload_and_abort(
                     self._entry,
                     data_updates=self._data,
                 )
+                
             else:
                 return await self.async_step_measurands()
 
