@@ -1,6 +1,7 @@
 """Adds config flow for ocpp."""
 
 from typing import Any
+from copy import deepcopy
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -140,6 +141,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._entry = discovery_info["entry"]
         self._cp_id = discovery_info["cp_id"]
         self._data = {**self._entry.data}
+        self._data = deepcopy(self._data)
 
         await self.async_set_unique_id(self._cp_id)
         # Abort the flow if a config entry with the same unique ID exists
