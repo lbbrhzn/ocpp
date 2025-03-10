@@ -10,8 +10,6 @@ from homeassistant.config_entries import (
 )
 import voluptuous as vol
 
-
-
 from .const import (
     CONF_CPID,
     CONF_CPIDS,
@@ -158,7 +156,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Don't allow duplicate cpids to be used
-            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})            
+            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             self._data[CONF_CPIDS].append({self._cp_id: user_input})
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
@@ -167,8 +165,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_update_reload_and_abort(
                     self._entry,
                     data_updates=self._data,
-                )
-                
+                )                
             else:
                 return await self.async_step_measurands()
 
