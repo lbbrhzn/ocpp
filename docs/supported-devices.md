@@ -98,6 +98,24 @@ match transactions and it won't report some meter values such as session time.
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
+## [SyncEV Compact EVCP](https://sync.energy/support/instruction-manuals)
+These are a discontinued (but cheap) 7kw 1PH smart charger, with an OCPP implementation that's seemingly quite close to standard, and tolerent.
+Mine works well with the plugin, OCPP setup is done through the local AP-Wifi. The admin panel password is admin.
+A few plugin tweaks to get full functionality...
+   - Force SMART mode, to allow setting charge rates (use action ocpp.set_charge_rate) and retreiving meter values (use action ocpp.trigger_custom_message)
+   - Manually specify the Measurands
+      - Voltage
+      - Temperature
+      - Current.Offered
+      - Current.Import
+      - Power.Active.Import
+      - Energy.Active.Import.Register
+   - Create an automation triggering action: ocpp.trigger_custom_message with requested_message set to MeterValues on a schedule of your choice to retrieve the Measurands.
+   - Optionally create an automation updating the hearbeat interval (you have to set a value different to the one in the chargepoint) when the chargepoint reboots.
+   - I haven't tested using secure mode.
+   - If you have problems with charging profiles, check your firmware version is 1.6.3 (the latest in Mar 2025)
+   - Firmware updates can be done through the app, by reconnecting the charger to the original OCPP backend (wss://cpc.uk.charge.ampeco.tech:443/syncev/) and if it says you're on the latest, call them (+44 1952 983 940) to get it updated. 
+
 ## [Teison Smart MINI Wallbox](https://www.teison.com/ac_smart_mini_ev_wallbox.html)
 Use *My Teison* app to enable webSocket. In the socket URL field enter the address of your Home Assistant server including the port. In the socket port field enter *ocpp1.6* for insecure connection or *socpp1.6* for secure connection with certificates. Once enabled, charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
 
