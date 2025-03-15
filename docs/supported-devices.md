@@ -95,6 +95,8 @@ match transactions and it won't report some meter values such as session time.
 
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
+## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)
+
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
