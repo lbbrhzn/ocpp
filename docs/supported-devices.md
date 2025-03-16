@@ -131,7 +131,16 @@ Even though the device accepts all measurands, the working ones are
 If the devices loses connection to Home Assistant (due to Wi-Fi disconnection or update, for example) it doesn't seem to reconnect automatically. It is necessary to reboot the charger via Bluetooth for it to reconnect.
      
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)
-(has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
+
+Grizzl-E chargers with firmware 3.x.x work mostly without issue, such as the following:
+* Grizzl-E Mini Connect 2024
+* Grizzl-E Ultimate
+
+Known issue: In firmware 03.09.0 amperage changes are accepted but not applied. This is due to the firmware accepting but not handling a value of `ChargePointMaxProfile` in `ChargerProfilePurpose`. United Chargers has stated that this will be addressed in firmware version 03.11.0.
+
+Supported OCPP requests for the 3.x.x firmware are documented in a PDF on their site in under https://grizzl-e.com/connect-to-third-party-ocpp-backend/
+
+Other Grizzl-E chargers on the 5.x.x firmware have some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
 ## [V2C Trydan](https://v2charge.com/trydan)
 
