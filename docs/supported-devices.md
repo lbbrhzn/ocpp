@@ -54,7 +54,17 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 [Jonas Karlsson](https://github.com/jonasbkarlsson) has written a [getting started guide](https://github.com/jonasbkarlsson/ocpp/wiki/CTEK-Chargestorm-Connected-2) for connecting CTEK Chargestorm Connected 2.
 
 ## [EN+ Caro Series Home Wallbox](https://www.en-plustech.com/product/caro-series-wallbox/)
-Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant.  If required, re-configure this with the correct Charge point identity (by removing and re-adding the integration) to change from the default `charger` Charge point identity before configuring the charger.
+This charger is often white-labelled by other vendors, including [cord](https://www.cord-ev.com/cord-one.html) and [EV Switch](https://www.evswitchstore.com.au/pages/ev-charger-range).
+
+Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant if the OCPP integration does not discover your charger, and also to request a firmware update for versions earlier than 1.0.25.130. 
+
+For firmware versions earlier than 1.0.25.130 the only way you can update firmware is by connecting to the evchargo OCPP server at `wss://ocpp16.evchargo.com:33033/` and emailing your serial number to `support@en-plus.com.cn` requesting that your firmware is updated.
+
+You will probably want to update your firmware if it is earlier than 1.0.25.130 before configuring your charger to connect to your own OCPP server.
+
+Firmware 1.0.25.130 has a firmware update option on the configuration interface (on IP address 192.168.4.1) which you can access by power-cycling the charger and connecting to its access point (see below). 
+
+If you have already installed the OCPP integration and have the default `charger` charge point installed, then you will need to re-configure this with the correct charge point identity (by removing and re-adding the OCPP integration) to change from the default `charger` charge point identity before configuring the charger.
 
 Connect to the charger's access point (AP) by powering down the charger (i.e. switch off the charger's isolator or circuit breaker) and powering it back on a few seconds later.  The charger's access point becomes available for 15 minutes, and the SSID matches the charger's serial number (starting with SN).  Log in to the configuration interface on the IP address 192.168.4.1.
 
@@ -74,10 +84,10 @@ Even though the device accepts all measurands, the key working ones are
    - `Current.Import`
    - `Current.Offered`
    - `Energy.Active.Import.Register`
-   - `Voltage` - although this shows a constant voltage, so should be considered spurious.
+   - `Voltage` - although this shows a constant voltage or zero unless a charging session is in progress.
    - `Transaction.ID`
 
-You may wish to disable sensors that show Unknown after you've completed a charging session, as they will never provide data with the current firmware 1.4.859.
+You may wish to disable sensors that show `Unknown` after you've completed a charging session, as they will never provide data with the current firmware 1.0.25.130.
 
 ## [Etrel - Inch Pro](https://etrel.com/charging-solutions/inch-pro/)
 To allow a custom OCPP server such as HA to set up a transaction ID, it is necessary to set under Users > Charging Authorization the
