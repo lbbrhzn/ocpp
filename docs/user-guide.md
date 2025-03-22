@@ -132,7 +132,7 @@ ABB Terra AC firmware 1.8.21 and earlier versions fail to respond correctly when
 
 ### Grizzl-E
 
-Grizzl-E firmware has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
+Grizzl-E firmware 5.x has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Firmware 3.x.x on chargers such as the Mini Connect and Ultimate does not seem to have these issues. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
 
 The workaround consists of:
 - checking the *Skip OCPP schema validation* checkbox during OCPP server configuration
