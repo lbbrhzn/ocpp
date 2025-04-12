@@ -263,6 +263,13 @@ class ChargePoint(cp):
         """Trigger status notifications for all connectors."""
         pass
 
+    async def trigger_custom_message(
+        self,
+        requested_message: str = "StatusNotification",
+    ):
+        """Trigger message request with a custom message."""
+        pass
+
     async def clear_profile(self):
         """Clear all charging profiles."""
         pass
