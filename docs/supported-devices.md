@@ -54,7 +54,17 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 [Jonas Karlsson](https://github.com/jonasbkarlsson) has written a [getting started guide](https://github.com/jonasbkarlsson/ocpp/wiki/CTEK-Chargestorm-Connected-2) for connecting CTEK Chargestorm Connected 2.
 
 ## [EN+ Caro Series Home Wallbox](https://www.en-plustech.com/product/caro-series-wallbox/)
-Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant.  If required, re-configure this with the correct Charge point identity (by removing and re-adding the integration) to change from the default `charger` Charge point identity before configuring the charger.
+This charger is often white-labelled by other vendors, including [cord](https://www.cord-ev.com/cord-one.html) and [EV Switch](https://www.evswitchstore.com.au/pages/ev-charger-range).
+
+Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant if the OCPP integration does not discover your charger, and also to request a firmware update for versions earlier than 1.0.25.130. 
+
+For firmware versions earlier than 1.0.25.130 the only way you can update firmware is by connecting to the evchargo OCPP server at `wss://ocpp16.evchargo.com:33033/` and emailing your serial number to `support@en-plus.com.cn` requesting that your firmware is updated.
+
+You will probably want to update your firmware if it is earlier than 1.0.25.130 before configuring your charger to connect to your own OCPP server.
+
+Firmware 1.0.25.130 has a firmware update option on the configuration interface (on IP address 192.168.4.1) which you can access by power-cycling the charger and connecting to its access point (see below). 
+
+If you have already installed the OCPP integration and have the default `charger` charge point installed, then you will need to re-configure this with the correct charge point identity (by removing and re-adding the OCPP integration) to change from the default `charger` charge point identity before configuring the charger.
 
 Connect to the charger's access point (AP) by powering down the charger (i.e. switch off the charger's isolator or circuit breaker) and powering it back on a few seconds later.  The charger's access point becomes available for 15 minutes, and the SSID matches the charger's serial number (starting with SN).  Log in to the configuration interface on the IP address 192.168.4.1.
 
@@ -74,10 +84,10 @@ Even though the device accepts all measurands, the key working ones are
    - `Current.Import`
    - `Current.Offered`
    - `Energy.Active.Import.Register`
-   - `Voltage` - although this shows a constant voltage, so should be considered spurious.
+   - `Voltage` - although this shows a constant voltage or zero unless a charging session is in progress.
    - `Transaction.ID`
 
-You may wish to disable sensors that show Unknown after you've completed a charging session, as they will never provide data with the current firmware 1.4.859.
+You may wish to disable sensors that show `Unknown` after you've completed a charging session, as they will never provide data with the current firmware 1.0.25.130.
 
 ## [Etrel - Inch Pro](https://etrel.com/charging-solutions/inch-pro/)
 To allow a custom OCPP server such as HA to set up a transaction ID, it is necessary to set under Users > Charging Authorization the
@@ -95,8 +105,28 @@ match transactions and it won't report some meter values such as session time.
 
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
+## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)
+
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
+
+## [SyncEV Compact EVCP](https://sync.energy/support/instruction-manuals)
+These are a discontinued (but cheap) 7kw 1PH smart charger, with an OCPP implementation that's seemingly quite close to standard, and tolerent.
+Mine works well with the plugin, OCPP setup is done through the local AP-Wifi. The admin panel password is admin.
+A few plugin tweaks to get full functionality...
+   - Force SMART mode, to allow setting charge rates (use action ocpp.set_charge_rate) and retreiving meter values (use action ocpp.trigger_custom_message)
+   - Manually specify the Measurands
+      - Voltage
+      - Temperature
+      - Current.Offered
+      - Current.Import
+      - Power.Active.Import
+      - Energy.Active.Import.Register
+   - Create an automation triggering action: ocpp.trigger_custom_message with requested_message set to MeterValues on a schedule of your choice to retrieve the Measurands.
+   - Optionally create an automation updating the hearbeat interval (you have to set a value different to the one in the chargepoint) when the chargepoint reboots.
+   - I haven't tested using secure mode.
+   - If you have problems with charging profiles, check your firmware version is 1.6.3 (the latest in Mar 2025)
+   - Firmware updates can be done through the app, by reconnecting the charger to the original OCPP backend (wss://cpc.uk.charge.ampeco.tech:443/syncev/) and if it says you're on the latest, call them (+44 1952 983 940) to get it updated. 
 
 ## [Teison Smart MINI Wallbox](https://www.teison.com/ac_smart_mini_ev_wallbox.html)
 Use *My Teison* app to enable webSocket. In the socket URL field enter the address of your Home Assistant server including the port. In the socket port field enter *ocpp1.6* for insecure connection or *socpp1.6* for secure connection with certificates. Once enabled, charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
@@ -111,7 +141,16 @@ Even though the device accepts all measurands, the working ones are
 If the devices loses connection to Home Assistant (due to Wi-Fi disconnection or update, for example) it doesn't seem to reconnect automatically. It is necessary to reboot the charger via Bluetooth for it to reconnect.
      
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)
-(has some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
+
+Grizzl-E chargers with firmware 3.x.x work mostly without issue, such as the following:
+* Grizzl-E Mini Connect 2024
+* Grizzl-E Ultimate
+
+Known issue: In firmware 03.09.0 amperage changes are accepted but not applied. This is due to the firmware accepting but not handling a value of `ChargePointMaxProfile` in `ChargerProfilePurpose`. United Chargers has stated that this will be addressed in firmware version 03.11.0.
+
+Supported OCPP requests for the 3.x.x firmware are documented in a PDF on their site in under https://grizzl-e.com/connect-to-third-party-ocpp-backend/
+
+Other Grizzl-E chargers on the 5.x.x firmware have some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
 ## [V2C Trydan](https://v2charge.com/trydan)
 

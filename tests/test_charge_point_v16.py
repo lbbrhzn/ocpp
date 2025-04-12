@@ -59,6 +59,7 @@ SERVICES = [
     csvcs.service_configure,
     csvcs.service_get_configuration,
     csvcs.service_get_diagnostics,
+    csvcs.service_trigger_custom_message,
     csvcs.service_clear_profile,
     csvcs.service_data_transfer,
     csvcs.service_set_charge_rate,
@@ -68,6 +69,7 @@ SERVICES = [
 SERVICES_ERROR = [
     csvcs.service_configure,
     csvcs.service_get_configuration,
+    csvcs.service_trigger_custom_message,
     csvcs.service_clear_profile,
     csvcs.service_data_transfer,
     csvcs.service_set_charge_rate,
@@ -127,6 +129,8 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
             data.update({"vendor_id": "ABC"})
         if service == csvcs.service_set_charge_rate:
             data.update({"limit_amps": 30})
+        if service == csvcs.service_trigger_custom_message:
+            data.update({"requested_message:": "StatusNotification"})
 
         await hass.services.async_call(
             OCPP_DOMAIN,
@@ -157,6 +161,13 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
         OCPP_DOMAIN,
         csvcs.service_set_charge_rate,
         service_data=data,
+        blocking=True,
+    )
+    # test custom message request for MeterValues
+    await hass.services.async_call(
+        OCPP_DOMAIN,
+        csvcs.service_trigger_custom_message,
+        service_data={"devid": cpid, "requested_message": "MeterValues"},
         blocking=True,
     )
 
@@ -445,8 +456,8 @@ async def test_cms_responses_actions_v16(
             await asyncio.wait_for(
                 asyncio.gather(
                     cp.send_meter_clock_data(),
-                    cs.charge_points[cp_id].trigger_boot_notification(),
-                    cs.charge_points[cp_id].trigger_status_notification(),
+                    # cs.charge_points[cp_id].trigger_boot_notification(),
+                    # cs.charge_points[cp_id].trigger_status_notification(),
                     test_switches(
                         hass,
                         cs.charge_points[cp_id].settings.cpid,

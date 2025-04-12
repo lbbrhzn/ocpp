@@ -63,12 +63,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
         for ent in NUMBERS:
             if ent.key == "maximum_current":
-                ent.initial_value = entry.data.get(
-                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
-                )
-                ent.native_max_value = entry.data.get(
-                    CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT
-                )
+                ent.initial_value = cp_id_settings[CONF_MAX_CURRENT]
+                ent.native_max_value = cp_id_settings[CONF_MAX_CURRENT]
             cpx = ChargePointNumber(hass, central_system, cpid, ent)
             entities.append(cpx)
 
