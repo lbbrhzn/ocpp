@@ -548,7 +548,7 @@ async def test_cms_responses_actions_v16(
                     cp.send_meter_energy_kwh(),
                     cp.send_meter_clock_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(1),
+                    cp.send_stop_transaction(2),
                 ),
                 timeout=5,
             )
