@@ -528,7 +528,7 @@ async def test_cms_responses_actions_v16(
     assert cs.get_unit(cpid, "Energy.Active.Import.Register") == "kWh"
 
     # Last sent "Energy.Active.Import.Register" value with transaction id should be here.
-    # Meter value sent with stop transaction used to calculate session energy
+    # Meter value sent with stop transaction should not be used to calculate session energy
     assert int(cs.get_metric(cpid, "Energy.Session")) == int(1305570 / 1000)
     assert cs.get_unit(cpid, "Energy.Session") == "kWh"
 
