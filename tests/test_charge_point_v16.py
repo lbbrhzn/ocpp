@@ -514,7 +514,7 @@ async def test_cms_responses_actions_v16(
                     cp.send_meter_periodic_data(),
                     cp.send_main_meter_clock_data(),
                     # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(1),
+                    cp.send_stop_transaction(2),
                 ),
                 timeout=5,
             )
@@ -529,7 +529,7 @@ async def test_cms_responses_actions_v16(
 
     # Last sent "Energy.Active.Import.Register" value with transaction id should be here.
     # Meter value sent with stop transaction used to calculate session energy
-    assert int(cs.get_metric(cpid, "Energy.Session")) == int(54321 / 1000)
+    assert int(cs.get_metric(cpid, "Energy.Session")) == int(1305570 / 1000)
     assert cs.get_unit(cpid, "Energy.Session") == "kWh"
 
     # test ocpp messages sent from charger that don't support errata 3.9 with meter values with kWh as energy unit
