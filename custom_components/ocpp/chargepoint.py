@@ -117,6 +117,7 @@ class OcppVersion(str, Enum):
 
     V16 = "1.6"
     V201 = "2.0.1"
+    V21 = "2.1"
 
 
 class SetVariableResult(Enum):
@@ -162,6 +163,10 @@ class ChargePoint(cp):
             self._call = callv201
             self._call_result = call_resultv201
             self._ocpp_version = "2.0.1"
+        elif version == OcppVersion.V21:
+            self._call = callv201
+            self._call_result = call_resultv201
+            self._ocpp_version = "2.1"
 
         for action in self.route_map:
             self.route_map[action]["_skip_schema_validation"] = (

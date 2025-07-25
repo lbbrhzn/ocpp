@@ -105,7 +105,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
         result_disc["flow_id"], user_input=cp_input
     )
 
-    measurand_input = {value: True for value in DEFAULT_MONITORED_VARIABLES.split(",")}
+    measurand_input = dict.fromkeys(DEFAULT_MONITORED_VARIABLES.split(","), True)
     result_meas = await hass.config_entries.flow.async_configure(
         result_cp["flow_id"], user_input=measurand_input
     )
