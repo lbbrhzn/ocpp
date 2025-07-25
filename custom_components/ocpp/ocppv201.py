@@ -1,4 +1,4 @@
-"""Representation of a OCPP 2.0.1 charging station."""
+"""Representation of a OCPP 2.0.1 or 2.1 charging station."""
 
 import asyncio
 from datetime import datetime, UTC
@@ -38,7 +38,6 @@ from ocpp.v201.enums import (
 )
 
 from .chargepoint import (
-    OcppVersion,
     SetVariableResult,
     MeasurandValue,
 )
@@ -95,7 +94,7 @@ class ChargePoint(cp):
         super().__init__(
             id,
             connection,
-            OcppVersion.V201,
+            connection.subprotocol.replace("ocpp", ""),
             hass,
             entry,
             central,

@@ -1262,20 +1262,20 @@ async def test_cms_responses_v201(hass, socket_enabled):
         [lambda cp: _run_test(hass, cs, cp)],
     )
 
-    # add second charger to config entry
+    # add v2.1 charger to config entry
     entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
-    cp_id2 = "CP_2_allfeatures"
-    entry.data[CONF_CPIDS].append({cp_id2: MOCK_CONFIG_CP_APPEND.copy()})
-    entry.data[CONF_CPIDS][-1][cp_id2][CONF_CPID] = "test_v201_cpid2"
+    cp_id3 = "CP_2_1_allfeatures"
+    entry.data[CONF_CPIDS].append({cp_id3: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id3][CONF_CPID] = "test_v21_cpid3"
     # need to reload to setup sensors etc for new charger
     await hass.config_entries.async_reload(entry.entry_id)
     cs = hass.data[DOMAIN][entry.entry_id]
 
     await run_charge_point_test(
         config_entry,
-        cp_id2,
-        ["ocpp2.0.1"],
-        lambda ws: ChargePointAllFeatures("CP_2_allfeatures_client", ws),
+        cp_id3,
+        ["ocpp2.1"],
+        lambda ws: ChargePointAllFeatures("CP_2_1_allfeatures_client", ws),
         [lambda cp: _extra_features_test(hass, cs, cp)],
     )
 
