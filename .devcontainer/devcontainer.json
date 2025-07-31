@@ -72,7 +72,7 @@
                         "fileMatch": [
                             "homeassistant/components/*/manifest.json"
                         ],
-                        "url": "${containerWorkspaceFolder}/script/json_schemas/manifest_schema.json"
+                        "url": "${containerWorkspaceFolder}/scripts/json_schemas/manifest_schema.json"
                     }
                 ]
             }
