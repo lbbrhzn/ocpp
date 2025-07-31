@@ -35,29 +35,9 @@ RUN pip3 install uv==0.7.1
 
 WORKDIR /usr/src
 
-## Setup Home Assistant Core dependencies
-COPY requirements.txt homeassistant/
-COPY homeassistant/package_constraints.txt homeassistant/homeassistant/
 RUN \
     uv pip install \
-        --no-build \
-        -r homeassistant/requirements.txt
+        -r requirements.txt
 
-COPY requirements_all.txt home_assistant_frontend-* home_assistant_intents-* homeassistant/
-RUN \
-    if ls homeassistant/home_assistant_*.whl 1> /dev/null 2>&1; then \
-        uv pip install homeassistant/home_assistant_*.whl; \
-    fi \
-    && uv pip install \
-        --no-build \
-        -r homeassistant/requirements_all.txt
-
-## Setup Home Assistant Core
-COPY . homeassistant/
-RUN \
-    uv pip install \
-        -e ./homeassistant \
-    && python3 -m compileall \
-        homeassistant/homeassistant
 
 WORKDIR /config
