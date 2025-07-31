@@ -50,7 +50,7 @@ RUN git clone --depth 1 https://github.com/home-assistant/hass-release ~/hass-re
 
 # Install Python dependencies from requirements
 COPY requirements.txt ./
-RUN uv pip install -r requirements.txt
+RUN uv pip install --prerelease=allow -r requirements.txt
 
 WORKDIR /workspaces
 
