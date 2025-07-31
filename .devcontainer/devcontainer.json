@@ -3,7 +3,7 @@
     "context": "..",
     "dockerFile": "../Dockerfile.dev",
     "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && scripts/setup",
-    "postStartCommand": "script/bootstrap",
+    "postStartCommand": "scripts/bootstrap",
     "containerEnv": {
         "PYTHONASYNCIODEBUG": "1"
     },
