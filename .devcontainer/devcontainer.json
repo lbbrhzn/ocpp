@@ -11,10 +11,10 @@
         "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
         "ghcr.io/devcontainers/features/github-cli:1": {}
     },
-    // Port 5683 udp is used by Shelly integration
     "appPort": [
-        "8123:8123",
-        "5683:5683/udp"
+        "9000:9000", // OCPP
+        "8123:8123", // Home Assistant
+        "5683:5683/udp" // Shelly integration
     ],
     "runArgs": [
         "-e",
