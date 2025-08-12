@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 set -e
 
 cd "$(dirname "$0")/.."
@@ -7,18 +6,18 @@ cd "$(dirname "$0")/.."
 # Create config dir if not present
 if [[ ! -d "${PWD}/config" ]]; then
     mkdir -p "${PWD}/config"
-    hass --config "${PWD}/config" --script ensure_config
+    /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --script ensure_config
 fi
 
-# Create custom components dir if not present
-if [[ ! -d "${PWD}/config/custom_components" ]]; then
-    mkdir -p "${PWD}/config/custom_components"
-    hass --config "${PWD}/config" --script ensure_config
-fi
+# Ensure custom components dir exists
+mkdir -p "${PWD}/config/custom_components"
 
-# copy the ocpp integration
-rm -rf $PWD/config/custom_components/ocpp
-cp -r -l $PWD/custom_components/ocpp $PWD/config/custom_components/
+# Link the ocpp integration (overwrite if exists)
+ln -sfn "${PWD}/custom_components/ocpp" "${PWD}/config/custom_components/ocpp"
 
-# Start Home Assistant
-hass --config "${PWD}/config" --debug
+# Install debugpy if missing
+/home/vscode/.local/ha-venv/bin/python -m pip install --quiet debugpy || true
+
+# Start Home Assistant with debugger
+exec /home/vscode/.local/ha-venv/bin/python -m debugpy --listen 0.0.0.0:5678 \
+    -m homeassistant --config "${PWD}/config" --debug
