@@ -21,6 +21,7 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_MAX_CURRENT,
+    CONF_NUM_CONNECTORS,
     DATA_UPDATED,
     DEFAULT_MAX_CURRENT,
     DOMAIN,
@@ -34,6 +35,7 @@ class OcppNumberDescription(NumberEntityDescription):
     """Class to describe a Number entity."""
 
     initial_value: float | None = None
+    connector_id: int | None = None
 
 
 ELECTRIC_CURRENT_AMPERE = UnitOfElectricCurrent.AMPERE
@@ -54,20 +56,42 @@ NUMBERS: Final = [
 
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
-
     central_system = hass.data[DOMAIN][entry.entry_id]
     entities = []
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
-
-        for ent in NUMBERS:
-            if ent.key == "maximum_current":
-                ent.initial_value = cp_id_settings[CONF_MAX_CURRENT]
-                ent.native_max_value = cp_id_settings[CONF_MAX_CURRENT]
-            cpx = ChargePointNumber(hass, central_system, cpid, ent)
-            entities.append(cpx)
-
+        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
+        for connector_id in (
+            range(1, num_connectors + 1) if num_connectors > 1 else [None]
+        ):
+            for ent in NUMBERS:
+                if ent.key == "maximum_current":
+                    ent_initial = cp_id_settings[CONF_MAX_CURRENT]
+                    ent_max = cp_id_settings[CONF_MAX_CURRENT]
+                else:
+                    ent_initial = ent.initial_value
+                    ent_max = ent.native_max_value
+                name_suffix = f" Connector {connector_id}" if connector_id else ""
+                entities.append(
+                    ChargePointNumber(
+                        hass,
+                        central_system,
+                        cpid,
+                        OcppNumberDescription(
+                            key=ent.key,
+                            name=ent.name + name_suffix,
+                            icon=ent.icon,
+                            initial_value=ent_initial,
+                            native_min_value=ent.native_min_value,
+                            native_max_value=ent_max,
+                            native_step=ent.native_step,
+                            native_unit_of_measurement=ent.native_unit_of_measurement,
+                            connector_id=connector_id,
+                        ),
+                        connector_id=connector_id,
+                    )
+                )
     async_add_devices(entities, False)
 
 
@@ -83,19 +107,30 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         central_system: CentralSystem,
         cpid: str,
         description: OcppNumberDescription,
+        connector_id: int | None = None,
     ):
         """Initialize a Number instance."""
         self.cpid = cpid
         self._hass = hass
         self.central_system = central_system
         self.entity_description = description
-        self._attr_unique_id = ".".join(
-            [NUMBER_DOMAIN, self.cpid, self.entity_description.key]
-        )
+        self.connector_id = connector_id
+        parts = [NUMBER_DOMAIN, DOMAIN, cpid, description.key]
+        if self.connector_id:
+            parts.insert(3, f"conn{self.connector_id}")
+        self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cpid)},
-        )
+        if self.connector_id:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
+                name=f"{cpid} Connector {self.connector_id}",
+                via_device=(DOMAIN, cpid),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, cpid)},
+                name=cpid,
+            )
         self._attr_native_value = self.entity_description.initial_value
         self._attr_should_poll = False
         self._attr_available = True

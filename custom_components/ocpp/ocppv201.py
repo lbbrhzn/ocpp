@@ -78,7 +78,7 @@ class ChargePoint(cp):
     _inventory: InventoryReport | None = None
     _wait_inventory: asyncio.Event | None = None
     _connector_status: list[list[ConnectorStatusEnumType | None]] = []
-    _tx_start_time: datetime | None = None
+    _tx_start_time: dict[int, datetime]
 
     def __init__(
         self,
@@ -100,6 +100,7 @@ class ChargePoint(cp):
             central,
             charger,
         )
+        self._tx_start_time = {}
 
     async def async_update_device_info_v201(self, boot_info: dict):
         """Update device info asynchronuously."""
@@ -292,9 +293,14 @@ class ChargePoint(cp):
         return resp.status == RequestStartStopStatusEnumType.accepted.value
 
     async def stop_transaction(self) -> bool:
-        """Request remote stop of current transaction."""
+        """Request remote stop of current transaction (default EVSE 1)."""
+        tx_id = (
+            self._metrics[1][csess.transaction_id.value].value
+            if 1 in self._metrics
+            else ""
+        )
         req: call.RequestStopTransaction = call.RequestStopTransaction(
-            transaction_id=self._metrics[csess.transaction_id.value].value
+            transaction_id=tx_id
         )
         resp: call_result.RequestStopTransaction = await self.call(req)
         return resp.status == RequestStartStopStatusEnumType.accepted.value
@@ -404,13 +410,7 @@ class ChargePoint(cp):
 
     def _report_evse_status(self, evse_id: int, evse_status_v16: ChargePointStatusv16):
         evse_status_str: str = evse_status_v16.value
-
-        if evse_id == 1:
-            self._metrics[cstat.status_connector.value].value = evse_status_str
-        else:
-            self._metrics[cstat.status_connector.value].extra_attr[evse_id] = (
-                evse_status_str
-            )
+        self._metrics[evse_id][cstat.status_connector.value].value = evse_status_str
         self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
@@ -430,25 +430,21 @@ class ChargePoint(cp):
         evse_status: ConnectorStatusEnumType | None = None
         for status in evse:
             if status is None:
-                evse_status = status
+                evse_status = None
                 break
-            else:
-                evse_status = status
-                if status != ConnectorStatusEnumType.available:
-                    break
-        evse_status_v16: ChargePointStatusv16 | None
-        if evse_status is None:
-            evse_status_v16 = None
-        elif evse_status == ConnectorStatusEnumType.available:
-            evse_status_v16 = ChargePointStatusv16.available
-        elif evse_status == ConnectorStatusEnumType.faulted:
-            evse_status_v16 = ChargePointStatusv16.faulted
-        elif evse_status == ConnectorStatusEnumType.unavailable:
-            evse_status_v16 = ChargePointStatusv16.unavailable
-        else:
-            evse_status_v16 = ChargePointStatusv16.preparing
+            evse_status = status
+            if status != ConnectorStatusEnumType.available:
+                break
 
-        if evse_status_v16:
+        if evse_status is not None:
+            if evse_status == ConnectorStatusEnumType.available:
+                evse_status_v16 = ChargePointStatusv16.available
+            elif evse_status == ConnectorStatusEnumType.faulted:
+                evse_status_v16 = ChargePointStatusv16.faulted
+            elif evse_status == ConnectorStatusEnumType.unavailable:
+                evse_status_v16 = ChargePointStatusv16.unavailable
+            else:
+                evse_status_v16 = ChargePointStatusv16.preparing
             self._report_evse_status(evse_id, evse_status_v16)
 
         return call_result.StatusNotification()
@@ -545,7 +541,9 @@ class ChargePoint(cp):
             status = self.get_authorization_status(token)
         return call_result.Authorize(id_token_info={"status": status})
 
-    def _set_meter_values(self, tx_event_type: str, meter_values: list[dict]):
+    def _set_meter_values(
+        self, tx_event_type: str, meter_values: list[dict], evse_id: int
+    ):
         converted_values: list[list[MeasurandValue]] = []
         for meter_value in meter_values:
             measurands: list[MeasurandValue] = []
@@ -569,18 +567,18 @@ class ChargePoint(cp):
 
         if (tx_event_type == TransactionEventEnumType.started.value) or (
             (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[csess.meter_start].value is None)
+            and (self._metrics[evse_id][csess.meter_start].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
                 for measurand_item in meter_value:
                     if measurand_item.measurand == energy_measurand:
-                        energy_value = ChargePoint.get_energy_kwh(measurand_item)
+                        energy_value = cp.get_energy_kwh(measurand_item)
                         energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
-                        self._metrics[csess.meter_start].value = energy_value
-                        self._metrics[csess.meter_start].unit = energy_unit
+                        self._metrics[evse_id][csess.meter_start].value = energy_value
+                        self._metrics[evse_id][csess.meter_start].unit = energy_unit
 
-        self.process_measurands(converted_values, True)
+        self.process_measurands(converted_values, True, evse_id)
 
         if tx_event_type == TransactionEventEnumType.ended.value:
             measurands_in_tx: set[str] = set()
@@ -593,10 +591,10 @@ class ChargePoint(cp):
                 for measurand in self._inventory.tx_updated_measurands:
                     if (
                         (measurand not in measurands_in_tx)
-                        and (measurand in self._metrics)
+                        and (measurand in self._metrics[evse_id])
                         and not measurand.startswith("Energy")
                     ):
-                        self._metrics[measurand].value = 0
+                        self._metrics[evse_id][measurand].value = 0
 
     @on(Action.transaction_event)
     def on_transaction_event(
@@ -609,14 +607,14 @@ class ChargePoint(cp):
         **kwargs,
     ):
         """Perform OCPP callback."""
+        evse_id: int = kwargs["evse"]["id"] if "evse" in kwargs else 1
         offline: bool = kwargs.get("offline", False)
         meter_values: list[dict] = kwargs.get("meter_value", [])
-        self._set_meter_values(event_type, meter_values)
+        self._set_meter_values(event_type, meter_values, evse_id)
         t = datetime.fromisoformat(timestamp)
 
         if "charging_state" in transaction_info:
             state = transaction_info["charging_state"]
-            evse_id: int = kwargs["evse"]["id"] if "evse" in kwargs else 1
             evse_status_v16: ChargePointStatusv16 | None = None
             if state == ChargingStateEnumType.idle:
                 evse_status_v16 = ChargePointStatusv16.available
@@ -636,22 +634,24 @@ class ChargePoint(cp):
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
             id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
-            self._metrics[cstat.id_tag.value].value = id_tag_string
+            self._metrics[evse_id][cstat.id_tag.value].value = id_tag_string
 
         if event_type == TransactionEventEnumType.started.value:
-            self._tx_start_time = t
+            self._tx_start_time[evse_id] = t
             tx_id: str = transaction_info["transaction_id"]
-            self._metrics[csess.transaction_id.value].value = tx_id
-            self._metrics[csess.session_time].value = 0
-            self._metrics[csess.session_time].unit = UnitOfTime.MINUTES
+            self._metrics[evse_id][csess.transaction_id.value].value = tx_id
+            self._metrics[evse_id][csess.session_time].value = 0
+            self._metrics[evse_id][csess.session_time].unit = UnitOfTime.MINUTES
         else:
-            if self._tx_start_time:
-                duration_minutes: int = ((t - self._tx_start_time).seconds + 59) // 60
-                self._metrics[csess.session_time].value = duration_minutes
-                self._metrics[csess.session_time].unit = UnitOfTime.MINUTES
+            if self._tx_start_time.get(evse_id):
+                duration_minutes: int = (
+                    (t - self._tx_start_time[evse_id]).seconds + 59
+                ) // 60
+                self._metrics[evse_id][csess.session_time].value = duration_minutes
+                self._metrics[evse_id][csess.session_time].unit = UnitOfTime.MINUTES
             if event_type == TransactionEventEnumType.ended.value:
-                self._metrics[csess.transaction_id.value].value = ""
-                self._metrics[cstat.id_tag.value].value = ""
+                self._metrics[evse_id][csess.transaction_id.value].value = ""
+                self._metrics[evse_id][cstat.id_tag.value].value = ""
 
         if not offline:
             self.hass.async_create_task(self.update(self.settings.cpid))

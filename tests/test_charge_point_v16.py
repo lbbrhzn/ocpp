@@ -640,14 +640,100 @@ async def test_cms_responses_errors_v16(
         )
 
 
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9007, "cp_id": "CP_1_norm_mc", "cms": "cms_norm", "num_connectors": 2}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_norm_mc"])
+@pytest.mark.parametrize("port", [9007])
+async def test_cms_responses_normal_multiple_connectors_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test central system responses to a charger under normal operation with multiple connectors."""
+
+    cs = setup_config_entry
+    num_connectors = 2
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}",
+        subprotocols=["ocpp1.5", "ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=num_connectors)
+
+        tasks = [
+            cp.start(),
+            cp.send_boot_notification(),
+            cp.send_authorize(),
+            cp.send_heartbeat(),
+            cp.send_security_event(),
+            cp.send_firmware_status(),
+            cp.send_data_transfer(),
+            cp.send_status_for_all_connectors(),
+            cp.send_start_transaction(12345),
+        ]
+
+        for conn_id in range(1, num_connectors + 1):
+            tasks.extend(
+                [
+                    cp.send_meter_err_phases(connector_id=conn_id),
+                    cp.send_meter_line_voltage(connector_id=conn_id),
+                    cp.send_meter_periodic_data(connector_id=conn_id),
+                ]
+            )
+
+        tasks.append(cp.send_stop_transaction(1))
+
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+
+        await ws.close()
+
+    cpid = cs.charge_points[cp_id].settings.cpid
+
+    assert int(
+        cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+    ) == int(1305570 / 1000)
+    assert int(cs.get_metric(cpid, "Energy.Session", connector_id=1)) == int(
+        (54321 - 12345) / 1000
+    )
+    assert int(cs.get_metric(cpid, "Current.Import", connector_id=1)) == 0
+    # assert int(cs.get_metric(cpid, "Voltage")) == 228
+    assert cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1) == "kWh"
+    assert cs.get_ha_unit(cpid, "Power.Reactive.Import", connector_id=1) == "var"
+    assert cs.get_unit(cpid, "Power.Reactive.Import", connector_id=1) == "var"
+    assert cs.get_metric("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert cs.get_unit("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert cs.get_extra_attr("unknown_cpid", "Energy.Active.Import.Register") is None
+    assert int(cs.get_supported_features("unknown_cpid")) == 0
+    assert (
+        await asyncio.wait_for(
+            cs.set_max_charge_rate_amps("unknown_cpid", 0), timeout=1
+        )
+        is False
+    )
+    assert (
+        await asyncio.wait_for(
+            cs.set_charger_state("unknown_cpid", csvcs.service_clear_profile, False),
+            timeout=1,
+        )
+        is False
+    )
+
+
 class ChargePoint(cpclass):
     """Representation of real client Charge Point."""
 
-    def __init__(self, id, connection, response_timeout=30):
+    def __init__(self, id, connection, response_timeout=30, no_connectors=1):
         """Init extra variables for testing."""
         super().__init__(id, connection)
+        self.no_connectors = int(no_connectors)
         self.active_transactionId: int = 0
         self.accept: bool = True
+        self.task = None  # reused for background triggers
+        self._tasks: set[asyncio.Task] = set()
 
     @on(Action.get_configuration)
     def on_get_configuration(self, key, **kwargs):
@@ -672,7 +758,9 @@ class ChargePoint(cpclass):
             )
         if key[0] == ConfigurationKey.number_of_connectors.value:
             return call_result.GetConfiguration(
-                configuration_key=[{"key": key[0], "readonly": False, "value": "1"}]
+                configuration_key=[
+                    {"key": key[0], "readonly": False, "value": f"{self.no_connectors}"}
+                ]
             )
         if key[0] == ConfigurationKey.web_socket_ping_interval.value:
             if self.accept is True:
@@ -767,7 +855,7 @@ class ChargePoint(cpclass):
 
     @on(Action.reset)
     def on_reset(self, **kwargs):
-        """Handle change availability request."""
+        """Handle reset request."""
         if self.accept is True:
             return call_result.Reset(ResetStatus.accepted)
         else:
@@ -807,12 +895,34 @@ class ChargePoint(cpclass):
             return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
     @on(Action.trigger_message)
-    def on_trigger_message(self, **kwargs):
+    def on_trigger_message(self, requested_message, **kwargs):
         """Handle trigger message request."""
-        if self.accept is True:
-            return call_result.TriggerMessage(TriggerMessageStatus.accepted)
-        else:
+        if not self.accept:
             return call_result.TriggerMessage(TriggerMessageStatus.rejected)
+
+        resp = call_result.TriggerMessage(TriggerMessageStatus.accepted)
+
+        try:
+            from ocpp.v16.enums import (
+                MessageTrigger,
+            )
+
+            connector_id = kwargs.get("connector_id")
+            if requested_message == MessageTrigger.status_notification:
+                if connector_id in (None, 0):
+                    task = asyncio.create_task(self.send_status_for_all_connectors())
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
+                else:
+                    task = asyncio.create_task(
+                        self.send_status_notification(connector_id)
+                    )
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
+        except Exception:
+            pass
+
+        return resp
 
     @on(Action.update_firmware)
     def on_update_firmware(self, **kwargs):
@@ -886,49 +996,40 @@ class ChargePoint(cpclass):
         self.active_transactionId = resp.transaction_id
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
 
-    async def send_status_notification(self):
-        """Send a status notification."""
+    async def send_status_notification(self, connector_id: int = 0):
+        """Send one StatusNotification for a specific connector."""
+        # Connector 0 = CP-level
+        if connector_id == 0:
+            status = ChargePointStatus.suspended_ev
+        elif connector_id == 1:
+            status = ChargePointStatus.charging
+        else:
+            status = ChargePointStatus.available
+
         request = call.StatusNotification(
-            connector_id=0,
+            connector_id=connector_id,
             error_code=ChargePointErrorCode.no_error,
-            status=ChargePointStatus.suspended_ev,
+            status=status,
             timestamp=datetime.now(tz=UTC).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
             vendor_error_code="Test error",
         )
-        resp = await self.call(request)
-        request = call.StatusNotification(
-            connector_id=1,
-            error_code=ChargePointErrorCode.no_error,
-            status=ChargePointStatus.charging,
-            timestamp=datetime.now(tz=UTC).isoformat(),
-            info="Test info",
-            vendor_id="The Mobility House",
-            vendor_error_code="Test error",
-        )
-        resp = await self.call(request)
-        request = call.StatusNotification(
-            connector_id=2,
-            error_code=ChargePointErrorCode.no_error,
-            status=ChargePointStatus.available,
-            timestamp=datetime.now(tz=UTC).isoformat(),
-            info="Test info",
-            vendor_id="The Mobility House",
-            vendor_error_code="Available",
-        )
-        resp = await self.call(request)
+        await self.call(request)
 
-        assert resp is not None
+    async def send_status_for_all_connectors(self):
+        """Send StatusNotification for 0..no_connectors."""
+        for cid in range(0, max(1, self.no_connectors) + 1):
+            await self.send_status_notification(cid)
 
-    async def send_meter_periodic_data(self):
-        """Send periodic meter data notification."""
+    async def send_meter_periodic_data(self, connector_id: int = 1):
+        """Send periodic meter data notification for a given connector."""
         n = 0
         while self.active_transactionId == 0 and n < 2:
             await asyncio.sleep(1)
             n += 1
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             transaction_id=self.active_transactionId,
             meter_value=[
                 {
@@ -1067,12 +1168,12 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_meter_line_voltage(self):
-        """Send line voltages."""
+    async def send_meter_line_voltage(self, connector_id: int = 1):
+        """Send line voltages for a given connector."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             transaction_id=self.active_transactionId,
             meter_value=[
                 {
@@ -1109,12 +1210,12 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_meter_err_phases(self):
-        """Send erroneous voltage phase."""
+    async def send_meter_err_phases(self, connector_id: int = 1):
+        """Send erroneous voltage phase for a given connector."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             transaction_id=self.active_transactionId,
             meter_value=[
                 {
@@ -1143,12 +1244,12 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_meter_energy_kwh(self):
-        """Send periodic energy meter value with kWh unit."""
+    async def send_meter_energy_kwh(self, connector_id: int = 1):
+        """Send periodic energy meter value with kWh unit for a given connector."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             transaction_id=self.active_transactionId,
             meter_value=[
                 {
@@ -1168,12 +1269,12 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_main_meter_clock_data(self):
-        """Send periodic main meter value. Main meter values dont have transaction_id."""
+    async def send_main_meter_clock_data(self, connector_id: int = 1):
+        """Send periodic main meter value (no transaction_id) for a given connector."""
         while self.active_transactionId == 0:
             await asyncio.sleep(1)
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             meter_value=[
                 {
                     "timestamp": "2021-06-21T16:15:09Z",
@@ -1192,11 +1293,11 @@ class ChargePoint(cpclass):
         resp = await self.call(request)
         assert resp is not None
 
-    async def send_meter_clock_data(self):
-        """Send periodic meter data notification."""
+    async def send_meter_clock_data(self, connector_id: int = 1):
+        """Send periodic meter data (clock) for a given connector."""
         self.active_transactionId = 0
         request = call.MeterValues(
-            connector_id=1,
+            connector_id=connector_id,
             transaction_id=self.active_transactionId,
             meter_value=[
                 {

@@ -22,6 +22,7 @@ from .api import CentralSystem
 from .const import (
     CONF_CPID,
     CONF_CPIDS,
+    CONF_NUM_CONNECTORS,
     DATA_UPDATED,
     DEFAULT_CLASS_UNITS_HA,
     DOMAIN,
@@ -46,6 +47,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
+        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
+
         SENSORS = []
         for metric in list(
             set(
@@ -70,14 +73,38 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 )
             )
 
-        for ent in SENSORS:
-            cpx = ChargePointMetric(
-                hass,
-                central_system,
-                cpid,
-                ent,
-            )
-            entities.append(cpx)
+        if num_connectors > 1:
+            for conn_id in range(1, num_connectors + 1):
+                name_suffix = f" Connector {conn_id}"
+                for ent in SENSORS:
+                    entities.append(
+                        ChargePointMetric(
+                            hass,
+                            central_system,
+                            cpid,
+                            OcppSensorDescription(
+                                key=ent.key,
+                                name=ent.name + name_suffix,
+                                metric=ent.metric,
+                                icon=ent.icon,
+                                device_class=ent.device_class,
+                                state_class=ent.state_class,
+                                entity_category=ent.entity_category,
+                            ),
+                            connector_id=conn_id,
+                        )
+                    )
+        else:
+            for ent in SENSORS:
+                entities.append(
+                    ChargePointMetric(
+                        hass,
+                        central_system,
+                        cpid,
+                        ent,
+                        connector_id=None,
+                    )
+                )
 
     async_add_devices(entities, False)
 
@@ -94,22 +121,33 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         central_system: CentralSystem,
         cpid: str,
         description: OcppSensorDescription,
+        connector_id: int | None = None,
     ):
         """Instantiate instance of a ChargePointMetrics."""
         self.central_system = central_system
         self.cpid = cpid
         self.entity_description = description
         self.metric = self.entity_description.metric
+        self.connector_id = connector_id
         self._hass = hass
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
-        self._attr_unique_id = ".".join(
-            [DOMAIN, self.cpid, self.entity_description.key, SENSOR_DOMAIN]
-        )
+        parts = [DOMAIN, self.cpid, self.entity_description.key, SENSOR_DOMAIN]
+        if self.connector_id:
+            parts.insert(2, f"conn{self.connector_id}")
+        self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cpid)},
-        )
+        if self.connector_id:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
+                name=f"{cpid} Connector {self.connector_id}",
+                via_device=(DOMAIN, cpid),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, cpid)},
+                name=cpid,
+            )
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
 

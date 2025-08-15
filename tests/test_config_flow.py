@@ -15,6 +15,7 @@ from .const import (
     MOCK_CONFIG_FLOW,
     CONF_CPIDS,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    CONF_NUM_CONNECTORS,
     DEFAULT_MONITORED_VARIABLES,
 )
 
@@ -116,6 +117,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = (
         False
     )
+    flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_NUM_CONNECTORS] = 1
     assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
     assert entry.data == flow_output

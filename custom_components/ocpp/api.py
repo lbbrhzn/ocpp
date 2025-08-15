@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import ssl
@@ -28,6 +29,7 @@ from .const import (
 )
 from .enums import (
     HAChargerServices as csvcs,
+    HAChargerStatuses as cstat,
 )
 from .chargepoint import SetVariableResult
 
@@ -273,59 +275,93 @@ class CentralSystem:
             charge_point = self.charge_points[cp_id]
             await charge_point.reconnect(websocket)
 
-    def get_metric(self, id: str, measurand: str):
+    def get_metric(self, id: str, measurand: str, connector_id: int = 1):
         """Return last known value for given measurand."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
 
-        if cp_id in self.charge_points:
-            return self.charge_points[cp_id]._metrics[measurand].value
-        return None
+        if cp_id not in self.charge_points:
+            return None
 
-    def del_metric(self, id: str, measurand: str):
+        m = self.charge_points[cp_id]._metrics
+        try:
+            return m[connector_id][measurand].value
+        except Exception:
+            return None
+
+    def del_metric(self, id: str, measurand: str, connector_id: int = 1):
         """Set given measurand to None."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
+        if cp_id not in self.charge_points:
+            return None
 
-        if self.cpids.get(cp_id) in self.charge_points:
-            self.charge_points[cp_id]._metrics[measurand].value = None
+        m = self.charge_points[cp_id]._metrics
+        m[connector_id][measurand].value = None
         return None
 
-    def get_unit(self, id: str, measurand: str):
+    def get_unit(self, id: str, measurand: str, connector_id: int = 1):
         """Return unit of given measurand."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
+        if cp_id not in self.charge_points:
+            return None
 
-        if cp_id in self.charge_points:
-            return self.charge_points[cp_id]._metrics[measurand].unit
-        return None
+        m = self.charge_points[cp_id]._metrics
+        return m[connector_id][measurand].unit
 
-    def get_ha_unit(self, id: str, measurand: str):
+    def get_ha_unit(self, id: str, measurand: str, connector_id: int = 1):
         """Return home assistant unit of given measurand."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
 
-        if cp_id in self.charge_points:
-            return self.charge_points[cp_id]._metrics[measurand].ha_unit
-        return None
+        if cp_id not in self.charge_points:
+            return None
 
-    def get_extra_attr(self, id: str, measurand: str):
+        m = self.charge_points[cp_id]._metrics
+        return m[connector_id][measurand].ha_unit
+
+    def get_extra_attr(self, id: str, measurand: str, connector_id: int = 1):
         """Return last known extra attributes for given measurand."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
+        if cp_id not in self.charge_points:
+            return None
 
-        if cp_id in self.charge_points:
-            return self.charge_points[cp_id]._metrics[measurand].extra_attr
-        return None
+        m = self.charge_points[cp_id]._metrics
+        return m[connector_id][measurand].extra_attr
 
-    def get_available(self, id: str):
-        """Return whether the charger is available."""
+    def get_available(self, id: str, connector_id: int | None = None):
+        """Return whether the charger (or a specific connector) is available."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
+        if cp_id not in self.charge_points:
+            return False
 
-        if cp_id in self.charge_points:
-            return self.charge_points[cp_id].status == STATE_OK
-        return False
+        cp = self.charge_points[cp_id]
+
+        if connector_id is None or connector_id == 0:
+            return cp.status == STATE_OK
+
+        m = cp._metrics
+        status_val = None
+        with contextlib.suppress(Exception):
+            status_val = m[connector_id][cstat.status_connector.value].value
+
+        if not status_val:
+            try:
+                flat = m[cstat.status_connector.value]
+                if hasattr(flat, "extra_attr"):
+                    status_val = flat.extra_attr.get(connector_id) or getattr(
+                        flat, "value", None
+                    )
+            except Exception:
+                pass
+
+        if not status_val:
+            return cp.status == STATE_OK
+
+        return str(status_val).lower() in ("available", "preparing", "charging")
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""

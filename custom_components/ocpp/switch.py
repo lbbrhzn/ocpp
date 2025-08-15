@@ -15,7 +15,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
-from .const import CONF_CPID, CONF_CPIDS, DOMAIN, ICON
+from .const import CONF_CPID, CONF_CPIDS, CONF_NUM_CONNECTORS, DOMAIN, ICON
 from .enums import HAChargerServices, HAChargerStatuses
 
 
@@ -66,13 +66,22 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the switch platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     entities = []
+
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
+        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
 
         for ent in SWITCHES:
-            cpx = ChargePointSwitch(central_system, cpid, ent)
-            entities.append(cpx)
+            if ent.metric_state and num_connectors > 1:
+                for conn_id in range(1, num_connectors + 1):
+                    entities.append(
+                        ChargePointSwitch(
+                            central_system, cpid, ent, connector_id=conn_id
+                        )
+                    )
+            else:
+                entities.append(ChargePointSwitch(central_system, cpid, ent))
 
     async_add_devices(entities, False)
 
@@ -88,19 +97,30 @@ class ChargePointSwitch(SwitchEntity):
         central_system: CentralSystem,
         cpid: str,
         description: OcppSwitchDescription,
+        connector_id: int | None = None,
     ):
         """Instantiate instance of a ChargePointSwitch."""
         self.cpid = cpid
         self.central_system = central_system
         self.entity_description = description
+        self.connector_id = connector_id
         self._state = self.entity_description.default_state
-        self._attr_unique_id = ".".join(
-            [SWITCH_DOMAIN, DOMAIN, self.cpid, self.entity_description.key]
-        )
+        parts = [SWITCH_DOMAIN, DOMAIN, cpid, description.key]
+        if self.connector_id:
+            parts.insert(3, f"conn{self.connector_id}")
+        self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.cpid)},
-        )
+        if self.connector_id:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
+                name=f"{cpid} Connector {self.connector_id}",
+                via_device=(DOMAIN, cpid),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, cpid)},
+                name=cpid,
+            )
 
     @property
     def available(self) -> bool:
