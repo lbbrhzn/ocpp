@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 import homeassistant
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
@@ -42,66 +41,96 @@ class OcppSensorDescription(SensorEntityDescription):
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    entities = []
+    entities: list[ChargePointMetric] = []
     # setup all chargers added to config
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
 
-        SENSORS = []
-        for metric in list(
+        measurands = list(
             set(
                 cp_id_settings[CONF_MONITORED_VARIABLES].split(",")
                 + list(HAChargerSession)
             )
-        ):
-            SENSORS.append(
-                OcppSensorDescription(
-                    key=metric.lower(),
-                    name=metric.replace(".", " "),
-                    metric=metric,
-                )
+        )
+
+        CHARGER_ONLY = [
+            HAChargerStatuses.status.value,
+            HAChargerStatuses.error_code.value,
+            HAChargerStatuses.heartbeat.value,
+            HAChargerStatuses.latency_ping.value,
+            HAChargerStatuses.latency_pong.value,
+            HAChargerStatuses.reconnects.value,
+            HAChargerDetails.vendor.value,
+            HAChargerDetails.model.value,
+            HAChargerDetails.serial.value,
+            HAChargerDetails.firmware_version.value,
+            HAChargerDetails.features.value,
+            HAChargerDetails.connectors.value,
+            HAChargerDetails.config_response.value,
+            HAChargerDetails.data_response.value,
+        ]
+
+        CONNECTOR_ONLY = measurands + [
+            HAChargerStatuses.status_connector.value,
+            HAChargerStatuses.error_code_connector.value,
+        ]
+
+        def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
+            return OcppSensorDescription(
+                key=metric.lower(),
+                name=metric.replace(".", " "),
+                metric=metric,
+                entity_category=EntityCategory.DIAGNOSTIC if cat_diag else None,
             )
-        for metric in list(HAChargerStatuses) + list(HAChargerDetails):
-            SENSORS.append(
-                OcppSensorDescription(
-                    key=metric.lower(),
-                    name=metric.replace(".", " "),
-                    metric=metric,
-                    entity_category=EntityCategory.DIAGNOSTIC,
+
+        # Root/charger-entities
+        for metric in CHARGER_ONLY:
+            entities.append(
+                ChargePointMetric(
+                    hass,
+                    central_system,
+                    cpid,
+                    _mk_desc(metric, cat_diag=True),
+                    connector_id=None,
                 )
             )
 
         if num_connectors > 1:
             for conn_id in range(1, num_connectors + 1):
-                name_suffix = f" Connector {conn_id}"
-                for ent in SENSORS:
+                for metric in CONNECTOR_ONLY:
                     entities.append(
                         ChargePointMetric(
                             hass,
                             central_system,
                             cpid,
-                            OcppSensorDescription(
-                                key=ent.key,
-                                name=ent.name + name_suffix,
-                                metric=ent.metric,
-                                icon=ent.icon,
-                                device_class=ent.device_class,
-                                state_class=ent.state_class,
-                                entity_category=ent.entity_category,
+                            _mk_desc(
+                                metric,
+                                cat_diag=metric
+                                in [
+                                    HAChargerStatuses.status_connector.value,
+                                    HAChargerStatuses.error_code_connector.value,
+                                ],
                             ),
                             connector_id=conn_id,
                         )
                     )
         else:
-            for ent in SENSORS:
+            for metric in CONNECTOR_ONLY:
                 entities.append(
                     ChargePointMetric(
                         hass,
                         central_system,
                         cpid,
-                        ent,
+                        _mk_desc(
+                            metric,
+                            cat_diag=metric
+                            in [
+                                HAChargerStatuses.status_connector.value,
+                                HAChargerStatuses.error_code_connector.value,
+                            ],
+                        ),
                         connector_id=None,
                     )
                 )
@@ -148,26 +177,29 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
                 identifiers={(DOMAIN, cpid)},
                 name=cpid,
             )
+
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
 
     @property
     def available(self) -> bool:
         """Return if sensor is available."""
-        return self.central_system.get_available(self.cpid)
+        return self.central_system.get_available(self.cpid, self.connector_id)
 
     @property
-    def should_poll(self):
+    def should_poll(self) -> bool:
         """Return True if entity has to be polled for state.
 
         False if entity pushes its state to HA.
         """
-        return True
+        return False
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        return self.central_system.get_extra_attr(self.cpid, self.metric)
+        return self.central_system.get_extra_attr(
+            self.cpid, self.metric, self.connector_id
+        )
 
     @property
     def state_class(self):
@@ -227,7 +259,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor, rounding if a number."""
-        value = self.central_system.get_metric(self.cpid, self.metric)
+        value = self.central_system.get_metric(
+            self.cpid, self.metric, self.connector_id
+        )
         if value is not None:
             self._attr_native_value = value
         return self._attr_native_value
@@ -235,7 +269,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     @property
     def native_unit_of_measurement(self):
         """Return the native unit of measurement."""
-        value = self.central_system.get_ha_unit(self.cpid, self.metric)
+        value = self.central_system.get_ha_unit(
+            self.cpid, self.metric, self.connector_id
+        )
         if value is not None:
             self._attr_native_unit_of_measurement = value
         else:
@@ -254,6 +290,8 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         async_dispatcher_connect(
             self._hass, DATA_UPDATED, self._schedule_immediate_update
         )
+
+        self.async_schedule_update_ha_state(True)
 
     @callback
     def _schedule_immediate_update(self):

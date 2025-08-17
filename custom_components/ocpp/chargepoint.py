@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
 from homeassistant.helpers import device_registry, entity_component, entity_registry
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
@@ -54,6 +55,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_CPIDS,
     CONFIG,
+    DATA_UPDATED,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
@@ -325,6 +327,12 @@ class ChargePoint(cp):
             await self.fetch_supported_features()
             num_connectors: int = await self.get_number_of_connectors()
             self.num_connectors = num_connectors
+            for conn in range(1, self.num_connectors + 1):
+                _ = self._metrics[(conn, cstat.status_connector.value)]
+                _ = self._metrics[(conn, cstat.error_code_connector.value)]
+                _ = self._metrics[(conn, csess.session_energy.value)]
+                _ = self._metrics[(conn, csess.meter_start.value)]
+                _ = self._metrics[(conn, csess.transaction_id.value)]
             self._metrics[(0, cdet.connectors.value)].value = num_connectors
             await self.get_heartbeat_interval()
 
@@ -566,17 +574,37 @@ class ChargePoint(cp):
                 self.hass.async_create_task(self.post_connect())
 
     async def update(self, cpid: str):
-        """Update sensors values in HA."""
+        """Update sensors values in HA (charger + connector child devices)."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
         identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
-        dev = dr.async_get_device(identifiers)
-        # _LOGGER.info("Device id: %s updating", dev.name)
-        for ent in entity_registry.async_entries_for_device(er, dev.id):
-            # _LOGGER.info("Entity id: %s updating", ent.entity_id)
-            self.hass.async_create_task(
-                entity_component.async_update_entity(self.hass, ent.entity_id)
-            )
+        root_dev = dr.async_get_device(identifiers)
+        if root_dev is None:
+            return
+
+        to_visit = [root_dev.id]
+        visited = set()
+        updated_entities = 0
+        found_children = 0
+
+        while to_visit:
+            dev_id = to_visit.pop(0)
+            if dev_id in visited:
+                continue
+            visited.add(dev_id)
+
+            for ent in entity_registry.async_entries_for_device(er, dev_id):
+                self.hass.async_create_task(
+                    entity_component.async_update_entity(self.hass, ent.entity_id)
+                )
+                updated_entities += 1
+
+            for dev in dr.devices.values():
+                if dev.via_device_id == dev_id and dev.id not in visited:
+                    found_children += 1
+                    to_visit.append(dev.id)
+
+        async_dispatcher_send(self.hass, DATA_UPDATED)
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
@@ -676,13 +704,6 @@ class ChargePoint(cp):
 
             if metric_value is not None:
                 metric_unit = phase_info.get(om.unit.value)
-                _LOGGER.debug(
-                    "process_phases: metric: %s, phase_info: %s value: %f unit :%s",
-                    metric,
-                    phase_info,
-                    metric_value,
-                    metric_unit,
-                )
                 if metric_unit == DEFAULT_POWER_UNIT:
                     self._metrics[(connector_id, metric)].value = metric_value / 1000
                     self._metrics[(connector_id, metric)].unit = HA_POWER_UNIT
@@ -734,8 +755,10 @@ class ChargePoint(cp):
                     value = value / 1000
                     unit = HA_POWER_UNIT
 
-                if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
-                    # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
+                if self._metrics[(connector_id, csess.meter_start.value)].value in (
+                    0,
+                    None,
+                ):
                     self._charger_reports_session_energy = True
 
                 if phase is None:
@@ -805,25 +828,52 @@ class ChargePoint(cp):
 
     def get_metric(self, measurand: str, connector_id: int = 0):
         """Return last known value for given measurand."""
-        return self._metrics[(connector_id, measurand)].value
+        val = self._metrics[(connector_id, measurand)].value
+        if val is not None:
+            return val
 
-    def get_ha_metric(self, measurand: str):
-        """Return last known value in HA for given measurand."""
-        entity_id = "sensor." + "_".join(
-            [self.settings.cpid.lower(), measurand.lower().replace(".", "_")]
-        )
-        try:
-            value = self.hass.states.get(entity_id).state
-        except Exception as e:
-            _LOGGER.debug(f"An error occurred when getting entity state from HA: {e}")
-            return None
-        if value == STATE_UNAVAILABLE or value == STATE_UNKNOWN:
-            return None
-        return value
+        if connector_id and connector_id > 0:
+            if measurand == cstat.status_connector.value:
+                agg = self._metrics[(0, cstat.status_connector.value)]
+                return agg.extra_attr.get(connector_id, agg.value)
+            if measurand == cstat.error_code_connector.value:
+                agg = self._metrics[(0, cstat.error_code_connector.value)]
+                return agg.extra_attr.get(connector_id, agg.value)
+
+        return None
+
+    def get_ha_metric(self, measurand: str, connector_id: int | None = None):
+        """Return last known value in HA for given measurand, or None if not available."""
+        base = self.settings.cpid.lower()
+        meas_slug = measurand.lower().replace(".", "_")
+
+        candidates: list[str] = []
+        if connector_id and connector_id > 0:
+            candidates.append(f"sensor.{base}_connector_{connector_id}_{meas_slug}")
+        else:
+            candidates.append(f"sensor.{base}_{meas_slug}")
+
+        for entity_id in candidates:
+            st = self.hass.states.get(entity_id)
+            if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN, None):
+                return st.state
+        return None
 
     def get_extra_attr(self, measurand: str, connector_id: int = 0):
         """Return extra attributes for given measurand (per connector)."""
-        return self._metrics[(connector_id, measurand)].extra_attr
+        attrs = self._metrics[(connector_id, measurand)].extra_attr
+        if attrs:
+            return attrs
+
+        if connector_id and connector_id > 0:
+            if measurand in (
+                cstat.status_connector.value,
+                cstat.error_code_connector.value,
+            ):
+                agg = self._metrics[(0, measurand)]
+                if connector_id in agg.extra_attr:
+                    return {connector_id: agg.extra_attr[connector_id]}
+        return {}
 
     def get_unit(self, measurand: str, connector_id: int = 0):
         """Return unit of given measurand."""

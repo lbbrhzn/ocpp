@@ -87,9 +87,14 @@ class ChargePoint(cp):
         )
         self._active_tx: dict[int, int] = {}  # connector_id -> transaction_id
 
-    async def get_number_of_connectors(self):
+    async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
-        return await self.get_configuration(ckey.number_of_connectors.value)
+        val = await self.get_configuration(ckey.number_of_connectors.value)
+        try:
+            n = int(val)
+        except (TypeError, ValueError):
+            n = 1  # fallback
+        return max(1, n)
 
     async def get_heartbeat_interval(self):
         """Retrieve heartbeat interval from the charger and store it."""
@@ -578,43 +583,50 @@ class ChargePoint(cp):
 
     @on(Action.meter_values)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
-        """Request handler for MeterValues Calls."""
-        transaction_id: int = kwargs.get(om.transaction_id.name, 0)
-        active_tx_for_conn = self._active_tx.get(connector_id, 0)
+        """Request handler for MeterValues (per connector)."""
+        transaction_id: int | None = kwargs.get(om.transaction_id.name, None)
+        active_tx_for_conn: int = int(self._active_tx.get(connector_id, 0) or 0)
 
         # If missing meter_start or active_transaction_id try to restore from HA states. If HA
         # does not have values either, generate new ones.
-        if self._metrics[connector_id][csess.meter_start.value].value is None:
-            value = self.get_ha_metric(csess.meter_start.value)
-            if value is None:
-                value = self._metrics[connector_id][DEFAULT_MEASURAND].value
+        if self._metrics[(connector_id, csess.meter_start.value)].value is None:
+            restored = self.get_ha_metric(csess.meter_start.value, connector_id)
+            if restored is None:
+                restored = self._metrics[(connector_id, DEFAULT_MEASURAND)].value
             else:
-                value = float(value)
-                _LOGGER.debug(
-                    f"{csess.meter_start.value} was None, restored value={value} from HA."
-                )
-            self._metrics[connector_id][csess.meter_start.value].value = value
-        if self._metrics[connector_id][csess.transaction_id.value].value is None:
-            value = self.get_ha_metric(csess.transaction_id.value)
-            if value is None:
-                candidate = transaction_id or active_tx_for_conn or None
+                try:
+                    restored = float(restored)
+                except (ValueError, TypeError):
+                    restored = None
+            if restored is not None:
+                self._metrics[(connector_id, csess.meter_start.value)].value = restored
+
+        if self._metrics[(connector_id, csess.transaction_id.value)].value is None:
+            restored_tx = self.get_ha_metric(csess.transaction_id.value, connector_id)
+            candidate: int | None
+            if restored_tx is not None:
+                try:
+                    candidate = int(restored_tx)
+                except (ValueError, TypeError):
+                    candidate = None
             else:
-                candidate = int(value)
+                candidate = transaction_id if transaction_id not in (None, 0) else None
 
             if candidate is not None and candidate != 0:
-                self._metrics[connector_id][
-                    csess.transaction_id.value
+                self._metrics[
+                    (connector_id, csess.transaction_id.value)
                 ].value = candidate
                 self._active_tx[connector_id] = candidate
+                active_tx_for_conn = candidate
 
-        transaction_matches = (
-            transaction_id != 0 and transaction_id == active_tx_for_conn
+        transaction_matches: bool = (
+            transaction_id not in (None, 0) and transaction_id == active_tx_for_conn
         )
 
         meter_values: list[list[MeasurandValue]] = []
         for bucket in meter_value:
             measurands: list[MeasurandValue] = []
-            for sampled_value in bucket[om.sampled_value.name]:
+            for sampled_value in bucket.get(om.sampled_value.name, []):
                 measurand = sampled_value.get(om.measurand.value, None)
                 v = sampled_value.get(om.value.value, None)
                 # where an empty string is supplied convert to 0
@@ -629,34 +641,35 @@ class ChargePoint(cp):
                 measurands.append(
                     MeasurandValue(measurand, v, phase, unit, context, location)
                 )
+
             meter_values.append(measurands)
         self.process_measurands(meter_values, transaction_matches, connector_id)
 
         if transaction_matches:
             tx_start = float(
-                self._metrics[connector_id][csess.transaction_id.value].value
+                self._metrics[(connector_id, csess.transaction_id.value)].value
                 or time.time()
             )
-            self._metrics[connector_id][csess.session_time.value].value = round(
+            self._metrics[(connector_id, csess.session_time.value)].value = round(
                 (int(time.time()) - tx_start) / 60
             )
-            self._metrics[connector_id][csess.session_time.value].unit = "min"
+            self._metrics[(connector_id, csess.session_time.value)].unit = "min"
             if (
-                self._metrics[connector_id][csess.meter_start.value].value is not None
+                self._metrics[(connector_id, csess.meter_start.value)].value is not None
                 and not self._charger_reports_session_energy
             ):
                 current_total = float(
-                    self._metrics[connector_id][DEFAULT_MEASURAND].value or 0
+                    self._metrics[(connector_id, DEFAULT_MEASURAND)].value or 0.0
                 )
                 meter_start = float(
-                    self._metrics[connector_id][csess.meter_start.value].value or 0
+                    self._metrics[(connector_id, csess.meter_start.value)].value or 0.0
                 )
-                self._metrics[connector_id][csess.session_energy.value].value = (
+                self._metrics[(connector_id, csess.session_energy.value)].value = (
                     current_total - meter_start
                 )
-                self._metrics[connector_id][csess.session_energy.value].extra_attr[
+                self._metrics[(connector_id, csess.session_energy.value)].extra_attr[
                     cstat.id_tag.name
-                ] = self._metrics[connector_id][cstat.id_tag.value].value
+                ] = self._metrics[(connector_id, cstat.id_tag.value)].value
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.MeterValues()
@@ -684,9 +697,11 @@ class ChargePoint(cp):
             self._metrics[0][cstat.status.value].value = status
             self._metrics[0][cstat.error_code.value].value = error_code
         else:
-            self._metrics[connector_id][cstat.status_connector.value].value = status
-            self._metrics[connector_id][
-                cstat.error_code_connector.value
+            self._metrics[
+                (connector_id or 0, cstat.status_connector.value)
+            ].value = status
+            self._metrics[
+                (connector_id or 0, cstat.error_code_connector.value)
             ].value = error_code
 
             if status in (
@@ -702,7 +717,7 @@ class ChargePoint(cp):
                     Measurand.power_reactive_export.value,
                 ]:
                     if meas in self._metrics[connector_id]:
-                        self._metrics[connector_id][meas].value = 0
+                        self._metrics[(connector_id, meas)].value = 0
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
@@ -754,10 +769,10 @@ class ChargePoint(cp):
             tx_id = int(time.time())
             self._active_tx[connector_id] = tx_id
             self.active_transaction_id = tx_id
-            self._metrics[connector_id][cstat.id_tag.value].value = id_tag
-            self._metrics[connector_id][cstat.stop_reason.value].value = ""
-            self._metrics[connector_id][csess.transaction_id.value].value = tx_id
-            self._metrics[connector_id][csess.meter_start.value].value = (
+            self._metrics[(connector_id, cstat.id_tag.value)].value = id_tag
+            self._metrics[(connector_id, cstat.stop_reason.value)].value = ""
+            self._metrics[(connector_id, csess.transaction_id.value)].value = tx_id
+            self._metrics[(connector_id, csess.meter_start.value)].value = (
                 int(meter_start) / 1000
             )
 
@@ -788,17 +803,19 @@ class ChargePoint(cp):
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
 
-        self._metrics[conn][cstat.stop_reason.value].value = kwargs.get(
+        self._metrics[(conn, cstat.stop_reason.value)].value = kwargs.get(
             om.reason.name, None
         )
 
         if (
-            self._metrics[conn][csess.meter_start.value].value is not None
+            self._metrics[(conn, csess.meter_start.value)].value is not None
             and not self._charger_reports_session_energy
         ):
-            start_kwh = float(self._metrics[conn][csess.meter_start.value].value or 0)
+            start_kwh = float(self._metrics[(conn, csess.meter_start.value)].value or 0)
             stop_kwh = int(meter_stop) / 1000.0
-            self._metrics[conn][csess.session_energy.value].value = stop_kwh - start_kwh
+            self._metrics[(conn, csess.session_energy.value)].value = (
+                stop_kwh - start_kwh
+            )
 
         for meas in [
             Measurand.current_import.value,
@@ -808,7 +825,7 @@ class ChargePoint(cp):
             Measurand.power_active_export.value,
             Measurand.power_reactive_export.value,
         ]:
-            self._metrics[conn][meas].value = 0
+            self._metrics[(conn, meas)].value = 0
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}

@@ -125,7 +125,7 @@ class ChargePointSwitch(SwitchEntity):
     @property
     def available(self) -> bool:
         """Return if switch is available."""
-        return self.central_system.get_available(self.cpid)  # type: ignore [no-any-return]
+        return self.central_system.get_available(self.cpid, self.connector_id)  # type: ignore [no-any-return]
 
     @property
     def is_on(self) -> bool:
@@ -133,7 +133,7 @@ class ChargePointSwitch(SwitchEntity):
         """Test metric state against condition if present"""
         if self.entity_description.metric_state is not None:
             resp = self.central_system.get_metric(
-                self.cpid, self.entity_description.metric_state
+                self.cpid, self.entity_description.metric_state, self.connector_id
             )
             if resp in self.entity_description.metric_condition:
                 self._state = True

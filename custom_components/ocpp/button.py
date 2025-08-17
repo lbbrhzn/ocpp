@@ -119,7 +119,7 @@ class ChargePointButton(ButtonEntity):
     @property
     def available(self) -> bool:
         """Return charger availability."""
-        return self.central_system.get_available(self.cpid, self.connector_id)  # type: ignore[no-any-return]
+        return self.central_system.get_available(self.cpid, self.connector_id)
 
     async def async_press(self) -> None:
         """Triggers the charger press action service."""

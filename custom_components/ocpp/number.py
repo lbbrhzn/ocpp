@@ -72,7 +72,6 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 else:
                     ent_initial = ent.initial_value
                     ent_max = ent.native_max_value
-                name_suffix = f" Connector {connector_id}" if connector_id else ""
                 entities.append(
                     ChargePointNumber(
                         hass,
@@ -80,7 +79,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                         cpid,
                         OcppNumberDescription(
                             key=ent.key,
-                            name=ent.name + name_suffix,
+                            name=ent.name,
                             icon=ent.icon,
                             initial_value=ent_initial,
                             native_min_value=ent.native_min_value,

@@ -22,7 +22,8 @@
                     "meter_interval": "Intervalo de mediciones (segundos)",
                     "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
                     "skip_schema_validation": "Omitir validación esquema OCPP",
-                    "force_smart_charging": "Forzar perfil de función Smart Charging"
+                    "force_smart_charging": "Forzar perfil de función Smart Charging",
+                    "num_connectors": "Número de conectores por punto de carga"
                 }
             },
             "measurands": {

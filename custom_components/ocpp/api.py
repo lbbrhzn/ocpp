@@ -190,6 +190,15 @@ class CentralSystem:
         self._server = server
         return self
 
+    @staticmethod
+    def _norm_conn(connector_id: int | None) -> int:
+        if connector_id in (None, 0):
+            return 0
+        try:
+            return int(connector_id)
+        except Exception:
+            return 0
+
     def select_subprotocol(
         self, connection: ServerConnection, subprotocols
     ) -> Subprotocol | None:
@@ -275,61 +284,88 @@ class CentralSystem:
             charge_point = self.charge_points[cp_id]
             await charge_point.reconnect(websocket)
 
-    def get_metric(self, id: str, measurand: str, connector_id: int = 1):
+    def _get_metrics(self, id: str):
+        """Return metrics."""
+        cp_id = self.cpids.get(id, id)
+        cp = self.charge_points.get(cp_id)
+        return (cp_id, cp._metrics) if cp is not None else (None, None)
+
+    def get_metric(self, id: str, measurand: str, connector_id: int | None = None):
         """Return last known value for given measurand."""
         # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
+        cp_id, m = self._get_metrics(id)
 
-        if cp_id not in self.charge_points:
+        if m is None:
             return None
 
-        m = self.charge_points[cp_id]._metrics
+        conn = self._norm_conn(connector_id)
         try:
-            return m[connector_id][measurand].value
+            return m[(conn, measurand)].value
         except Exception:
+            if conn == 0:
+                with contextlib.suppress(Exception):
+                    return m[measurand].value
             return None
 
-    def del_metric(self, id: str, measurand: str, connector_id: int = 1):
+    def del_metric(self, id: str, measurand: str, connector_id: int | None = None):
         """Set given measurand to None."""
         # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
+        cp_id, m = self._get_metrics(id)
+        if m is None:
             return None
 
-        m = self.charge_points[cp_id]._metrics
-        m[connector_id][measurand].value = None
+        conn = self._norm_conn(connector_id)
+        try:
+            m[(conn, measurand)].value = None
+        except Exception:
+            if conn == 0:
+                with contextlib.suppress(Exception):
+                    m[measurand].value = None
         return None
 
-    def get_unit(self, id: str, measurand: str, connector_id: int = 1):
+    def get_unit(self, id: str, measurand: str, connector_id: int | None = None):
         """Return unit of given measurand."""
         # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
+        cp_id, m = self._get_metrics(id)
+        if m is None:
+            return None
+        conn = self._norm_conn(connector_id)
+        try:
+            return m[(conn, measurand)].unit
+        except Exception:
+            if conn == 0:
+                with contextlib.suppress(Exception):
+                    return m[measurand].unit
             return None
 
-        m = self.charge_points[cp_id]._metrics
-        return m[connector_id][measurand].unit
-
-    def get_ha_unit(self, id: str, measurand: str, connector_id: int = 1):
+    def get_ha_unit(self, id: str, measurand: str, connector_id: int | None = None):
         """Return home assistant unit of given measurand."""
-        # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-
-        if cp_id not in self.charge_points:
+        cp_id, m = self._get_metrics(id)
+        if m is None:
+            return None
+        conn = self._norm_conn(connector_id)
+        try:
+            return m[(conn, measurand)].ha_unit
+        except Exception:
+            if conn == 0:
+                with contextlib.suppress(Exception):
+                    return m[measurand].ha_unit
             return None
 
-        m = self.charge_points[cp_id]._metrics
-        return m[connector_id][measurand].ha_unit
-
-    def get_extra_attr(self, id: str, measurand: str, connector_id: int = 1):
+    def get_extra_attr(self, id: str, measurand: str, connector_id: int | None = None):
         """Return last known extra attributes for given measurand."""
         # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
+        cp_id, m = self._get_metrics(id)
+        if m is None:
             return None
-
-        m = self.charge_points[cp_id]._metrics
-        return m[connector_id][measurand].extra_attr
+        conn = self._norm_conn(connector_id)
+        try:
+            return m[(conn, measurand)].extra_attr
+        except Exception:
+            if conn == 0:
+                with contextlib.suppress(Exception):
+                    return m[measurand].extra_attr
+            return None
 
     def get_available(self, id: str, connector_id: int | None = None):
         """Return whether the charger (or a specific connector) is available."""
@@ -346,7 +382,7 @@ class CentralSystem:
         m = cp._metrics
         status_val = None
         with contextlib.suppress(Exception):
-            status_val = m[connector_id][cstat.status_connector.value].value
+            status_val = m[(connector_id, cstat.status_connector.value)].value
 
         if not status_val:
             try:
@@ -361,7 +397,19 @@ class CentralSystem:
         if not status_val:
             return cp.status == STATE_OK
 
-        return str(status_val).lower() in ("available", "preparing", "charging")
+        ok_statuses = {
+            "available",
+            "preparing",
+            "charging",
+            "suspendedev",
+            "suspendedevse",
+            "finishing",
+            "occupied",
+            "reserved",
+        }
+
+        ret = str(status_val).lower() in ok_statuses
+        return ret
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""

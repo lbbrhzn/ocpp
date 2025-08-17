@@ -120,7 +120,7 @@ class ChargePoint(cp):
         req = call.GetBaseReport(1, "FullInventory")
         resp: call_result.GetBaseReport | None = None
         try:
-            resp: call_result.GetBaseReport = await self.call(req)
+            resp = await self.call(req)
         except ocpp.exceptions.NotImplementedError:
             self._inventory = InventoryReport()
         except OCPPError:
@@ -294,11 +294,7 @@ class ChargePoint(cp):
 
     async def stop_transaction(self) -> bool:
         """Request remote stop of current transaction (default EVSE 1)."""
-        tx_id = (
-            self._metrics[1][csess.transaction_id.value].value
-            if 1 in self._metrics
-            else ""
-        )
+        tx_id = self._metrics[(1, csess.transaction_id.value)].value or ""
         req: call.RequestStopTransaction = call.RequestStopTransaction(
             transaction_id=tx_id
         )
@@ -410,7 +406,7 @@ class ChargePoint(cp):
 
     def _report_evse_status(self, evse_id: int, evse_status_v16: ChargePointStatusv16):
         evse_status_str: str = evse_status_v16.value
-        self._metrics[evse_id][cstat.status_connector.value].value = evse_status_str
+        self._metrics[(evse_id, cstat.status_connector.value)].value = evse_status_str
         self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
@@ -567,7 +563,7 @@ class ChargePoint(cp):
 
         if (tx_event_type == TransactionEventEnumType.started.value) or (
             (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[evse_id][csess.meter_start].value is None)
+            and (self._metrics[(evse_id, csess.meter_start)].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
@@ -575,8 +571,8 @@ class ChargePoint(cp):
                     if measurand_item.measurand == energy_measurand:
                         energy_value = cp.get_energy_kwh(measurand_item)
                         energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
-                        self._metrics[evse_id][csess.meter_start].value = energy_value
-                        self._metrics[evse_id][csess.meter_start].unit = energy_unit
+                        self._metrics[(evse_id, csess.meter_start)].value = energy_value
+                        self._metrics[(evse_id, csess.meter_start)].unit = energy_unit
 
         self.process_measurands(converted_values, True, evse_id)
 
@@ -591,10 +587,10 @@ class ChargePoint(cp):
                 for measurand in self._inventory.tx_updated_measurands:
                     if (
                         (measurand not in measurands_in_tx)
-                        and (measurand in self._metrics[evse_id])
+                        and ((evse_id, measurand) in self._metrics)
                         and not measurand.startswith("Energy")
                     ):
-                        self._metrics[evse_id][measurand].value = 0
+                        self._metrics[(evse_id, measurand)].value = 0
 
     @on(Action.transaction_event)
     def on_transaction_event(
@@ -634,24 +630,24 @@ class ChargePoint(cp):
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
             id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
-            self._metrics[evse_id][cstat.id_tag.value].value = id_tag_string
+            self._metrics[(evse_id, cstat.id_tag.value)].value = id_tag_string
 
         if event_type == TransactionEventEnumType.started.value:
             self._tx_start_time[evse_id] = t
             tx_id: str = transaction_info["transaction_id"]
-            self._metrics[evse_id][csess.transaction_id.value].value = tx_id
-            self._metrics[evse_id][csess.session_time].value = 0
-            self._metrics[evse_id][csess.session_time].unit = UnitOfTime.MINUTES
+            self._metrics[(evse_id, csess.transaction_id.value)].value = tx_id
+            self._metrics[(evse_id, csess.session_time)].value = 0
+            self._metrics[(evse_id, csess.session_time)].unit = UnitOfTime.MINUTES
         else:
             if self._tx_start_time.get(evse_id):
                 duration_minutes: int = (
                     (t - self._tx_start_time[evse_id]).seconds + 59
                 ) // 60
-                self._metrics[evse_id][csess.session_time].value = duration_minutes
-                self._metrics[evse_id][csess.session_time].unit = UnitOfTime.MINUTES
+                self._metrics[(evse_id, csess.session_time)].value = duration_minutes
+                self._metrics[(evse_id, csess.session_time)].unit = UnitOfTime.MINUTES
             if event_type == TransactionEventEnumType.ended.value:
-                self._metrics[evse_id][csess.transaction_id.value].value = ""
-                self._metrics[evse_id][cstat.id_tag.value].value = ""
+                self._metrics[(evse_id, csess.transaction_id.value)].value = ""
+                self._metrics[(evse_id, cstat.id_tag.value)].value = ""
 
         if not offline:
             self.hass.async_create_task(self.update(self.settings.cpid))
