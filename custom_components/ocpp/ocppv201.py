@@ -56,6 +56,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
 )
+import contextlib
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
@@ -79,6 +80,8 @@ class ChargePoint(cp):
     _wait_inventory: asyncio.Event | None = None
     _connector_status: list[list[ConnectorStatusEnumType | None]] = []
     _tx_start_time: dict[int, datetime]
+    _global_to_evse: dict[int, tuple[int, int]]  # global_idx -> (evse_id, connector_id)
+    _evse_to_global: dict[tuple[int, int], int]  # (evse_id, connector_id) -> global_idx
 
     def __init__(
         self,
@@ -101,6 +104,39 @@ class ChargePoint(cp):
             charger,
         )
         self._tx_start_time = {}
+        self._global_to_evse = {}
+        self._evse_to_global = {}
+
+    # --- Connector mapping helpers (EVSE <-> global index) ---
+    def _build_connector_map(self):
+        """Build maps between global connector index and (evse_id, connector_id)."""
+        self._global_to_evse.clear()
+        self._evse_to_global.clear()
+        if not self._inventory:
+            return
+        idx = 0
+        for evse_id in range(1, self._inventory.evse_count + 1):
+            cnt = self._inventory.connector_count[evse_id - 1]
+            for conn_id in range(1, cnt + 1):
+                idx += 1
+                self._global_to_evse[idx] = (evse_id, conn_id)
+                self._evse_to_global[(evse_id, conn_id)] = idx
+
+    def _pair_to_global(self, evse_id: int, conn_id: int) -> int:
+        """Return global index for (evse_id, connector_id). Fallback: first connector of EVSE."""
+        return self._evse_to_global.get(
+            (evse_id, conn_id), self._evse_to_global.get((evse_id, 1), evse_id)
+        )
+
+    def _global_to_pair(self, global_idx: int) -> tuple[int, int]:
+        """Return (evse_id, connector_id) for a global index. Fallback: (global_idx,1)."""
+        return self._global_to_evse.get(global_idx, (global_idx, 1))
+
+    def _total_connectors(self) -> int:
+        """Total physical connectors across all EVSE."""
+        if not self._inventory:
+            return 0
+        return sum(self._inventory.connector_count or [0])
 
     async def async_update_device_info_v201(self, boot_info: dict):
         """Update device info asynchronuously."""
@@ -128,11 +164,13 @@ class ChargePoint(cp):
         if (resp is not None) and (resp.status == "Accepted"):
             await asyncio.wait_for(self._wait_inventory.wait(), self._response_timeout)
         self._wait_inventory = None
+        if self._inventory:
+            self._build_connector_map()
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
         await self._get_inventory()
-        return self._inventory.evse_count if self._inventory else 0
+        return self._total_connectors()
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
@@ -220,47 +258,67 @@ class ChargePoint(cp):
         req: call.ClearChargingProfile = call.ClearChargingProfile(
             None,
             {
-                "charging_profile_Purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value
+                "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value
             },
         )
         await self.call(req)
 
     async def set_charge_rate(
         self,
-        limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_amps: int | None = None,
+        limit_watts: int | None = None,
         conn_id: int = 0,
         profile: dict | None = None,
     ):
-        """Set a charging profile with defined limit."""
-        req: call.SetChargingProfile
-        if profile:
+        """Set a charging profile with defined limit (OCPP 2.x)."""
+        if profile is not None:
             req = call.SetChargingProfile(0, profile)
-        else:
-            period: dict = {"start_period": 0}
-            schedule: dict = {"id": 1}
-            if limit_amps < 32:
-                period["limit"] = limit_amps
-                schedule["charging_rate_unit"] = ChargingRateUnitEnumType.amps.value
-            elif limit_watts < 22000:
-                period["limit"] = limit_watts
-                schedule["charging_rate_unit"] = ChargingRateUnitEnumType.watts.value
-            else:
+            resp: call_result.SetChargingProfile = await self.call(req)
+            if resp.status != ChargingProfileStatusEnumType.accepted:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_variables_error",
+                    translation_placeholders={
+                        "message": f"{str(resp.status)}: {str(resp.status_info)}"
+                    },
+                )
+            return
+
+        if limit_watts is not None:
+            if float(limit_watts) >= 22000:
                 await self.clear_profile()
                 return
+            period_limit = int(limit_watts)
+            unit_value = ChargingRateUnitEnumType.watts.value
 
-            schedule["charging_schedule_period"] = [period]
-            req = call.SetChargingProfile(
-                0,
-                {
-                    "id": 1,
-                    "stack_level": 0,
-                    "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile,
-                    "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
-                    "charging_schedule": [schedule],
-                },
+        elif limit_amps is not None:
+            if float(limit_amps) >= 32:
+                await self.clear_profile()
+                return
+            period_limit = (
+                int(limit_amps) if float(limit_amps).is_integer() else float(limit_amps)
             )
+            unit_value = ChargingRateUnitEnumType.amps.value
 
+        else:
+            await self.clear_profile()
+            return
+
+        schedule: dict = {
+            "id": 1,
+            "charging_rate_unit": unit_value,
+            "charging_schedule_period": [{"start_period": 0, "limit": period_limit}],
+        }
+
+        charging_profile: dict = {
+            "id": 1,
+            "stack_level": 0,
+            "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile,
+            "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
+            "charging_schedule": [schedule],
+        }
+
+        req: call.SetChargingProfile = call.SetChargingProfile(0, charging_profile)
         resp: call_result.SetChargingProfile = await self.call(req)
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
@@ -271,18 +329,34 @@ class ChargePoint(cp):
                 },
             )
 
-    async def set_availability(self, state: bool = True):
+    async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
-        req: call.ChangeAvailability = call.ChangeAvailability(
+        status = (
             OperationalStatusEnumType.operative.value
             if state
             else OperationalStatusEnumType.inoperative.value
         )
-        await self.call(req)
+        if not connector_id:
+            await self.call(call.ChangeAvailability(status))
+            return
 
-    async def start_transaction(self) -> bool:
+        evse_id = None
+        with contextlib.suppress(Exception):
+            evse_id, _ = self._global_to_pair(int(connector_id))
+
+        if evse_id:
+            await self.call(call.ChangeAvailability(status, evse={"id": evse_id}))
+        else:
+            await self.call(call.ChangeAvailability(status))
+
+    async def start_transaction(self, connector_id: int = 1) -> bool:
         """Remote start a transaction."""
+        evse_id = connector_id
+        if connector_id and connector_id > 0:
+            evse_id, _ = self._global_to_pair(connector_id)
+
         req: call.RequestStartTransaction = call.RequestStartTransaction(
+            evse_id=evse_id,
             id_token={
                 "id_token": self._remote_id_tag,
                 "type": IdTokenEnumType.central.value,
@@ -294,7 +368,14 @@ class ChargePoint(cp):
 
     async def stop_transaction(self) -> bool:
         """Request remote stop of current transaction (default EVSE 1)."""
-        tx_id = self._metrics[(1, csess.transaction_id.value)].value or ""
+        await self._get_inventory()
+        tx_id = ""
+        total = self._total_connectors() or 1
+        for g in range(1, total + 1):
+            val = self._metrics[(g, csess.transaction_id.value)].value
+            if val:
+                tx_id = val
+                break
         req: call.RequestStopTransaction = call.RequestStopTransaction(
             transaction_id=tx_id
         )
@@ -405,8 +486,8 @@ class ChargePoint(cp):
         return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
 
     def _report_evse_status(self, evse_id: int, evse_status_v16: ChargePointStatusv16):
-        evse_status_str: str = evse_status_v16.value
-        self._metrics[(evse_id, cstat.status_connector.value)].value = evse_status_str
+        """Report EVSE-level status on the global connector."""
+        self._metrics[(0, cstat.status_connector.value)].value = evse_status_v16.value
         self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
@@ -423,6 +504,14 @@ class ChargePoint(cp):
 
         evse: list[ConnectorStatusEnumType] = self._connector_status[evse_id - 1]
         evse[connector_id - 1] = ConnectorStatusEnumType(connector_status)
+
+        global_idx = self._pair_to_global(evse_id, connector_id)
+        self._metrics[
+            (global_idx, cstat.status_connector.value)
+        ].value = ConnectorStatusEnumType(connector_status).value
+
+        self.hass.async_create_task(self.update(self.settings.cpid))
+
         evse_status: ConnectorStatusEnumType | None = None
         for status in evse:
             if status is None:
@@ -446,12 +535,24 @@ class ChargePoint(cp):
         return call_result.StatusNotification()
 
     @on(Action.firmware_status_notification)
-    @on(Action.meter_values)
-    @on(Action.log_status_notification)
-    @on(Action.notify_event)
-    def ack(self, **kwargs):
+    def on_firmware_status_notification(self, **kwargs):
         """Perform OCPP callback."""
-        return call_result.StatusNotification()
+        return call_result.FirmwareStatusNotification()
+
+    @on(Action.meter_values)
+    def on_meter_values(self, **kwargs):
+        """Perform OCPP callback."""
+        return call_result.MeterValues()
+
+    @on(Action.log_status_notification)
+    def on_log_status_notification(self, **kwargs):
+        """Perform OCPP callback."""
+        return call_result.LogStatusNotification()
+
+    @on(Action.notify_event)
+    def on_notify_event(self, **kwargs):
+        """Perform OCPP callback."""
+        return call_result.NotifyEvent()
 
     @on(Action.notify_report)
     def on_report(self, request_id: int, generated_at: str, seq_no: int, **kwargs):
@@ -538,8 +639,13 @@ class ChargePoint(cp):
         return call_result.Authorize(id_token_info={"status": status})
 
     def _set_meter_values(
-        self, tx_event_type: str, meter_values: list[dict], evse_id: int
+        self,
+        tx_event_type: str,
+        meter_values: list[dict],
+        evse_id: int,
+        connector_id: int,
     ):
+        global_idx: int = self._pair_to_global(evse_id, connector_id)
         converted_values: list[list[MeasurandValue]] = []
         for meter_value in meter_values:
             measurands: list[MeasurandValue] = []
@@ -563,7 +669,7 @@ class ChargePoint(cp):
 
         if (tx_event_type == TransactionEventEnumType.started.value) or (
             (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[(evse_id, csess.meter_start)].value is None)
+            and (self._metrics[(global_idx, csess.meter_start)].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
@@ -571,10 +677,14 @@ class ChargePoint(cp):
                     if measurand_item.measurand == energy_measurand:
                         energy_value = cp.get_energy_kwh(measurand_item)
                         energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
-                        self._metrics[(evse_id, csess.meter_start)].value = energy_value
-                        self._metrics[(evse_id, csess.meter_start)].unit = energy_unit
+                        self._metrics[
+                            (global_idx, csess.meter_start)
+                        ].value = energy_value
+                        self._metrics[
+                            (global_idx, csess.meter_start)
+                        ].unit = energy_unit
 
-        self.process_measurands(converted_values, True, evse_id)
+        self.process_measurands(converted_values, True, global_idx)
 
         if tx_event_type == TransactionEventEnumType.ended.value:
             measurands_in_tx: set[str] = set()
@@ -587,10 +697,10 @@ class ChargePoint(cp):
                 for measurand in self._inventory.tx_updated_measurands:
                     if (
                         (measurand not in measurands_in_tx)
-                        and ((evse_id, measurand) in self._metrics)
+                        and ((global_idx, measurand) in self._metrics)
                         and not measurand.startswith("Energy")
                     ):
-                        self._metrics[(evse_id, measurand)].value = 0
+                        self._metrics[(global_idx, measurand)].value = 0
 
     @on(Action.transaction_event)
     def on_transaction_event(
@@ -604,9 +714,13 @@ class ChargePoint(cp):
     ):
         """Perform OCPP callback."""
         evse_id: int = kwargs["evse"]["id"] if "evse" in kwargs else 1
+        evse_conn_id: int = (
+            kwargs["evse"].get("connector_id", 1) if "evse" in kwargs else 1
+        )
+        global_idx: int = self._pair_to_global(evse_id, evse_conn_id)
         offline: bool = kwargs.get("offline", False)
         meter_values: list[dict] = kwargs.get("meter_value", [])
-        self._set_meter_values(event_type, meter_values, evse_id)
+        self._set_meter_values(event_type, meter_values, evse_id, evse_conn_id)
         t = datetime.fromisoformat(timestamp)
 
         if "charging_state" in transaction_info:
@@ -630,24 +744,26 @@ class ChargePoint(cp):
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
             id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
-            self._metrics[(evse_id, cstat.id_tag.value)].value = id_tag_string
+            self._metrics[(global_idx, cstat.id_tag.value)].value = id_tag_string
 
         if event_type == TransactionEventEnumType.started.value:
-            self._tx_start_time[evse_id] = t
+            self._tx_start_time[global_idx] = t
             tx_id: str = transaction_info["transaction_id"]
-            self._metrics[(evse_id, csess.transaction_id.value)].value = tx_id
-            self._metrics[(evse_id, csess.session_time)].value = 0
-            self._metrics[(evse_id, csess.session_time)].unit = UnitOfTime.MINUTES
+            self._metrics[(global_idx, csess.transaction_id.value)].value = tx_id
+            self._metrics[(global_idx, csess.session_time)].value = 0
+            self._metrics[(global_idx, csess.session_time)].unit = UnitOfTime.MINUTES
         else:
-            if self._tx_start_time.get(evse_id):
+            if self._tx_start_time.get(global_idx):
                 duration_minutes: int = (
-                    (t - self._tx_start_time[evse_id]).seconds + 59
+                    (t - self._tx_start_time[global_idx]).seconds + 59
                 ) // 60
-                self._metrics[(evse_id, csess.session_time)].value = duration_minutes
-                self._metrics[(evse_id, csess.session_time)].unit = UnitOfTime.MINUTES
+                self._metrics[(global_idx, csess.session_time)].value = duration_minutes
+                self._metrics[
+                    (global_idx, csess.session_time)
+                ].unit = UnitOfTime.MINUTES
             if event_type == TransactionEventEnumType.ended.value:
-                self._metrics[(evse_id, csess.transaction_id.value)].value = ""
-                self._metrics[(evse_id, cstat.id_tag.value)].value = ""
+                self._metrics[(global_idx, csess.transaction_id.value)].value = ""
+                self._metrics[(global_idx, cstat.id_tag.value)].value = ""
 
         if not offline:
             self.hass.async_create_task(self.update(self.settings.cpid))

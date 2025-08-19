@@ -29,13 +29,14 @@ class OcppSwitchDescription(SwitchEntityDescription):
     on_action: str | None = None
     off_action: str | None = None
     metric_state: str | None = None
-    metric_condition: str | None = None
+    metric_condition: list[str] | None = None
     default_state: bool = False
+    per_connector: bool = False
 
 
 POWER_KILO_WATT = UnitOfPower.KILO_WATT
 
-SWITCHES: Final = [
+SWITCHES: Final[list[OcppSwitchDescription]] = [
     OcppSwitchDescription(
         key="charge_control",
         name="Charge Control",
@@ -48,6 +49,7 @@ SWITCHES: Final = [
             ChargePointStatus.suspended_evse.value,
             ChargePointStatus.suspended_ev.value,
         ],
+        per_connector=True,
     ),
     OcppSwitchDescription(
         key="availability",
@@ -55,9 +57,10 @@ SWITCHES: Final = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status_connector.value,
+        metric_state=HAChargerStatuses.status.value,  # charger-level status
         metric_condition=[ChargePointStatus.available.value],
         default_state=True,
+        per_connector=False,
     ),
 ]
 
@@ -65,23 +68,25 @@ SWITCHES: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the switch platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    entities = []
+    entities: list[ChargePointSwitch] = []
 
     for charger in entry.data[CONF_CPIDS]:
-        cp_id_settings = list(charger.values())[0]
-        cpid = cp_id_settings[CONF_CPID]
-        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
+        cp_settings = list(charger.values())[0]
+        cpid = cp_settings[CONF_CPID]
+        num_connectors = int(cp_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
 
-        for ent in SWITCHES:
-            if ent.metric_state and num_connectors > 1:
+        for desc in SWITCHES:
+            if desc.per_connector:
                 for conn_id in range(1, num_connectors + 1):
                     entities.append(
                         ChargePointSwitch(
-                            central_system, cpid, ent, connector_id=conn_id
+                            central_system, cpid, desc, connector_id=conn_id
                         )
                     )
             else:
-                entities.append(ChargePointSwitch(central_system, cpid, ent))
+                entities.append(
+                    ChargePointSwitch(central_system, cpid, desc, connector_id=None)
+                )
 
     async_add_devices(entities, False)
 
@@ -105,9 +110,10 @@ class ChargePointSwitch(SwitchEntity):
         self.entity_description = description
         self.connector_id = connector_id
         self._state = self.entity_description.default_state
-        parts = [SWITCH_DOMAIN, DOMAIN, cpid, description.key]
+        parts = [SWITCH_DOMAIN, DOMAIN, cpid]
         if self.connector_id:
-            parts.insert(3, f"conn{self.connector_id}")
+            parts.append(f"conn{self.connector_id}")
+        parts.append(description.key)
         self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
         if self.connector_id:
@@ -122,10 +128,12 @@ class ChargePointSwitch(SwitchEntity):
                 name=cpid,
             )
 
+        self._attr_icon = ICON
+
     @property
     def available(self) -> bool:
         """Return if switch is available."""
-        return self.central_system.get_available(self.cpid, self.connector_id)  # type: ignore [no-any-return]
+        return self.central_system.get_available(self.cpid, self.connector_id)
 
     @property
     def is_on(self) -> bool:
@@ -135,16 +143,17 @@ class ChargePointSwitch(SwitchEntity):
             resp = self.central_system.get_metric(
                 self.cpid, self.entity_description.metric_state, self.connector_id
             )
-            if resp in self.entity_description.metric_condition:
-                self._state = True
-            else:
-                self._state = False
-        return self._state  # type: ignore [no-any-return]
+            if self.entity_description.metric_condition is not None:
+                self._state = resp in self.entity_description.metric_condition
+        return self._state  # type: ignore[no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         self._state = await self.central_system.set_charger_state(
-            self.cpid, self.entity_description.on_action
+            self.cpid,
+            self.entity_description.on_action,
+            True,
+            connector_id=self.connector_id,
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -154,10 +163,15 @@ class ChargePointSwitch(SwitchEntity):
             resp = True
         elif self.entity_description.off_action == self.entity_description.on_action:
             resp = await self.central_system.set_charger_state(
-                self.cpid, self.entity_description.off_action, False
+                self.cpid,
+                self.entity_description.off_action,
+                False,
+                connector_id=self.connector_id,
             )
         else:
             resp = await self.central_system.set_charger_state(
-                self.cpid, self.entity_description.off_action
+                self.cpid,
+                self.entity_description.off_action,
+                connector_id=self.connector_id,
             )
         self._state = not resp

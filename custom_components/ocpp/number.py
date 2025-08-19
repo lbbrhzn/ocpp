@@ -62,9 +62,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
-        for connector_id in (
-            range(1, num_connectors + 1) if num_connectors > 1 else [None]
-        ):
+        for connector_id in range(1, num_connectors + 1):
             for ent in NUMBERS:
                 if ent.key == "maximum_current":
                     ent_initial = cp_id_settings[CONF_MAX_CURRENT]
@@ -163,7 +161,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             self.cpid
         ) and Profiles.SMART & self.central_system.get_supported_features(self.cpid):
             resp = await self.central_system.set_max_charge_rate_amps(
-                self.cpid, num_value
+                self.cpid, num_value, self.connector_id
             )
             if resp is True:
                 self._attr_native_value = num_value

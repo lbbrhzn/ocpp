@@ -58,7 +58,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1))
 
         for desc in BUTTONS:
-            if desc.per_connector and num_connectors > 1:
+            if desc.per_connector:
                 for connector_id in range(1, num_connectors + 1):
                     entities.append(
                         ChargePointButton(
@@ -124,5 +124,7 @@ class ChargePointButton(ButtonEntity):
     async def async_press(self) -> None:
         """Triggers the charger press action service."""
         await self.central_system.set_charger_state(
-            self.cpid, self.entity_description.press_action
+            self.cpid,
+            self.entity_description.press_action,
+            connector_id=self.connector_id,
         )

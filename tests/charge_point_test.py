@@ -28,10 +28,11 @@ from websockets.asyncio.client import ClientConnection
 
 async def set_switch(hass: HomeAssistant, cpid: str, key: str, on: bool):
     """Toggle a switch."""
+    prefix = "_" if key == "availability" else "_connector_1_"
     await hass.services.async_call(
         SWITCH_DOMAIN,
         SERVICE_TURN_ON if on else SERVICE_TURN_OFF,
-        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cpid}_{key}"},
+        service_data={ATTR_ENTITY_ID: f"{SWITCH_DOMAIN}.{cpid}{prefix}{key}"},
         blocking=True,
     )
 
@@ -43,7 +44,7 @@ async def set_number(hass: HomeAssistant, cpid: str, key: str, value: int):
         "set_value",
         service_data={"value": str(value)},
         blocking=True,
-        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cpid}_{key}"},
+        target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cpid}_connector_1_{key}"},
     )
 
 

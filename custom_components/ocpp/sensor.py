@@ -116,6 +116,17 @@ async def async_setup_entry(hass, entry, async_add_devices):
                             connector_id=conn_id,
                         )
                     )
+
+            for metric in ["Energy.Active.Import.Register"]:
+                entities.append(
+                    ChargePointMetric(
+                        hass,
+                        central_system,
+                        cpid,
+                        _mk_desc(metric),
+                        connector_id=None,
+                    )
+                )
         else:
             for metric in CONNECTOR_ONLY:
                 entities.append(

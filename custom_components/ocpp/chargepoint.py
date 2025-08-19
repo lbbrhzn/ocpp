@@ -395,7 +395,7 @@ class ChargePoint(cp):
         """Change availability."""
         return False
 
-    async def start_transaction(self) -> bool:
+    async def start_transaction(self, connector_id: int = 1) -> bool:
         """Remote start a transaction."""
         return False
 
@@ -730,85 +730,47 @@ class ChargePoint(cp):
         """Process all values from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
         for bucket in meter_values:
             unprocessed: list[MeasurandValue] = []
-            for idx in range(len(bucket)):
-                sampled_value: MeasurandValue = bucket[idx]
+            for sampled_value in bucket:
                 measurand = sampled_value.measurand
                 value = sampled_value.value
                 unit = sampled_value.unit
                 phase = sampled_value.phase
                 location = sampled_value.location
                 context = sampled_value.context
-                # where an empty string is supplied convert to 0
 
-                if sampled_value.measurand is None:  # Backwards compatibility
+                # If the measurand is missing: treat as EAIR but respect existing unit
+                if measurand is None:
                     measurand = DEFAULT_MEASURAND
-                    unit = DEFAULT_ENERGY_UNIT
+                    if unit is None:
+                        unit = DEFAULT_ENERGY_UNIT
 
+                # If EAIR and unit missing, assume Wh (charger not sending unit)
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
 
-                if unit == DEFAULT_ENERGY_UNIT:
-                    value = ChargePoint.get_energy_kwh(sampled_value)
+                # Normalize units
+                if unit == DEFAULT_ENERGY_UNIT or (
+                    measurand == DEFAULT_MEASURAND and unit is None
+                ):
+                    # Wh → kWh
+                    value = ChargePoint.get_energy_kwh(
+                        MeasurandValue(measurand, value, phase, unit, context, location)
+                    )
                     unit = HA_ENERGY_UNIT
-
-                if unit == DEFAULT_POWER_UNIT:
+                elif unit == DEFAULT_POWER_UNIT:
+                    # W → kW
                     value = value / 1000
                     unit = HA_POWER_UNIT
 
-                if self._metrics[(connector_id, csess.meter_start.value)].value in (
-                    0,
-                    None,
-                ):
+                # Only flag if meter_start explicitly is 0 (not None)
+                if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
                     self._charger_reports_session_energy = True
 
                 if phase is None:
-                    if (
-                        measurand == DEFAULT_MEASURAND
-                        and self._charger_reports_session_energy
-                    ):
-                        # Ignore messages with Transaction Begin context
-                        if context != ReadingContext.transaction_begin.value:
-                            if is_transaction:
-                                self._metrics[
-                                    (connector_id, csess.session_energy.value)
-                                ].value = value
-                                self._metrics[
-                                    (connector_id, csess.session_energy.value)
-                                ].unit = unit
-                                self._metrics[
-                                    (connector_id, csess.session_energy.value)
-                                ].extra_attr[cstat.id_tag.name] = self._metrics[
-                                    (connector_id, cstat.id_tag.value)
-                                ].value
-                            else:
-                                self._metrics[(connector_id, measurand)].value = value
-                                self._metrics[(connector_id, measurand)].unit = unit
-                        else:
-                            continue
-                    else:
-                        self._metrics[(connector_id, measurand)].value = value
-                        self._metrics[(connector_id, measurand)].unit = unit
-                        if (
-                            is_transaction
-                            and (measurand == DEFAULT_MEASURAND)
-                            and (
-                                self._metrics[(connector_id, csess.meter_start)].value
-                                is not None
-                            )
-                            and (
-                                self._metrics[(connector_id, csess.meter_start)].unit
-                                == unit
-                            )
-                        ):
-                            meter_start = self._metrics[
-                                (connector_id, csess.meter_start)
-                            ].value
-                            self._metrics[
-                                (connector_id, csess.session_energy.value)
-                            ].value = round(1000 * (value - meter_start)) / 1000
-                            self._metrics[
-                                (connector_id, csess.session_energy.value)
-                            ].unit = unit
+                    # Set main measurand
+                    self._metrics[(connector_id, measurand)].value = value
+                    self._metrics[(connector_id, measurand)].unit = unit
+
                     if location is not None:
                         self._metrics[(connector_id, measurand)].extra_attr[
                             om.location.value
@@ -817,8 +779,48 @@ class ChargePoint(cp):
                         self._metrics[(connector_id, measurand)].extra_attr[
                             om.context.value
                         ] = context
+
+                    # Energy.Session is calculated here only for OCPP 2.x (not 1.6)
+                    if (
+                        measurand == DEFAULT_MEASURAND
+                        and is_transaction
+                        and self._ocpp_version != "1.6"
+                    ):
+                        if (
+                            self._charger_reports_session_energy
+                            and context != ReadingContext.transaction_begin.value
+                        ):
+                            # The charger reports session energy directly (2.x case)
+                            self._metrics[
+                                (connector_id, csess.session_energy.value)
+                            ].value = value
+                            self._metrics[
+                                (connector_id, csess.session_energy.value)
+                            ].unit = HA_ENERGY_UNIT
+                            self._metrics[
+                                (connector_id, csess.session_energy.value)
+                            ].extra_attr[cstat.id_tag.name] = self._metrics[
+                                (connector_id, cstat.id_tag.value)
+                            ].value
+                        else:
+                            # Derive: EAIR_kWh - meter_start_kWh
+                            ms_val = self._metrics[
+                                (connector_id, csess.meter_start)
+                            ].value
+                            if ms_val is not None:
+                                self._metrics[
+                                    (connector_id, csess.session_energy.value)
+                                ].value = (
+                                    round(1000 * (float(value) - float(ms_val))) / 1000
+                                )
+                                self._metrics[
+                                    (connector_id, csess.session_energy.value)
+                                ].unit = HA_ENERGY_UNIT
                 else:
+                    # Handle phase values separately
                     unprocessed.append(sampled_value)
+
+            # Sum/calculate phase values
             self.process_phases(unprocessed, connector_id)
 
     @property
