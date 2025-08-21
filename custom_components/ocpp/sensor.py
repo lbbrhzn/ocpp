@@ -53,7 +53,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
             for m in str(cp_id_settings.get(CONF_MONITORED_VARIABLES, "")).split(",")
             if m and m.strip()
         ]
-        measurands = sorted(configured)
+        default_measurands: list[str] = []
+        measurands = sorted(configured or default_measurands)
 
         CHARGER_ONLY = [
             HAChargerStatuses.status.value,
@@ -170,7 +171,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         if self.connector_id is not None:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
+                name=f"Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:

@@ -122,7 +122,7 @@ class ChargePointButton(ButtonEntity):
         if self.connector_id:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
+                name=f"Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:

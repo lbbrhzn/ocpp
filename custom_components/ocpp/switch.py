@@ -129,7 +129,7 @@ class ChargePointSwitch(SwitchEntity):
         if self.connector_id and not self._flatten_single:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
+                name=f"Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:
@@ -144,7 +144,7 @@ class ChargePointSwitch(SwitchEntity):
         target_conn = (
             self.connector_id if self.entity_description.per_connector else None
         )
-        return self.central_system.get_available(self.cpid, target_conn)
+        return bool(self.central_system.get_available(self.cpid, target_conn))
 
     @property
     def is_on(self) -> bool:

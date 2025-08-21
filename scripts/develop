@@ -25,6 +25,9 @@ if [[ -e "$dst" || -L "$dst" ]]; then
   rm -rf -- "$dst"
 fi
 
+# Create the symlink
+ln -s "$src" "$dst"
+
 # Install debugpy if missing
 if ! /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then
   /home/vscode/.local/ha-venv/bin/python -m pip install --quiet debugpy

@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, UTC
+from dataclasses import dataclass, field
 import logging
 
 import ocpp.exceptions
@@ -62,15 +63,16 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 
+@dataclass
 class InventoryReport:
     """Cached full inventory report for a charger."""
 
     evse_count: int = 0
-    connector_count: list[int] = []
+    connector_count: list[int] = field(default_factory=list)
     smart_charging_available: bool = False
     reservation_available: bool = False
     local_auth_available: bool = False
-    tx_updated_measurands: list[MeasurandEnumType] = []
+    tx_updated_measurands: list[MeasurandEnumType] = field(default_factory=list)
 
 
 class ChargePoint(cp):
@@ -283,7 +285,7 @@ class ChargePoint(cp):
         return ""
 
     async def get_supported_features(self) -> Profiles:
-        """Get comma-separated list of measurands supported by the charger."""
+        """Get feature profiles supported by the charger."""
         await self._get_inventory()
         features = Profiles.CORE
         if self._inventory and self._inventory.smart_charging_available:

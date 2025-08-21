@@ -63,8 +63,11 @@ async def async_setup_entry(hass, entry, async_add_devices):
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
         for desc in NUMBERS:
             if desc.key == "maximum_current":
-                ent_initial = cp_id_settings[CONF_MAX_CURRENT]
-                ent_max = cp_id_settings[CONF_MAX_CURRENT]
+                max_cur = float(
+                    cp_id_settings.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT)
+                )
+                ent_initial = max_cur
+                ent_max = max_cur
             else:
                 ent_initial = desc.initial_value
                 ent_max = desc.native_max_value
@@ -147,7 +150,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         if self.connector_id:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
+                name=f"Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:
@@ -182,7 +185,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         )
 
     async def async_set_native_value(self, value):
-        """Set new value for station-wide max current (EVSE 0)."""
+        """Set new value for max current (station-wide when _op_connector_id==0, otherwise per-connector)."""
         num_value = float(value)
         resp = await self.central_system.set_max_charge_rate_amps(
             self.cpid,
