@@ -153,7 +153,7 @@ class ChargerSystemSettings:
     skip_schema_validation: bool
     force_smart_charging: bool
     connection: int | None = None  # number of this connection in central server
-    num_connectors: int = 1
+    num_connectors: int = DEFAULT_NUM_CONNECTORS
 
 
 @dataclass

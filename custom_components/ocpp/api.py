@@ -293,18 +293,18 @@ class CentralSystem:
         """Return metrics."""
         cp_id = self.cpids.get(id, id)
         cp = self.charge_points.get(cp_id)
-        return (cp_id, cp._metrics) if cp is not None else (None, None)
+        n_connectors = getattr(cp, "num_connectors", 1) or 1
+        return (
+            (cp_id, cp._metrics, cp, n_connectors)
+            if cp is not None
+            else (None, None, None, None)
+        )
 
     def get_metric(self, id: str, measurand: str, connector_id: int | None = None):
         """Return last known value for given measurand."""
-        # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
+        if cp is None:
             return None
-
-        cp = self.charge_points[cp_id]
-        m = cp._metrics
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
 
         def _try_val(key):
             with contextlib.suppress(Exception):
@@ -314,7 +314,7 @@ class CentralSystem:
 
         # 1) Explicit connector_id (including 0): just get it
         if connector_id is not None:
-            conn = 0 if connector_id == 0 else connector_id
+            conn = self._norm_conn(connector_id)
             return _try_val((conn, measurand))
 
         # 2) No connector_id: try CHARGER level (conn=0)
@@ -344,8 +344,8 @@ class CentralSystem:
 
     def del_metric(self, id: str, measurand: str, connector_id: int | None = None):
         """Set given measurand to None."""
-        # allow id to be either cpid or cp_id
-        cp_id, m = self._get_metrics(id)
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
+
         if m is None:
             return None
 
@@ -360,14 +360,10 @@ class CentralSystem:
 
     def get_unit(self, id: str, measurand: str, connector_id: int | None = None):
         """Return unit of given measurand."""
-        # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
-            return None
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
 
-        cp = self.charge_points[cp_id]
-        m = cp._metrics
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
+        if cp is None:
+            return None
 
         def _try_unit(key):
             with contextlib.suppress(Exception):
@@ -375,7 +371,7 @@ class CentralSystem:
             return None
 
         if connector_id is not None:
-            conn = 0 if connector_id == 0 else connector_id
+            conn = self._norm_conn(connector_id)
             return _try_unit((conn, measurand))
 
         val = _try_unit((0, measurand))
@@ -401,13 +397,10 @@ class CentralSystem:
 
     def get_ha_unit(self, id: str, measurand: str, connector_id: int | None = None):
         """Return home assistant unit of given measurand."""
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
-            return None
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
 
-        cp = self.charge_points[cp_id]
-        m = cp._metrics
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
+        if cp is None:
+            return None
 
         def _try_ha_unit(key):
             with contextlib.suppress(Exception):
@@ -415,7 +408,7 @@ class CentralSystem:
             return None
 
         if connector_id is not None:
-            conn = 0 if connector_id == 0 else connector_id
+            conn = self._norm_conn(connector_id)
             return _try_ha_unit((conn, measurand))
 
         val = _try_ha_unit((0, measurand))
@@ -441,14 +434,10 @@ class CentralSystem:
 
     def get_extra_attr(self, id: str, measurand: str, connector_id: int | None = None):
         """Return extra attributes for given measurand."""
-        # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
-            return None
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
 
-        cp = self.charge_points[cp_id]
-        m = cp._metrics
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
+        if cp is None:
+            return None
 
         def _try_extra(key):
             with contextlib.suppress(Exception):
@@ -456,7 +445,7 @@ class CentralSystem:
             return None
 
         if connector_id is not None:
-            conn = 0 if connector_id == 0 else connector_id
+            conn = self._norm_conn(connector_id)
             return _try_extra((conn, measurand))
 
         val = _try_extra((0, measurand))
@@ -482,28 +471,27 @@ class CentralSystem:
 
     def get_available(self, id: str, connector_id: int | None = None):
         """Return whether the charger (or a specific connector) is available."""
-        # allow id to be either cpid or cp_id
-        cp_id = self.cpids.get(id, id)
-        if cp_id not in self.charge_points:
-            return False
+        cp_id, m, cp, n_connectors = self._get_metrics(id)
 
-        cp = self.charge_points[cp_id]
+        if cp is None:
+            return None
 
-        if connector_id is None or connector_id == 0:
+        if self._norm_conn(connector_id) == 0:
             return cp.status == STATE_OK
 
-        m = cp._metrics
         status_val = None
         with contextlib.suppress(Exception):
-            status_val = m[(connector_id, cstat.status_connector.value)].value
+            status_val = m[
+                (self._norm_conn(connector_id), cstat.status_connector.value)
+            ].value
 
         if not status_val:
             try:
                 flat = m[cstat.status_connector.value]
                 if hasattr(flat, "extra_attr"):
-                    status_val = flat.extra_attr.get(connector_id) or getattr(
-                        flat, "value", None
-                    )
+                    status_val = flat.extra_attr.get(
+                        self._norm_conn(connector_id)
+                    ) or getattr(flat, "value", None)
             except Exception:
                 pass
 

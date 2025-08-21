@@ -35,7 +35,6 @@ class OcppNumberDescription(NumberEntityDescription):
     """Class to describe a Number entity."""
 
     initial_value: float | None = None
-    connector_id: int | None = None
 
 
 ELECTRIC_CURRENT_AMPERE = UnitOfElectricCurrent.AMPERE
@@ -57,38 +56,61 @@ NUMBERS: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    entities = []
+    entities: list[ChargePointNumber] = []
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
-        for connector_id in range(1, num_connectors + 1):
-            for ent in NUMBERS:
-                if ent.key == "maximum_current":
-                    ent_initial = cp_id_settings[CONF_MAX_CURRENT]
-                    ent_max = cp_id_settings[CONF_MAX_CURRENT]
-                else:
-                    ent_initial = ent.initial_value
-                    ent_max = ent.native_max_value
+        for desc in NUMBERS:
+            if desc.key == "maximum_current":
+                ent_initial = cp_id_settings[CONF_MAX_CURRENT]
+                ent_max = cp_id_settings[CONF_MAX_CURRENT]
+            else:
+                ent_initial = desc.initial_value
+                ent_max = desc.native_max_value
+
+            if num_connectors > 1:
+                for conn_id in range(1, num_connectors + 1):
+                    entities.append(
+                        ChargePointNumber(
+                            hass=hass,
+                            central_system=central_system,
+                            cpid=cpid,
+                            description=OcppNumberDescription(
+                                key=desc.key,
+                                name=desc.name,
+                                icon=desc.icon,
+                                initial_value=ent_initial,
+                                native_min_value=desc.native_min_value,
+                                native_max_value=ent_max,
+                                native_step=desc.native_step,
+                                native_unit_of_measurement=desc.native_unit_of_measurement,
+                            ),
+                            connector_id=conn_id,
+                            op_connector_id=conn_id,
+                        )
+                    )
+            else:
                 entities.append(
                     ChargePointNumber(
-                        hass,
-                        central_system,
-                        cpid,
-                        OcppNumberDescription(
-                            key=ent.key,
-                            name=ent.name,
-                            icon=ent.icon,
+                        hass=hass,
+                        central_system=central_system,
+                        cpid=cpid,
+                        description=OcppNumberDescription(
+                            key=desc.key,
+                            name=desc.name,
+                            icon=desc.icon,
                             initial_value=ent_initial,
-                            native_min_value=ent.native_min_value,
+                            native_min_value=desc.native_min_value,
                             native_max_value=ent_max,
-                            native_step=ent.native_step,
-                            native_unit_of_measurement=ent.native_unit_of_measurement,
-                            connector_id=connector_id,
+                            native_step=desc.native_step,
+                            native_unit_of_measurement=desc.native_unit_of_measurement,
                         ),
-                        connector_id=connector_id,
+                        connector_id=None,
+                        op_connector_id=0,
                     )
                 )
+
     async_add_devices(entities, False)
 
 
@@ -105,6 +127,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         cpid: str,
         description: OcppNumberDescription,
         connector_id: int | None = None,
+        op_connector_id: int | None = None,
     ):
         """Initialize a Number instance."""
         self.cpid = cpid
@@ -112,6 +135,10 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         self.central_system = central_system
         self.entity_description = description
         self.connector_id = connector_id
+        self._op_connector_id = (
+            op_connector_id if op_connector_id is not None else (connector_id or 1)
+        )
+
         parts = [NUMBER_DOMAIN, DOMAIN, cpid, description.key]
         if self.connector_id:
             parts.insert(3, f"conn{self.connector_id}")
@@ -145,24 +172,24 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
     def _schedule_immediate_update(self):
         self.async_schedule_update_ha_state(True)
 
-    # @property
-    # def available(self) -> bool:
-    #    """Return if entity is available."""
-    #    if not (
-    #        Profiles.SMART & self.central_system.get_supported_features(self.cpid)
-    #    ):
-    #        return False
-    #    return self.central_system.get_available(self.cpid)  # type: ignore [no-any-return]
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        features = self.central_system.get_supported_features(self.cpid)
+        has_smart = bool(features & Profiles.SMART)
+        return bool(
+            self.central_system.get_available(self.cpid, self._op_connector_id)
+            and has_smart
+        )
 
     async def async_set_native_value(self, value):
-        """Set new value."""
+        """Set new value for station-wide max current (EVSE 0)."""
         num_value = float(value)
-        if self.central_system.get_available(
-            self.cpid
-        ) and Profiles.SMART & self.central_system.get_supported_features(self.cpid):
-            resp = await self.central_system.set_max_charge_rate_amps(
-                self.cpid, num_value, self.connector_id
-            )
-            if resp is True:
-                self._attr_native_value = num_value
-                self.async_write_ha_state()
+        resp = await self.central_system.set_max_charge_rate_amps(
+            self.cpid,
+            num_value,
+            connector_id=0,
+        )
+        if resp is True:
+            self._attr_native_value = num_value
+            self.async_write_ha_state()

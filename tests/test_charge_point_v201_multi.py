@@ -56,7 +56,7 @@ from .charge_point_test import (
 
 
 class MultiConnectorChargePoint(cpclass):
-    """Minimal OCPP 2.0.1 client som rapporterar 2 EVSE (1: två connectors, 2: en)."""
+    """Minimal OCPP 2.0.1 client that reports 2 EVSE (1: two connectors, 2: one)."""
 
     def __init__(self, cp_id, ws):
         """Initialize."""

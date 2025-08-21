@@ -82,6 +82,9 @@ class ChargePoint(cp):
     _tx_start_time: dict[int, datetime]
     _global_to_evse: dict[int, tuple[int, int]]  # global_idx -> (evse_id, connector_id)
     _evse_to_global: dict[tuple[int, int], int]  # (evse_id, connector_id) -> global_idx
+    _pending_status_notifications: list[
+        tuple[str, str, int, int]
+    ]  # (timestamp, connector_status, evse_id, connector_id)
 
     def __init__(
         self,
@@ -104,33 +107,106 @@ class ChargePoint(cp):
             charger,
         )
         self._tx_start_time = {}
-        self._global_to_evse = {}
-        self._evse_to_global = {}
+        self._global_to_evse: dict[int, tuple[int, int]] = {}
+        self._evse_to_global: dict[tuple[int, int], int] = {}
+        self._pending_status_notifications: list[tuple[str, str, int, int]] = []
 
     # --- Connector mapping helpers (EVSE <-> global index) ---
-    def _build_connector_map(self):
-        """Build maps between global connector index and (evse_id, connector_id)."""
-        self._global_to_evse.clear()
+    def _build_connector_map(self) -> bool:
+        if not self._inventory or self._inventory.evse_count == 0:
+            return False
+        if self._evse_to_global and self._global_to_evse:
+            return True
+
+        g = 1
         self._evse_to_global.clear()
-        if not self._inventory:
-            return
-        idx = 0
+        self._global_to_evse.clear()
         for evse_id in range(1, self._inventory.evse_count + 1):
-            cnt = self._inventory.connector_count[evse_id - 1]
-            for conn_id in range(1, cnt + 1):
-                idx += 1
-                self._global_to_evse[idx] = (evse_id, conn_id)
-                self._evse_to_global[(evse_id, conn_id)] = idx
+            count = 0
+            if len(self._inventory.connector_count) >= evse_id:
+                count = int(self._inventory.connector_count[evse_id - 1] or 0)
+            for conn_id in range(1, count + 1):
+                self._evse_to_global[(evse_id, conn_id)] = g
+                self._global_to_evse[g] = (evse_id, conn_id)
+                g += 1
+        return bool(self._evse_to_global)
+
+    def _ensure_connector_map(self) -> bool:
+        if self._evse_to_global and self._global_to_evse:
+            return True
+        return self._build_connector_map()
 
     def _pair_to_global(self, evse_id: int, conn_id: int) -> int:
-        """Return global index for (evse_id, connector_id). Fallback: first connector of EVSE."""
-        return self._evse_to_global.get(
-            (evse_id, conn_id), self._evse_to_global.get((evse_id, 1), evse_id)
-        )
+        """Return global index for (evse_id, conn_id)."""
+        # Exact match available
+        idx = self._evse_to_global.get((evse_id, conn_id))
+        if idx is not None:
+            return idx
+        # Build from inventory if we have it
+        if self._inventory and not self._evse_to_global:
+            self._build_connector_map()
+            idx = self._evse_to_global.get(
+                (evse_id, conn_id)
+            ) or self._evse_to_global.get((evse_id, 1))
+            if idx is not None:
+                return idx
+        # Allocate a unique index to avoid collisions until inventory arrives
+        new_idx = max(self._global_to_evse.keys(), default=0) + 1
+        self._global_to_evse[new_idx] = (evse_id, conn_id)
+        self._evse_to_global[(evse_id, conn_id)] = new_idx
+        return new_idx
 
     def _global_to_pair(self, global_idx: int) -> tuple[int, int]:
         """Return (evse_id, connector_id) for a global index. Fallback: (global_idx,1)."""
         return self._global_to_evse.get(global_idx, (global_idx, 1))
+
+    def _apply_status_notification(
+        self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
+    ):
+        """Update per connector and evse aggregated."""
+        if evse_id > len(self._connector_status):
+            self._connector_status += [[]] * (evse_id - len(self._connector_status))
+        if connector_id > len(self._connector_status[evse_id - 1]):
+            self._connector_status[evse_id - 1] += [None] * (
+                connector_id - len(self._connector_status[evse_id - 1])
+            )
+
+        evse_list = self._connector_status[evse_id - 1]
+        evse_list[connector_id - 1] = ConnectorStatusEnumType(connector_status)
+
+        global_idx = self._pair_to_global(evse_id, connector_id)
+        self._metrics[
+            (global_idx, cstat.status_connector.value)
+        ].value = ConnectorStatusEnumType(connector_status).value
+
+        evse_status: ConnectorStatusEnumType | None = None
+        for st in evse_list:
+            if st is None:
+                evse_status = None
+                break
+            evse_status = st
+            if st != ConnectorStatusEnumType.available:
+                break
+        if evse_status is not None:
+            if evse_status == ConnectorStatusEnumType.available:
+                v16 = ChargePointStatusv16.available
+            elif evse_status == ConnectorStatusEnumType.faulted:
+                v16 = ChargePointStatusv16.faulted
+            elif evse_status == ConnectorStatusEnumType.unavailable:
+                v16 = ChargePointStatusv16.unavailable
+            else:
+                v16 = ChargePointStatusv16.preparing
+            self._report_evse_status(evse_id, v16)
+
+    def _flush_pending_status_notifications(self):
+        """Flush buffered status notifications when the map is ready."""
+        if not self._ensure_connector_map():
+            return
+        pending = self._pending_status_notifications
+        self._pending_status_notifications = []
+        for t, st, evse_id, conn_id in pending:
+            self._apply_status_notification(t, st, evse_id, conn_id)
+        self.hass.async_create_task(self.update(self.settings.cpid))
 
     def _total_connectors(self) -> int:
         """Total physical connectors across all EVSE."""
@@ -313,7 +389,7 @@ class ChargePoint(cp):
         charging_profile: dict = {
             "id": 1,
             "stack_level": 0,
-            "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile,
+            "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value,
             "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
             "charging_schedule": [schedule],
         }
@@ -376,6 +452,9 @@ class ChargePoint(cp):
             if val:
                 tx_id = val
                 break
+        if not tx_id:
+            _LOGGER.info("No active transaction found to stop")
+            return False
         req: call.RequestStopTransaction = call.RequestStopTransaction(
             transaction_id=tx_id
         )
@@ -495,43 +574,16 @@ class ChargePoint(cp):
         self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
     ):
         """Perform OCPP callback."""
-        if evse_id > len(self._connector_status):
-            self._connector_status += [[]] * (evse_id - len(self._connector_status))
-        if connector_id > len(self._connector_status[evse_id - 1]):
-            self._connector_status[evse_id - 1] += [None] * (
-                connector_id - len(self._connector_status[evse_id - 1])
+        if not self._ensure_connector_map():
+            self._pending_status_notifications.append(
+                (timestamp, connector_status, evse_id, connector_id)
             )
+            return call_result.StatusNotification()
 
-        evse: list[ConnectorStatusEnumType] = self._connector_status[evse_id - 1]
-        evse[connector_id - 1] = ConnectorStatusEnumType(connector_status)
-
-        global_idx = self._pair_to_global(evse_id, connector_id)
-        self._metrics[
-            (global_idx, cstat.status_connector.value)
-        ].value = ConnectorStatusEnumType(connector_status).value
-
+        self._apply_status_notification(
+            timestamp, connector_status, evse_id, connector_id
+        )
         self.hass.async_create_task(self.update(self.settings.cpid))
-
-        evse_status: ConnectorStatusEnumType | None = None
-        for status in evse:
-            if status is None:
-                evse_status = None
-                break
-            evse_status = status
-            if status != ConnectorStatusEnumType.available:
-                break
-
-        if evse_status is not None:
-            if evse_status == ConnectorStatusEnumType.available:
-                evse_status_v16 = ChargePointStatusv16.available
-            elif evse_status == ConnectorStatusEnumType.faulted:
-                evse_status_v16 = ChargePointStatusv16.faulted
-            elif evse_status == ConnectorStatusEnumType.unavailable:
-                evse_status_v16 = ChargePointStatusv16.unavailable
-            else:
-                evse_status_v16 = ChargePointStatusv16.preparing
-            self._report_evse_status(evse_id, evse_status_v16)
-
         return call_result.StatusNotification()
 
     @on(Action.firmware_status_notification)
@@ -556,72 +608,112 @@ class ChargePoint(cp):
 
     @on(Action.notify_report)
     def on_report(self, request_id: int, generated_at: str, seq_no: int, **kwargs):
-        """Perform OCPP callback."""
+        """Handle OCPP 2.x inventory/report updates."""
         if self._wait_inventory is None:
             return call_result.NotifyReport()
+
         if self._inventory is None:
             self._inventory = InventoryReport()
-        reports: list[dict] = kwargs.get("report_data", [])
+
+        reports: list[dict] = kwargs.get("report_data", []) or []
         for report_data in reports:
-            component: dict = report_data["component"]
-            variable: dict = report_data["variable"]
-            component_name = component["name"]
-            variable_name = variable["name"]
+            component: dict = report_data.get("component", {}) or {}
+            variable: dict = report_data.get("variable", {}) or {}
+            component_name: str = str(component.get("name", "") or "")
+            variable_name: str = str(variable.get("name", "") or "")
+
             value: str | None = None
-            for attribute in report_data["variable_attribute"]:
-                if (("type" not in attribute) or (attribute["type"] == "Actual")) and (
-                    "value" in attribute
+            for attr in report_data.get("variable_attribute", []) or []:
+                if ("type" not in attr) or (
+                    str(attr.get("type", "")).casefold() == "actual"
                 ):
-                    value = attribute["value"]
-                    break
-            bool_value: bool = value and (value.casefold() == "true".casefold())
+                    if "value" in attr:
+                        v = attr.get("value")
+                        value = str(v) if v is not None else None
+                        break
+
+            bool_value: bool = False
+            if value is not None and str(value).strip():
+                bool_value = str(value).strip().casefold() == "true"
 
             if (component_name == "SmartChargingCtrlr") and (
                 variable_name == "Available"
             ):
                 self._inventory.smart_charging_available = bool_value
-            elif (component_name == "ReservationCtrlr") and (
+                continue
+            if (component_name == "ReservationCtrlr") and (
                 variable_name == "Available"
             ):
                 self._inventory.reservation_available = bool_value
-            elif (component_name == "LocalAuthListCtrlr") and (
+                continue
+            if (component_name == "LocalAuthListCtrlr") and (
                 variable_name == "Available"
             ):
                 self._inventory.local_auth_available = bool_value
-            elif (component_name == "EVSE") and ("evse" in component):
-                self._inventory.evse_count = max(
-                    self._inventory.evse_count, component["evse"]["id"]
-                )
-                self._inventory.connector_count += [0] * (
-                    self._inventory.evse_count - len(self._inventory.connector_count)
-                )
-            elif (
+                continue
+
+            if (component_name == "EVSE") and ("evse" in component):
+                evse_id = int(component["evse"].get("id", 0) or 0)
+                if evse_id > 0:
+                    self._inventory.evse_count = max(
+                        self._inventory.evse_count, evse_id
+                    )
+                    if (
+                        len(self._inventory.connector_count)
+                        < self._inventory.evse_count
+                    ):
+                        self._inventory.connector_count += [0] * (
+                            self._inventory.evse_count
+                            - len(self._inventory.connector_count)
+                        )
+                continue
+
+            if (
                 (component_name == "Connector")
                 and ("evse" in component)
                 and ("connector_id" in component["evse"])
             ):
-                evse_id = component["evse"]["id"]
-                self._inventory.evse_count = max(self._inventory.evse_count, evse_id)
-                self._inventory.connector_count += [0] * (
-                    self._inventory.evse_count - len(self._inventory.connector_count)
-                )
-                self._inventory.connector_count[evse_id - 1] = max(
-                    self._inventory.connector_count[evse_id - 1],
-                    component["evse"]["connector_id"],
-                )
-            elif (
-                (component_name == "SampledDataCtrlr")
-                and (variable_name == "TxUpdatedMeasurands")
-                and ("variable_characteristics" in report_data)
+                evse_id = int(component["evse"].get("id", 0) or 0)
+                conn_id = int(component["evse"].get("connector_id", 0) or 0)
+                if evse_id > 0 and conn_id > 0:
+                    self._inventory.evse_count = max(
+                        self._inventory.evse_count, evse_id
+                    )
+                    if (
+                        len(self._inventory.connector_count)
+                        < self._inventory.evse_count
+                    ):
+                        self._inventory.connector_count += [0] * (
+                            self._inventory.evse_count
+                            - len(self._inventory.connector_count)
+                        )
+                    self._inventory.connector_count[evse_id - 1] = max(
+                        self._inventory.connector_count[evse_id - 1], conn_id
+                    )
+                continue
+
+            if (component_name == "SampledDataCtrlr") and (
+                variable_name == "TxUpdatedMeasurands"
             ):
-                characteristics: dict = report_data["variable_characteristics"]
-                values: str = characteristics.get("values_list", "")
-                self._inventory.tx_updated_measurands = [
-                    MeasurandEnumType(s) for s in values.split(",")
+                characteristics: dict = (
+                    report_data.get("variable_characteristics", {}) or {}
+                )
+                values: str = str(characteristics.get("values_list", "") or "")
+                meas_list = [
+                    s.strip() for s in values.split(",") if s is not None and s.strip()
                 ]
+                self._inventory.tx_updated_measurands = [
+                    MeasurandEnumType(s) for s in meas_list
+                ]
+                continue
 
         if not kwargs.get("tbc", False):
+            if hasattr(self, "_build_connector_map"):
+                self._build_connector_map()
+            if hasattr(self, "_flush_pending_status_notifications"):
+                self._flush_pending_status_notifications()
             self._wait_inventory.set()
+
         return call_result.NotifyReport()
 
     @on(Action.authorize)
@@ -669,7 +761,7 @@ class ChargePoint(cp):
 
         if (tx_event_type == TransactionEventEnumType.started.value) or (
             (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[(global_idx, csess.meter_start)].value is None)
+            and (self._metrics[(global_idx, csess.meter_start.value)].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
@@ -678,10 +770,10 @@ class ChargePoint(cp):
                         energy_value = cp.get_energy_kwh(measurand_item)
                         energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
                         self._metrics[
-                            (global_idx, csess.meter_start)
+                            (global_idx, csess.meter_start.value)
                         ].value = energy_value
                         self._metrics[
-                            (global_idx, csess.meter_start)
+                            (global_idx, csess.meter_start.value)
                         ].unit = energy_unit
 
         self.process_measurands(converted_values, True, global_idx)
@@ -721,7 +813,7 @@ class ChargePoint(cp):
         offline: bool = kwargs.get("offline", False)
         meter_values: list[dict] = kwargs.get("meter_value", [])
         self._set_meter_values(event_type, meter_values, evse_id, evse_conn_id)
-        t = datetime.fromisoformat(timestamp)
+        t = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
         if "charging_state" in transaction_info:
             state = transaction_info["charging_state"]
@@ -750,16 +842,19 @@ class ChargePoint(cp):
             self._tx_start_time[global_idx] = t
             tx_id: str = transaction_info["transaction_id"]
             self._metrics[(global_idx, csess.transaction_id.value)].value = tx_id
-            self._metrics[(global_idx, csess.session_time)].value = 0
-            self._metrics[(global_idx, csess.session_time)].unit = UnitOfTime.MINUTES
+            self._metrics[(global_idx, csess.session_time.value)].value = 0
+            self._metrics[
+                (global_idx, csess.session_time.value)
+            ].unit = UnitOfTime.MINUTES
         else:
             if self._tx_start_time.get(global_idx):
-                duration_minutes: int = (
-                    (t - self._tx_start_time[global_idx]).seconds + 59
-                ) // 60
-                self._metrics[(global_idx, csess.session_time)].value = duration_minutes
+                elapsed = (t - self._tx_start_time[global_idx]).total_seconds()
+                duration_minutes: int = int((elapsed + 59) // 60)
                 self._metrics[
-                    (global_idx, csess.session_time)
+                    (global_idx, csess.session_time.value)
+                ].value = duration_minutes
+                self._metrics[
+                    (global_idx, csess.session_time.value)
                 ].unit = UnitOfTime.MINUTES
             if event_type == TransactionEventEnumType.ended.value:
                 self._metrics[(global_idx, csess.transaction_id.value)].value = ""

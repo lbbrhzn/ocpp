@@ -118,11 +118,11 @@ class Metric:
 class _ConnectorAwareMetrics(MutableMapping):
     """Backwards compatible mapping for metrics.
 
-      - m["Power.Active.Import"]         -> Metric for connector 0 (flat access)
-      - m[(2, "Power.Active.Import")]    -> Metric for connector 2 (per connector)
-      - m[2]                             -> dict[str -> Metric] for connector 2
+    - m["Power.Active.Import"]         -> Metric for connector 0 (flat access)
+    - m[(2, "Power.Active.Import")]    -> Metric for connector 2 (per connector)
+    - m[2]                             -> dict[str -> Metric] for connector 2
 
-    Iteration, len, keys(), items() etc act like flat dict (connector 0).
+    Iteration, len, keys(), values(), items() operate on connector 0 (flat view).
     """
 
     def __init__(self):
@@ -798,7 +798,7 @@ class ChargePoint(cp):
                         else:
                             # Derive: EAIR_kWh - meter_start_kWh
                             ms_val = self._metrics[
-                                (connector_id, csess.meter_start)
+                                (connector_id, csess.meter_start.value)
                             ].value
                             if ms_val is not None:
                                 self._metrics[

@@ -55,17 +55,29 @@ async def async_setup_entry(hass, entry, async_add_devices):
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
 
-        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1))
+        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
 
         for desc in BUTTONS:
             if desc.per_connector:
-                for connector_id in range(1, num_connectors + 1):
+                if num_connectors > 1:
+                    for connector_id in range(1, num_connectors + 1):
+                        entities.append(
+                            ChargePointButton(
+                                central_system=central_system,
+                                cpid=cpid,
+                                description=desc,
+                                connector_id=connector_id,
+                                op_connector_id=connector_id,
+                            )
+                        )
+                else:
                     entities.append(
                         ChargePointButton(
                             central_system=central_system,
                             cpid=cpid,
                             description=desc,
-                            connector_id=connector_id,
+                            connector_id=None,
+                            op_connector_id=1,
                         )
                     )
             else:
@@ -75,6 +87,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                         cpid=cpid,
                         description=desc,
                         connector_id=None,
+                        op_connector_id=None,
                     )
                 )
 
@@ -93,12 +106,14 @@ class ChargePointButton(ButtonEntity):
         cpid: str,
         description: OcppButtonDescription,
         connector_id: int | None = None,
+        op_connector_id: int | None = None,
     ):
         """Instantiate instance of a ChargePointButton."""
         self.cpid = cpid
         self.central_system = central_system
         self.entity_description = description
         self.connector_id = connector_id
+        self._op_connector_id = op_connector_id
         parts = [BUTTON_DOMAIN, DOMAIN, cpid, description.key]
         if self.connector_id:
             parts.insert(3, f"conn{self.connector_id}")
@@ -119,12 +134,12 @@ class ChargePointButton(ButtonEntity):
     @property
     def available(self) -> bool:
         """Return charger availability."""
-        return self.central_system.get_available(self.cpid, self.connector_id)
+        return self.central_system.get_available(self.cpid, self._op_connector_id)
 
     async def async_press(self) -> None:
         """Triggers the charger press action service."""
         await self.central_system.set_charger_state(
             self.cpid,
             self.entity_description.press_action,
-            connector_id=self.connector_id,
+            connector_id=self._op_connector_id,
         )

@@ -129,5 +129,5 @@ dmypy.json
 .pyre/
 
 # HA Development
-config/
-**/.DS_Store
+/config/
+.DS_Store

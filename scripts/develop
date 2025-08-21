@@ -13,11 +13,25 @@ fi
 mkdir -p "${PWD}/config/custom_components"
 
 # Link the ocpp integration (overwrite if exists)
-ln -sfn "${PWD}/custom_components/ocpp" "${PWD}/config/custom_components/ocpp"
+src="${PWD}/custom_components/ocpp"
+dst="${PWD}/config/custom_components/ocpp"
+if [[ ! -d "$src" ]]; then
+  echo "Missing integration sources at: $src" >&2
+  exit 1
+fi
+ln -sfn "$src" "$dst"
 
 # Install debugpy if missing
-/home/vscode/.local/ha-venv/bin/python -m pip install --quiet debugpy || true
+if ! /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then
+  /home/vscode/.local/ha-venv/bin/python -m pip install --quiet debugpy
+fi
 
-# Start Home Assistant with debugger
-exec /home/vscode/.local/ha-venv/bin/python -m debugpy --listen 0.0.0.0:5678 \
+# Start Home Assistant (prefer debugger if available)
+DEBUGPY_LISTEN="${DEBUGPY_LISTEN:-0.0.0.0:5678}"
+if /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then
+  exec /home/vscode/.local/ha-venv/bin/python -m debugpy --listen "${DEBUGPY_LISTEN}" \
     -m homeassistant --config "${PWD}/config" --debug
+else
+  echo "debugpy not available; starting Home Assistant without debugger" >&2
+  exec /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --debug
+fi

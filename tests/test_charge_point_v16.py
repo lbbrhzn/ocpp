@@ -652,7 +652,10 @@ async def test_cms_responses_errors_v16(
 async def test_cms_responses_normal_multiple_connectors_v16(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
-    """Test central system responses to a charger under normal operation with multiple connectors."""
+    """Test central system responses to a charger.
+
+    Normal operation with multiple connectors.
+    """
 
     cs = setup_config_entry
     num_connectors = 2
@@ -663,8 +666,9 @@ async def test_cms_responses_normal_multiple_connectors_v16(
     ) as ws:
         cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=num_connectors)
 
-        tasks = [
-            cp.start(),
+        cp_task = asyncio.create_task(cp.start())
+
+        phase1 = [
             cp.send_boot_notification(),
             cp.send_authorize(),
             cp.send_heartbeat(),
@@ -674,9 +678,8 @@ async def test_cms_responses_normal_multiple_connectors_v16(
             cp.send_status_for_all_connectors(),
             cp.send_start_transaction(12345),
         ]
-
         for conn_id in range(1, num_connectors + 1):
-            tasks.extend(
+            phase1.extend(
                 [
                     cp.send_meter_err_phases(connector_id=conn_id),
                     cp.send_meter_line_voltage(connector_id=conn_id),
@@ -684,10 +687,16 @@ async def test_cms_responses_normal_multiple_connectors_v16(
                 ]
             )
 
-        tasks.append(cp.send_stop_transaction(1))
-
         with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+            await asyncio.wait_for(asyncio.gather(*phase1), timeout=10)
+
+        await cp.send_stop_transaction(1)
+
+        await asyncio.sleep(0.05)
+
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
 
         await ws.close()
 

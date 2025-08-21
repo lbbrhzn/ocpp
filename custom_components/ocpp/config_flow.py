@@ -93,7 +93,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
-        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): int,
+        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): vol.All(
+            vol.Coerce(int), vol.Range(min=1)
+        ),
     }
 )
 

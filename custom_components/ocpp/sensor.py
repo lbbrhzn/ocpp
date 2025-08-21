@@ -48,12 +48,12 @@ async def async_setup_entry(hass, entry, async_add_devices):
         cpid = cp_id_settings[CONF_CPID]
         num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
 
-        measurands = list(
-            set(
-                cp_id_settings[CONF_MONITORED_VARIABLES].split(",")
-                + list(HAChargerSession)
-            )
-        )
+        configured = [
+            m.strip()
+            for m in cp_id_settings[CONF_MONITORED_VARIABLES].split(",")
+            if m and m.strip()
+        ]
+        measurands = list(set(configured + list(HAChargerSession)))
 
         CHARGER_ONLY = [
             HAChargerStatuses.status.value,
@@ -78,10 +78,11 @@ async def async_setup_entry(hass, entry, async_add_devices):
         ]
 
         def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
+            ms = str(metric).strip()
             return OcppSensorDescription(
-                key=metric.lower(),
-                name=metric.replace(".", " "),
-                metric=metric,
+                key=ms.lower(),
+                name=ms.replace(".", " "),
+                metric=ms,
                 entity_category=EntityCategory.DIAGNOSTIC if cat_diag else None,
             )
 
@@ -116,17 +117,6 @@ async def async_setup_entry(hass, entry, async_add_devices):
                             connector_id=conn_id,
                         )
                     )
-
-            for metric in ["Energy.Active.Import.Register"]:
-                entities.append(
-                    ChargePointMetric(
-                        hass,
-                        central_system,
-                        cpid,
-                        _mk_desc(metric),
-                        connector_id=None,
-                    )
-                )
         else:
             for metric in CONNECTOR_ONLY:
                 entities.append(
@@ -173,11 +163,11 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
         parts = [DOMAIN, self.cpid, self.entity_description.key, SENSOR_DOMAIN]
-        if self.connector_id:
+        if self.connector_id is not None:
             parts.insert(2, f"conn{self.connector_id}")
         self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
-        if self.connector_id:
+        if self.connector_id is not None:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
                 name=f"{cpid} Connector {self.connector_id}",
