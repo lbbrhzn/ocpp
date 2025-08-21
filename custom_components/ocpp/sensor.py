@@ -28,7 +28,7 @@ from .const import (
     ICON,
     Measurand,
 )
-from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
+from .enums import HAChargerDetails, HAChargerStatuses
 
 
 @dataclass
@@ -50,10 +50,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
         configured = [
             m.strip()
-            for m in cp_id_settings[CONF_MONITORED_VARIABLES].split(",")
+            for m in str(cp_id_settings.get(CONF_MONITORED_VARIABLES, "")).split(",")
             if m and m.strip()
         ]
-        measurands = list(set(configured + list(HAChargerSession)))
+        measurands = sorted(configured)
 
         CHARGER_ONLY = [
             HAChargerStatuses.status.value,

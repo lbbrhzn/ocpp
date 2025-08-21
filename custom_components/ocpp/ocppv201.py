@@ -165,7 +165,8 @@ class ChargePoint(cp):
     ):
         """Update per connector and evse aggregated."""
         if evse_id > len(self._connector_status):
-            self._connector_status += [[]] * (evse_id - len(self._connector_status))
+            needed = evse_id - len(self._connector_status)
+            self._connector_status.extend([[] for _ in range(needed)])
         if connector_id > len(self._connector_status[evse_id - 1]):
             self._connector_status[evse_id - 1] += [None] * (
                 connector_id - len(self._connector_status[evse_id - 1])
@@ -346,9 +347,18 @@ class ChargePoint(cp):
         conn_id: int = 0,
         profile: dict | None = None,
     ):
-        """Set a charging profile with defined limit (OCPP 2.x)."""
+        """Set a charging profile with defined limit (OCPP 2.x).
+
+        - conn_id=0 (default) targets the Charging Station (evse_id=0).
+        - conn_id>0 targets the specific EVSE corresponding to the global connector index.
+        """
+
+        evse_target = 0
+        if conn_id and conn_id > 0:
+            with contextlib.suppress(Exception):
+                evse_target, _ = self._global_to_pair(int(conn_id))
         if profile is not None:
-            req = call.SetChargingProfile(0, profile)
+            req = call.SetChargingProfile(evse_target, profile)
             resp: call_result.SetChargingProfile = await self.call(req)
             if resp.status != ChargingProfileStatusEnumType.accepted:
                 raise HomeAssistantError(
@@ -394,7 +404,9 @@ class ChargePoint(cp):
             "charging_schedule": [schedule],
         }
 
-        req: call.SetChargingProfile = call.SetChargingProfile(0, charging_profile)
+        req: call.SetChargingProfile = call.SetChargingProfile(
+            evse_target, charging_profile
+        )
         resp: call_result.SetChargingProfile = await self.call(req)
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
@@ -859,6 +871,7 @@ class ChargePoint(cp):
             if event_type == TransactionEventEnumType.ended.value:
                 self._metrics[(global_idx, csess.transaction_id.value)].value = ""
                 self._metrics[(global_idx, cstat.id_tag.value)].value = ""
+                self._tx_start_time.pop(global_idx, None)
 
         if not offline:
             self.hass.async_create_task(self.update(self.settings.cpid))

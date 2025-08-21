@@ -157,7 +157,6 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             )
         self._attr_native_value = self.entity_description.initial_value
         self._attr_should_poll = False
-        self._attr_available = True
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
@@ -188,7 +187,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         resp = await self.central_system.set_max_charge_rate_amps(
             self.cpid,
             num_value,
-            connector_id=0,
+            connector_id=self._op_connector_id,
         )
         if resp is True:
             self._attr_native_value = num_value

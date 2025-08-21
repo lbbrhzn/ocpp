@@ -38,7 +38,7 @@ BUTTONS: Final = [
     OcppButtonDescription(
         key="unlock",
         name="Unlock",
-        device_class=ButtonDeviceClass.UPDATE,
+        device_class=None,
         entity_category=EntityCategory.CONFIG,
         press_action=HAChargerServices.service_unlock.name,
         per_connector=True,

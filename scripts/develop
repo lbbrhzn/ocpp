@@ -3,10 +3,10 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-# Create config dir if not present
-if [[ ! -d "${PWD}/config" ]]; then
-    mkdir -p "${PWD}/config"
-    /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --script ensure_config
+# Create/prepare config
+mkdir -p "${PWD}/config"
+if [[ ! -f "${PWD}/config/configuration.yaml" ]]; then
+  /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --script ensure_config
 fi
 
 # Ensure custom components dir exists
@@ -19,7 +19,11 @@ if [[ ! -d "$src" ]]; then
   echo "Missing integration sources at: $src" >&2
   exit 1
 fi
-ln -sfn "$src" "$dst"
+
+# Remove existing dir/symlink/file at destination
+if [[ -e "$dst" || -L "$dst" ]]; then
+  rm -rf -- "$dst"
+fi
 
 # Install debugpy if missing
 if ! /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then

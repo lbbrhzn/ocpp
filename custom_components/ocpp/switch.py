@@ -121,16 +121,11 @@ class ChargePointSwitch(SwitchEntity):
         self._flatten_single = flatten_single
         self._state = self.entity_description.default_state
         parts = [SWITCH_DOMAIN, DOMAIN, cpid]
-        if self.connector_id:
+        if self.connector_id and not self._flatten_single:
             parts.append(f"conn{self.connector_id}")
         parts.append(description.key)
         self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
-        if self.entity_description.per_connector and self.connector_id:
-            if self._flatten_single:
-                self._attr_name = (
-                    f"Connector {self.connector_id} {self.entity_description.name}"
-                )
         if self.connector_id and not self._flatten_single:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
@@ -174,18 +169,14 @@ class ChargePointSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
-        target_conn = (
-            self.connector_id if self.entity_description.per_connector else None
-        )
+        target_conn = self.connector_id if self.entity_description.per_connector else 0
         self._state = await self.central_system.set_charger_state(
             self.cpid, self.entity_description.on_action, True, connector_id=target_conn
         )
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
-        target_conn = (
-            self.connector_id if self.entity_description.per_connector else None
-        )
+        target_conn = self.connector_id if self.entity_description.per_connector else 0
         if self.entity_description.off_action is None:
             resp = True
         elif self.entity_description.off_action == self.entity_description.on_action:
