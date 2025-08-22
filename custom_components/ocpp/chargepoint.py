@@ -409,9 +409,11 @@ class ChargePoint(cp):
         return False
 
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
-        """Update charger with new firmware if available."""
-        """where firmware_url is the http or https url of the new firmware"""
-        """and wait_time is hours from now to wait before install"""
+        """Update charger with new firmware if available.
+
+        - firmware_url is the http or https url of the new firmware
+        - wait_time is hours from now to wait before install
+        """
         pass
 
     async def get_diagnostics(self, upload_url: str):

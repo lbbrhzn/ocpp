@@ -283,17 +283,10 @@ class ChargePoint(cp):
         purpose: ChargingProfilePurposeType | None = None,
     ) -> bool:
         """Clear charging profiles (per connector and/or purpose)."""
-        criteria = {}
-        if purpose is not None:
-            criteria["charging_profile_purpose"] = purpose.value
-
-        target_connector = None
-        if conn_id is not None:
-            target_connector = int(conn_id)
-
+        target_connector = int(conn_id) if conn_id is not None else None
         req = call.ClearChargingProfile(
             connector_id=target_connector,
-            charging_profile_purpose=criteria if criteria else None,
+            charging_profile_purpose=purpose.value if purpose is not None else None,
         )
         resp = await self.call(req)
         if resp.status in (
@@ -492,40 +485,58 @@ class ChargePoint(cp):
             return False
 
     async def update_firmware(self, firmware_url: str, wait_time: int = 0):
-        """Update charger with new firmware if available."""
-        """where firmware_url is the http or https url of the new firmware"""
-        """and wait_time is hours from now to wait before install"""
-        if prof.FW in self._attr_supported_features:
-            schema = vol.Schema(vol.Url())
-            try:
-                url = schema(firmware_url)
-            except vol.MultipleInvalid as e:
-                _LOGGER.debug("Failed to parse url: %s", e)
-            update_time = (datetime.now(tz=UTC) + timedelta(hours=wait_time)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            req = call.UpdateFirmware(location=url, retrieve_date=update_time)
+        """Update charger with new firmware if available.
+
+        - firmware_url: http/https URL of the new firmware
+        - wait_time: hours from now to wait before install
+        """
+        features = int(self._attr_supported_features or 0)
+        if not (features & prof.FW):
+            _LOGGER.warning("Charger does not support OCPP firmware updating")
+            return False
+
+        schema = vol.Schema(vol.Url())
+        try:
+            url = schema(firmware_url)
+        except vol.MultipleInvalid as e:
+            _LOGGER.warning("Failed to parse url: %s", e)
+            return False
+
+        try:
+            retrieve_time = (
+                datetime.now(tz=UTC) + timedelta(hours=max(0, int(wait_time or 0)))
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            retrieve_time = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        try:
+            req = call.UpdateFirmware(location=str(url), retrieve_date=retrieve_time)
             resp = await self.call(req)
-            _LOGGER.info("Response: %s", resp)
+            _LOGGER.info("UpdateFirmware response: %s", resp)
             return True
-        else:
-            _LOGGER.warning("Charger does not support ocpp firmware updating")
+        except Exception as e:
+            _LOGGER.error("UpdateFirmware failed: %s", e)
             return False
 
     async def get_diagnostics(self, upload_url: str):
         """Upload diagnostic data to server from charger."""
-        if prof.FW in self._attr_supported_features:
+        features = int(self._attr_supported_features or 0)
+        if features & prof.FW:
             schema = vol.Schema(vol.Url())
             try:
                 url = schema(upload_url)
             except vol.MultipleInvalid as e:
                 _LOGGER.warning("Failed to parse url: %s", e)
-            req = call.GetDiagnostics(location=url)
+                return
+            req = call.GetDiagnostics(location=str(url))
             resp = await self.call(req)
             _LOGGER.info("Response: %s", resp)
             return True
         else:
-            _LOGGER.warning("Charger does not support ocpp diagnostics uploading")
+            _LOGGER.debug(
+                "Charger %s does not support ocpp diagnostics uploading",
+                self.id,
+            )
             return False
 
     async def data_transfer(self, vendor_id: str, message_id: str = "", data: str = ""):

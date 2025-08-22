@@ -165,6 +165,8 @@ class ChargePointSwitch(SwitchEntity):
             )
             if self.entity_description.metric_condition is not None:
                 self._state = resp in self.entity_description.metric_condition
+            else:
+                self._state = bool(resp)
         return self._state
 
     async def async_turn_on(self, **kwargs):

@@ -80,7 +80,7 @@ class ChargePoint(cp):
 
     _inventory: InventoryReport | None = None
     _wait_inventory: asyncio.Event | None = None
-    _connector_status: list[list[ConnectorStatusEnumType | None]] = []
+    _connector_status: list[list[ConnectorStatusEnumType | None]]
     _tx_start_time: dict[int, datetime]
     _global_to_evse: dict[int, tuple[int, int]]  # global_idx -> (evse_id, connector_id)
     _evse_to_global: dict[tuple[int, int], int]  # (evse_id, connector_id) -> global_idx
@@ -112,6 +112,7 @@ class ChargePoint(cp):
         self._global_to_evse: dict[int, tuple[int, int]] = {}
         self._evse_to_global: dict[tuple[int, int], int] = {}
         self._pending_status_notifications: list[tuple[str, str, int, int]] = []
+        self._connector_status = []
 
     # --- Connector mapping helpers (EVSE <-> global index) ---
     def _build_connector_map(self) -> bool:
