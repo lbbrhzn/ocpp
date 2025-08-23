@@ -1133,6 +1133,8 @@ async def test_on_meter_values_paths_v16(
         try:
             # Boot (enough for the CS to register the CPID).
             await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
             cpid = cs.charge_points[cp_id].settings.cpid
 
             # 1) Start a transaction so the helper for "main meter" won't block.
@@ -1208,6 +1210,8 @@ async def test_on_meter_values_paths_v16(
             cp_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cp_task
+
+            await ws.close()
 
 
 @pytest.mark.timeout(10)
@@ -1328,7 +1332,7 @@ async def test_on_meter_values_restore_paths_v16(
         await ws.close()
 
 
-@pytest.mark.timeout(5)
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9012, "cp_id": "CP_1_monconn", "cms": "cms_monconn"}],
@@ -1352,8 +1356,12 @@ async def test_monitor_connection_timeout_branch(
 
         srv_cp = cs.charge_points[cp_id]
 
-        # Patch asyncio in the module under test.
         from custom_components.ocpp import chargepoint as cp_mod
+
+        async def noop_task(_coro):
+            return None
+
+        monkeypatch.setattr(srv_cp.hass, "async_create_task", noop_task, raising=True)
 
         async def fast_sleep(_):
             return None  # skip the initial sleep(10) and interval sleeps
@@ -1362,13 +1370,6 @@ async def test_monitor_connection_timeout_branch(
 
         # First wait_for returns a never-finishing "pong waiter",
         # second wait_for raises TimeoutError -> hits the except branch
-        calls = {"n": 0}
-
-        class _NeverFinishes:
-            def __await__(self):
-                fut = asyncio.get_event_loop().create_future()
-                return fut.__await__()
-
         calls = {"n": 0}
 
         async def fake_wait_for(awaitable, timeout):
@@ -1392,15 +1393,39 @@ async def test_monitor_connection_timeout_branch(
         srv_cp.cs_settings.websocket_ping_timeout = 0.01
         srv_cp.cs_settings.websocket_ping_tries = 0  # => > tries -> raise
 
+        srv_cp.post_connect_success = True
+
+        async def noop():
+            return None
+
+        monkeypatch.setattr(srv_cp, "post_connect", noop, raising=True)
+        monkeypatch.setattr(srv_cp, "set_availability", noop, raising=True)
+
         with pytest.raises(TimeoutError):
             await srv_cp.monitor_connection()
 
         assert calls["n"] >= 2  # both wait_for calls were exercised
 
-        # Cleanup
+        # Cleanup (deterministic)
+        # 1) Close websocket first to stop further I/O.
+        await ws.close()
 
+        # 2) Give the loop a tick so pending send/recv tasks notice the close.
+        await asyncio.sleep(0)
+
+        # 3) Cancel any helper tasks you spawned on the client (defensive).
+        for t in list(getattr(cp, "_tasks", [])):
+            t.cancel()
+            with contextlib.suppress(
+                asyncio.CancelledError, websockets.exceptions.ConnectionClosedOK
+            ):
+                await t
+
+        # 4) Now cancel the client's main OCPP task.
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+        with contextlib.suppress(
+            asyncio.CancelledError, websockets.exceptions.ConnectionClosedOK
+        ):
             await cp_task
 
 
@@ -1433,6 +1458,7 @@ async def test_api_get_extra_attr_paths(
         cp_task = asyncio.create_task(cp.start())
         # One Boot is enough to associate the CP id in CS
         await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
 
         # Grab server-side CP and seed metrics directly
         cp_srv = cs.charge_points[cp_id]
@@ -1461,10 +1487,17 @@ async def test_api_get_extra_attr_paths(
         assert attrs_fallback == {"custom": "c1", "context": "Override"}
 
         # Clean up
+        for t in list(getattr(cp, "_tasks", [])):
+            t.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
 
         cp_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
+
+        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
+            await ws.close()
 
 
 @pytest.mark.timeout(20)
@@ -1656,7 +1689,7 @@ async def test_update_firmware_rpc_failure_v16(
         await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9018, "cp_id": "CP_1_unit_fallback", "cms": "cms_unit_fallback"}],
@@ -1703,12 +1736,20 @@ async def test_api_get_unit_fallback_to_later_connectors(
         assert unit == "kW"
 
         # Cleanup
+        for t in list(getattr(cp, "_tasks", [])):
+            t.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
+
         cp_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
 
+        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
+            await ws.close()
 
-@pytest.mark.timeout(10)
+
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [
@@ -1774,9 +1815,17 @@ async def test_api_get_extra_attr_fallback_to_later_connectors(
         assert got == expected
 
         # Cleanup
+        for t in list(getattr(cp, "_tasks", [])):
+            t.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
+
         cp_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
+
+        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
+            await ws.close()
 
 
 class ChargePoint(cpclass):

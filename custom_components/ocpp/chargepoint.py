@@ -169,10 +169,9 @@ class _ConnectorAwareMetrics(MutableMapping):
         return len(self._by_conn[0])
 
     def get(self, key, default=None):
-        try:
+        if key in self:
             return self[key]
-        except KeyError:
-            return default
+        return default
 
     def keys(self):
         return self._by_conn[0].keys()

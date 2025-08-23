@@ -140,14 +140,13 @@ def test_get_variants_and_contains_behavior():
     assert got.value == 230.0
     assert "Voltage" in m
 
-    # 2) get() missing flat key -> defaultdict creates Metric(None, None); default is ignored
+    # 2) get() missing flat key -> default is returned
     default_metric = M(0.0, "V")
     got_default = m.get("Nope", default_metric)
     assert isinstance(got_default, Metric)
-    assert got_default is not default_metric
-    assert got_default.value is None
-    # Key is now present due to defaultdict insertion
-    assert "Nope" in m
+    assert got_default is default_metric
+    assert got_default.value == 0.0
+    assert "V" not in m
 
     # 3) get() existing tuple key
     got_c2 = m.get((2, "Voltage"))
@@ -155,18 +154,13 @@ def test_get_variants_and_contains_behavior():
     assert got_c2.value == 231.0
     assert 2 in m
 
-    # 4) get() missing tuple key -> also inserts a Metric(None, None)
+    # 4) get() missing tuple key -> also inserts default, not the missing key
     missing_default = M(7.0)
     got_missing = m.get((2, "Missing"), missing_default)
     assert isinstance(got_missing, Metric)
-    assert got_missing is not missing_default
-    assert got_missing.value is None
-    assert 2 in m and "Missing" in m[2]
-
-    # 5) get() on a brand new connector id returns its (empty) dict and creates it
-    conn99 = m.get(99)
-    assert isinstance(conn99, dict)
-    assert 99 in m
+    assert got_missing is missing_default
+    assert got_missing.value == 7.0
+    assert 2 in m and "Missing" not in m[2]
 
 
 def test_delitem_all_paths_and_errors():
