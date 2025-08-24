@@ -20,6 +20,7 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    CONF_NUM_CONNECTORS,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -39,6 +40,7 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_NUM_CONNECTORS,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -91,6 +93,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
+        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): vol.All(
+            vol.Coerce(int), vol.Range(min=1)
+        ),
     }
 )
 
@@ -106,7 +111,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 0
+    MINOR_VERSION = 1
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):

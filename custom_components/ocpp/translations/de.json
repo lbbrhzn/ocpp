@@ -27,7 +27,8 @@
                     "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
                     "skip_schema_validation": "Überspringe OCPP-Schemavalidierung",
                     "force_smart_charging": "Erzwinge Smart Charging Funktionsprofil",
-                    "monitored_variables_autoconfig": "Automatische Erkennung der OCPP-Messwerte"
+                    "monitored_variables_autoconfig": "Automatische Erkennung der OCPP-Messwerte",
+                    "num_connectors": "Anzahl der Anschlüsse pro Ladestation"
                 }
             },
             "measurands": {

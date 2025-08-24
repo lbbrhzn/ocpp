@@ -1,24 +1,44 @@
 #!/usr/bin/env bash
-
 set -e
 
 cd "$(dirname "$0")/.."
 
-# Create config dir if not present
-if [[ ! -d "${PWD}/config" ]]; then
-    mkdir -p "${PWD}/config"
-    hass --config "${PWD}/config" --script ensure_config
+# Create/prepare config
+mkdir -p "${PWD}/config"
+if [[ ! -f "${PWD}/config/configuration.yaml" ]]; then
+  /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --script ensure_config
 fi
 
-# Create custom components dir if not present
-if [[ ! -d "${PWD}/config/custom_components" ]]; then
-    mkdir -p "${PWD}/config/custom_components"
-    hass --config "${PWD}/config" --script ensure_config
+# Ensure custom components dir exists
+mkdir -p "${PWD}/config/custom_components"
+
+# Link the ocpp integration (overwrite if exists)
+src="${PWD}/custom_components/ocpp"
+dst="${PWD}/config/custom_components/ocpp"
+if [[ ! -d "$src" ]]; then
+  echo "Missing integration sources at: $src" >&2
+  exit 1
 fi
 
-# copy the ocpp integration
-rm -rf $PWD/config/custom_components/ocpp
-cp -r -l $PWD/custom_components/ocpp $PWD/config/custom_components/
+# Remove existing dir/symlink/file at destination
+if [[ -e "$dst" || -L "$dst" ]]; then
+  rm -rf -- "$dst"
+fi
 
-# Start Home Assistant
-hass --config "${PWD}/config" --debug
+# Create the symlink
+ln -s "$src" "$dst"
+
+# Install debugpy if missing
+if ! /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then
+  /home/vscode/.local/ha-venv/bin/python -m pip install --quiet debugpy
+fi
+
+# Start Home Assistant (prefer debugger if available)
+DEBUGPY_LISTEN="${DEBUGPY_LISTEN:-0.0.0.0:5678}"
+if /home/vscode/.local/ha-venv/bin/python -c 'import debugpy' >/dev/null 2>&1; then
+  exec /home/vscode/.local/ha-venv/bin/python -m debugpy --listen "${DEBUGPY_LISTEN}" \
+    -m homeassistant --config "${PWD}/config" --debug
+else
+  echo "debugpy not available; starting Home Assistant without debugger" >&2
+  exec /home/vscode/.local/ha-venv/bin/python -m homeassistant --config "${PWD}/config" --debug
+fi

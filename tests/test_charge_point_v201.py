@@ -1058,12 +1058,12 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     # Junk report to be ignored
     await cp.call(call.NotifyReport(2, datetime.now(tz=UTC).isoformat(), 0))
 
-    assert cs.get_metric(cpid, cdet.serial.value) == "SERIAL"
-    assert cs.get_metric(cpid, cdet.model.value) == "MODEL"
-    assert cs.get_metric(cpid, cdet.vendor.value) == "VENDOR"
-    assert cs.get_metric(cpid, cdet.firmware_version.value) == "VERSION"
+    assert cs.get_metric(cpid, cdet.serial.value, connector_id=0) == "SERIAL"
+    assert cs.get_metric(cpid, cdet.model.value, connector_id=0) == "MODEL"
+    assert cs.get_metric(cpid, cdet.vendor.value, connector_id=0) == "VENDOR"
+    assert cs.get_metric(cpid, cdet.firmware_version.value, connector_id=0) == "VERSION"
     assert (
-        cs.get_metric(cpid, cdet.features.value)
+        cs.get_metric(cpid, cdet.features.value, connector_id=0)
         == Profiles.CORE | Profiles.SMART | Profiles.RES | Profiles.AUTH
     )
     assert (
@@ -1164,10 +1164,7 @@ async def _extra_features_test(
     await wait_ready(cs.charge_points[cp_id])
 
     assert (
-        cs.get_metric(
-            cpid,
-            cdet.features.value,
-        )
+        cs.get_metric(cpid, cdet.features.value, connector_id=0)
         == Profiles.CORE
         | Profiles.SMART
         | Profiles.RES
@@ -1219,10 +1216,7 @@ async def _unsupported_base_report_test(
     )
     await wait_ready(cs.charge_points[cp_id])
     assert (
-        cs.get_metric(
-            cpid,
-            cdet.features.value,
-        )
+        cs.get_metric(cpid, cdet.features.value, connector_id=0)
         == Profiles.CORE | Profiles.REM | Profiles.FW
     )
 

@@ -25,6 +25,7 @@ CONF_MODE = ha.CONF_MODE
 CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
 CONF_MONITORED_VARIABLES_AUTOCONFIG = "monitored_variables_autoconfig"
 CONF_NAME = ha.CONF_NAME
+CONF_NUM_CONNECTORS = "num_connectors"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
@@ -45,6 +46,7 @@ DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_CURRENT = 32
+DEFAULT_NUM_CONNECTORS = 1
 DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
 DEFAULT_FORCE_SMART_CHARGING = False
@@ -151,6 +153,7 @@ class ChargerSystemSettings:
     skip_schema_validation: bool
     force_smart_charging: bool
     connection: int | None = None  # number of this connection in central server
+    num_connectors: int = DEFAULT_NUM_CONNECTORS
 
 
 @dataclass
