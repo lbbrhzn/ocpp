@@ -380,26 +380,27 @@ async def test_cms_responses_normal_v16(
     ) as ws:
         # use a different id for debugging
         cp = ChargePoint(f"{cp_id}_client", ws)
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                    cp.send_boot_notification(),
-                    cp.send_authorize(),
-                    cp.send_heartbeat(),
-                    cp.send_status_notification(),
-                    cp.send_security_event(),
-                    cp.send_firmware_status(),
-                    cp.send_data_transfer(),
-                    cp.send_start_transaction(12345),
-                    cp.send_meter_err_phases(),
-                    cp.send_meter_line_voltage(),
-                    cp.send_meter_periodic_data(),
-                    # add delay to allow meter data to be processed
-                    cp.send_stop_transaction(1),
-                ),
-                timeout=8,
-            )
+        cp_task = asyncio.create_task(cp.start())
+
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+        await cp.send_boot_notification()
+        await cp.send_authorize()
+        await cp.send_heartbeat()
+        await cp.send_status_notification()
+        await cp.send_security_event()
+        await cp.send_firmware_status()
+        await cp.send_data_transfer()
+        await cp.send_start_transaction(12345)
+        await cp.send_meter_err_phases()
+        await cp.send_meter_line_voltage()
+        await cp.send_meter_periodic_data()
+        # add delay to allow meter data to be processed
+        await cp.send_stop_transaction(1)
+
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
     cpid = cs.charge_points[cp_id].settings.cpid
@@ -485,6 +486,8 @@ async def test_cms_responses_actions_v16(
                 timeout=10,
             )
             cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
         await ws.close()
 
     # cpid set in cs after websocket connection
@@ -638,6 +641,8 @@ async def test_cms_responses_errors_v16(
             )
             await cs.charge_points[cp_id].stop()
             cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
         await ws.close()
 
     # test services when charger is unavailable
@@ -650,7 +655,7 @@ async def test_cms_responses_errors_v16(
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
-    [{"port": 9007, "cp_id": "CP_1_norm_mc", "cms": "cms_norm", "num_connectors": 2}],
+    [{"port": 9007, "cp_id": "CP_1_norm_mc", "cms": "cms_norm"}],
     indirect=True,
 )
 @pytest.mark.parametrize("cp_id", ["CP_1_norm_mc"])
@@ -692,6 +697,8 @@ async def test_cms_responses_normal_multiple_connectors_v16(
         await cp.send_stop_transaction(1)
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
     cpid = cs.charge_points[cp_id].settings.cpid
@@ -770,6 +777,8 @@ async def test_clear_profile_v16(hass, socket_enabled, cp_id, port, setup_config
         assert isinstance(cp.last_clear_profile_kwargs, dict)
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -792,7 +801,7 @@ set_report_session_energyreport.__test__ = False
 )
 @pytest.mark.parametrize("cp_id", ["CP_1_stop_paths"])
 @pytest.mark.parametrize("port", [9010])
-async def test_stop_transaction_paths_v16(
+async def test_stop_transaction_paths_v16_a(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
     """Exercise all branches of ocppv16.on_stop_transaction."""
@@ -832,7 +841,25 @@ async def test_stop_transaction_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
+
+
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9021, "cp_id": "CP_1_stop_paths_a1", "cms": "cms_stop_paths_a1"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_stop_paths_a1"])
+@pytest.mark.parametrize("port", [9021])
+async def test_stop_transaction_paths_v16_a1(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Exercise all branches of ocppv16.on_stop_transaction."""
+    cs: CentralSystem = setup_config_entry
 
     #
     # SCENARIO A (variant): charger reports session energy AND last EAIR already kWh.
@@ -862,7 +889,25 @@ async def test_stop_transaction_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
+
+
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9022, "cp_id": "CP_1_stop_paths_b", "cms": "cms_stop_paths_b"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_stop_paths_b"])
+@pytest.mark.parametrize("port", [9022])
+async def test_stop_transaction_paths_v16_b(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Exercise all branches of ocppv16.on_stop_transaction."""
+    cs: CentralSystem = setup_config_entry
 
     #
     # SCENARIO B: charger reports session energy BUT SessionEnergy already set → do not overwrite.
@@ -895,7 +940,25 @@ async def test_stop_transaction_paths_v16(
         assert round(sess, 3) == 7.777  # unchanged
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
+
+
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9023, "cp_id": "CP_1_stop_paths_c", "cms": "cms_stop_paths_c"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_stop_paths_c"])
+@pytest.mark.parametrize("port", [9023])
+async def test_stop_transaction_paths_v16_c(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Exercise all branches of ocppv16.on_stop_transaction."""
+    cs: CentralSystem = setup_config_entry
 
     #
     # SCENARIO C: _charger_reports_session_energy = False -> compute from meter_stop - meter_start
@@ -1048,6 +1111,8 @@ async def test_on_meter_values_paths_v16(
 
         finally:
             cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
             await ws.close()
 
 
@@ -1163,6 +1228,8 @@ async def test_on_meter_values_restore_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1225,6 +1292,8 @@ async def test_api_get_extra_attr_paths(
 
         # Clean up
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1273,6 +1342,8 @@ async def test_update_firmware_supported_valid_url_v16(
         )
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1315,6 +1386,8 @@ async def test_update_firmware_supported_invalid_url_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1357,6 +1430,8 @@ async def test_update_firmware_not_supported_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1402,17 +1477,19 @@ async def test_update_firmware_rpc_failure_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
 @pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
-    [{"port": 9018, "cp_id": "CP_1_unit_fallback", "cms": "cms_unit_fallback"}],
+    [{"port": 9020, "cp_id": "CP_1_unit_fallback", "cms": "cms_unit_fallback"}],
     indirect=True,
 )
 @pytest.mark.parametrize("cp_id", ["CP_1_unit_fallback"])
-@pytest.mark.parametrize("port", [9018])
+@pytest.mark.parametrize("port", [9020])
 async def test_api_get_unit_fallback_to_later_connectors(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
@@ -1453,6 +1530,8 @@ async def test_api_get_unit_fallback_to_later_connectors(
 
         # Cleanup
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1523,6 +1602,8 @@ async def test_api_get_extra_attr_fallback_to_later_connectors(
 
         # Cleanup
         cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
         await ws.close()
 
 
@@ -1651,7 +1732,6 @@ async def test_get_diagnostics_and_data_transfer_v16(
         cp_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
-
         await ws.close()
 
 
