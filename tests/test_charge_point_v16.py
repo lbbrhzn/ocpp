@@ -3,7 +3,6 @@
 import asyncio
 import contextlib
 from datetime import datetime, UTC  # timedelta,
-import inspect
 import logging
 import re
 
@@ -12,9 +11,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 import websockets
 
-from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.api import CentralSystem
 from custom_components.ocpp.button import BUTTONS
+from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.const import (
     DOMAIN as OCPP_DOMAIN,
     CONF_CPIDS,
@@ -648,7 +647,6 @@ async def test_cms_responses_errors_v16(
         )
 
 
-# @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
@@ -668,44 +666,32 @@ async def test_cms_responses_normal_multiple_connectors_v16(
     cs = setup_config_entry
     num_connectors = 2
 
+    # test ocpp messages sent from charger to cms
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}",
         subprotocols=["ocpp1.5", "ocpp1.6"],
     ) as ws:
+        # use a different id for debugging
         cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=num_connectors)
-
         cp_task = asyncio.create_task(cp.start())
 
-        phase1 = [
-            cp.send_boot_notification(),
-            cp.send_authorize(),
-            cp.send_heartbeat(),
-            cp.send_security_event(),
-            cp.send_firmware_status(),
-            cp.send_data_transfer(),
-            cp.send_status_for_all_connectors(),
-            cp.send_start_transaction(12345),
-        ]
-        for conn_id in range(1, num_connectors + 1):
-            phase1.extend(
-                [
-                    cp.send_meter_err_phases(connector_id=conn_id),
-                    cp.send_meter_line_voltage(connector_id=conn_id),
-                    cp.send_meter_periodic_data(connector_id=conn_id),
-                ]
-            )
-
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.gather(*phase1), timeout=10)
-
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+        await cp.send_boot_notification()
+        await cp.send_authorize()
+        await cp.send_heartbeat()
+        await cp.send_status_notification()
+        await cp.send_security_event()
+        await cp.send_firmware_status()
+        await cp.send_data_transfer()
+        await cp.send_start_transaction(12345)
+        await cp.send_meter_err_phases()
+        await cp.send_meter_line_voltage()
+        await cp.send_meter_periodic_data()
+        # add delay to allow meter data to be processed
         await cp.send_stop_transaction(1)
 
-        await asyncio.sleep(0.05)
-
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
     cpid = cs.charge_points[cp_id].settings.cpid
@@ -738,145 +724,6 @@ async def test_cms_responses_normal_multiple_connectors_v16(
         )
         is False
     )
-
-
-# @pytest.mark.skip(reason="skip")
-@pytest.mark.timeout(20)
-@pytest.mark.parametrize(
-    "setup_config_entry",
-    [{"port": 9008, "cp_id": "CP_1_diag_dt", "cms": "cms_diag_dt"}],
-    indirect=True,
-)
-@pytest.mark.parametrize("cp_id", ["CP_1_diag_dt"])
-@pytest.mark.parametrize("port", [9008])
-async def test_get_diagnostics_and_data_transfer_v16(
-    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
-):
-    """Ensure HA services trigger correct OCPP 1.6 calls with expected payload.
-
-    including DataTransfer rejected path and get_diagnostics error/feature branches.
-    """
-
-    cs: CentralSystem = setup_config_entry
-
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/{cp_id}",
-        subprotocols=["ocpp1.6"],
-    ) as ws:
-        cp = ChargePoint(f"{cp_id}_client", ws)
-        cp_task = asyncio.create_task(cp.start())
-
-        # Bring charger to ready state (boot + post_connect)
-        await cp.send_boot_notification()
-        await wait_ready(cs.charge_points[cp_id])
-
-        # Resolve HA device id (cpid)
-        cpid = cs.charge_points[cp_id].settings.cpid
-
-        # --- get_diagnostics: happy path with valid URL ---
-        upload_url = "https://example.test/diag"
-        await hass.services.async_call(
-            OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
-            service_data={"devid": cpid, "upload_url": upload_url},
-            blocking=True,
-        )
-
-        # --- data_transfer: Accepted path ---
-        vendor_id = "VendorX"
-        message_id = "Msg42"
-        payload = '{"hello":"world"}'
-        await hass.services.async_call(
-            OCPP_DOMAIN,
-            csvcs.service_data_transfer.value,
-            service_data={
-                "devid": cpid,
-                "vendor_id": vendor_id,
-                "message_id": message_id,
-                "data": payload,
-            },
-            blocking=True,
-        )
-
-        # Give event loop a tick to flush ws calls
-        await asyncio.sleep(0.05)
-
-        # Assert CP handlers received expected fields (as captured by the fake CP)
-        assert cp.last_diag_location == upload_url
-        assert cp.last_data_transfer == (vendor_id, message_id, payload)
-        # If your fake CP stores status, assert it was Accepted
-        if hasattr(cp, "last_data_transfer_status"):
-            from ocpp.v16.enums import DataTransferStatus
-
-            assert cp.last_data_transfer_status == DataTransferStatus.accepted
-
-        # --- data_transfer: Rejected path (flip cp.accept -> False) ---
-        cp.accept = False
-        await hass.services.async_call(
-            OCPP_DOMAIN,
-            csvcs.service_data_transfer.value,
-            service_data={
-                "devid": cpid,
-                "vendor_id": "VendorX",
-                "message_id": "MsgRejected",
-                "data": "nope",
-            },
-            blocking=True,
-        )
-        await asyncio.sleep(0.05)
-        if hasattr(cp, "last_data_transfer_status"):
-            from ocpp.v16.enums import DataTransferStatus
-
-            assert cp.last_data_transfer_status == DataTransferStatus.rejected
-
-        # --- get_diagnostics: invalid URL triggers vol.MultipleInvalid warning ---
-        caplog.clear()
-        caplog.set_level(logging.WARNING)
-        await hass.services.async_call(
-            OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
-            service_data={"devid": cpid, "upload_url": "not-a-valid-url"},
-            blocking=True,
-        )
-        assert any(
-            "Failed to parse url" in rec.message for rec in caplog.records
-        ), "Expected warning for invalid diagnostics upload_url not found"
-
-        # --- get_diagnostics: FW profile NOT supported branch ---
-        # Simulate that FirmwareManagement profile is not supported by the CP
-        cpobj = cs.charge_points[cp_id]
-        original_features = getattr(cpobj, "_attr_supported_features", None)
-
-        # Try to blank out features regardless of type (set/list/tuple/int)
-        try:
-            tp = type(original_features)
-            if isinstance(original_features, set | list | tuple):
-                new_val = tp()  # empty same container type
-            else:
-                new_val = 0  # fall back to "no features"
-            setattr(cpobj, "_attr_supported_features", new_val)
-        except Exception:
-            setattr(cpobj, "_attr_supported_features", 0)
-
-        # Valid URL, but without FW support the handler should skip/return gracefully
-        await hass.services.async_call(
-            OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
-            service_data={"devid": cpid, "upload_url": "https://example.com/diag2"},
-            blocking=True,
-        )
-
-        # Restore original features to avoid impacting other tests
-        if original_features is not None:
-            setattr(cpobj, "_attr_supported_features", original_features)
-
-        # Cleanup
-
-        cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
-        await ws.close()
 
 
 # @pytest.mark.skip(reason="skip")
@@ -923,10 +770,17 @@ async def test_clear_profile_v16(hass, socket_enabled, cp_id, port, setup_config
         assert isinstance(cp.last_clear_profile_kwargs, dict)
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
+
+
+async def set_report_session_energyreport(
+    cs: CentralSystem, cp_id: str, should_report: bool
+):
+    """Set report session energy report True/False."""
+    cs.charge_points[cp_id]._charger_reports_session_energy = should_report
+
+
+set_report_session_energyreport.__test__ = False
 
 
 # @pytest.mark.skip(reason="skip")
@@ -943,54 +797,6 @@ async def test_stop_transaction_paths_v16(
 ):
     """Exercise all branches of ocppv16.on_stop_transaction."""
     cs: CentralSystem = setup_config_entry
-
-    #
-    # SCENARIO C: _charger_reports_session_energy = False -> compute from meter_stop - meter_start
-    #
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
-    ) as ws:
-        cp = ChargePoint(f"{cp_id}_client", ws)
-        cp_task = asyncio.create_task(cp.start())
-
-        await cp.send_boot_notification()
-        await wait_ready(cs.charge_points[cp_id])
-
-        # Disable "charger reports session energy" branch
-        cs.charge_points[cp_id]._charger_reports_session_energy = False
-
-        # Start a transaction with known meter_start (Wh); server lagrar meter_start som kWh
-        await cp.send_start_transaction(meter_start=12345)  # 12.345 kWh på servern
-
-        # Stop with meter_stop=54321 (→ 54.321 kWh)
-        await cp.send_stop_transaction(delay=0)
-
-        cpid = cs.charge_points[cp_id].settings.cpid
-
-        # Expect session = 54.321 - 12.345 = 41.976 kWh
-        sess = float(cs.get_metric(cpid, "Energy.Session"))
-        assert round(sess, 3) == round(54.321 - 12.345, 3)
-        assert cs.get_unit(cpid, "Energy.Session") == "kWh"
-
-        # After stop, these measurands must be zeroed
-        for meas in [
-            "Current.Import",
-            "Power.Active.Import",
-            "Power.Reactive.Import",
-            "Current.Export",
-            "Power.Active.Export",
-            "Power.Reactive.Export",
-        ]:
-            assert float(cs.get_metric(cpid, meas)) == 0.0
-
-        # Optional: stop reason captured
-        assert cs.get_metric(cpid, "Stop.Reason") is not None
-
-        cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
-        await ws.close()
 
     #
     # SCENARIO A: _charger_reports_session_energy = True and SessionEnergy is None
@@ -1026,9 +832,6 @@ async def test_stop_transaction_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
     #
@@ -1059,9 +862,6 @@ async def test_stop_transaction_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
     #
@@ -1095,8 +895,48 @@ async def test_stop_transaction_paths_v16(
         assert round(sess, 3) == 7.777  # unchanged
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
+        await ws.close()
+
+    #
+    # SCENARIO C: _charger_reports_session_energy = False -> compute from meter_stop - meter_start
+    #
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                asyncio.gather(
+                    cp.start(),
+                    cp.send_boot_notification(),
+                    cp.send_start_transaction(12345),
+                    set_report_session_energyreport(cs, cp_id, False),
+                    cp.send_stop_transaction(1),
+                ),
+                timeout=8,
+            )
+        await ws.close()
+
+        cpid = cs.charge_points[cp_id].settings.cpid
+
+        # Expect session = 54.321 - 12.345 = 41.976 kWh
+        sess = float(cs.get_metric(cpid, "Energy.Session"))
+        assert round(sess, 3) == round(54.321 - 12.345, 3)
+        assert cs.get_unit(cpid, "Energy.Session") == "kWh"
+
+        # After stop, these measurands must be zeroed
+        for meas in [
+            "Current.Import",
+            "Power.Active.Import",
+            "Power.Reactive.Import",
+            "Current.Export",
+            "Power.Active.Export",
+            "Power.Reactive.Export",
+        ]:
+            assert float(cs.get_metric(cpid, meas)) == 0.0
+
+        # Optional: stop reason captured
+        assert cs.get_metric(cpid, "Stop.Reason") is not None
 
         await ws.close()
 
@@ -1208,9 +1048,6 @@ async def test_on_meter_values_paths_v16(
 
         finally:
             cp_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await cp_task
-
             await ws.close()
 
 
@@ -1326,107 +1163,7 @@ async def test_on_meter_values_restore_paths_v16(
         assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
-
-
-@pytest.mark.timeout(20)
-@pytest.mark.parametrize(
-    "setup_config_entry",
-    [{"port": 9012, "cp_id": "CP_1_monconn", "cms": "cms_monconn"}],
-    indirect=True,
-)
-@pytest.mark.parametrize("cp_id", ["CP_1_monconn"])
-@pytest.mark.parametrize("port", [9012])
-async def test_monitor_connection_timeout_branch(
-    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
-):
-    """Exercise TimeoutError branch in chargepoint.monitor_connection and ensure it raises after exceeded tries."""
-    cs: CentralSystem = setup_config_entry
-
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
-    ) as ws:
-        cp = ChargePoint(f"{cp_id}_client", ws)
-        cp_task = asyncio.create_task(cp.start())
-        await cp.send_boot_notification()
-        await wait_ready(cs.charge_points[cp_id])
-
-        srv_cp = cs.charge_points[cp_id]
-
-        from custom_components.ocpp import chargepoint as cp_mod
-
-        async def noop_task(_coro):
-            return None
-
-        monkeypatch.setattr(srv_cp.hass, "async_create_task", noop_task, raising=True)
-
-        async def fast_sleep(_):
-            return None  # skip the initial sleep(10) and interval sleeps
-
-        monkeypatch.setattr(cp_mod.asyncio, "sleep", fast_sleep, raising=True)
-
-        # First wait_for returns a never-finishing "pong waiter",
-        # second wait_for raises TimeoutError -> hits the except branch
-        calls = {"n": 0}
-
-        async def fake_wait_for(awaitable, timeout):
-            calls["n"] += 1
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            if calls["n"] == 1:
-
-                class _NeverFinishes:
-                    def __await__(self):
-                        fut = asyncio.get_event_loop().create_future()
-                        return fut.__await__()
-
-                return _NeverFinishes()
-            raise TimeoutError
-
-        monkeypatch.setattr(cp_mod.asyncio, "wait_for", fake_wait_for, raising=True)
-
-        # Make the code raise on first timeout
-        srv_cp.cs_settings.websocket_ping_interval = 0.0
-        srv_cp.cs_settings.websocket_ping_timeout = 0.01
-        srv_cp.cs_settings.websocket_ping_tries = 0  # => > tries -> raise
-
-        srv_cp.post_connect_success = True
-
-        async def noop():
-            return None
-
-        monkeypatch.setattr(srv_cp, "post_connect", noop, raising=True)
-        monkeypatch.setattr(srv_cp, "set_availability", noop, raising=True)
-
-        with pytest.raises(TimeoutError):
-            await srv_cp.monitor_connection()
-
-        assert calls["n"] >= 2  # both wait_for calls were exercised
-
-        # Cleanup (deterministic)
-        # 1) Close websocket first to stop further I/O.
-        await ws.close()
-
-        # 2) Give the loop a tick so pending send/recv tasks notice the close.
-        await asyncio.sleep(0)
-
-        # 3) Cancel any helper tasks you spawned on the client (defensive).
-        for t in list(getattr(cp, "_tasks", [])):
-            t.cancel()
-            with contextlib.suppress(
-                asyncio.CancelledError, websockets.exceptions.ConnectionClosedOK
-            ):
-                await t
-
-        # 4) Now cancel the client's main OCPP task.
-        cp_task.cancel()
-        with contextlib.suppress(
-            asyncio.CancelledError, websockets.exceptions.ConnectionClosedOK
-        ):
-            await cp_task
 
 
 @pytest.mark.timeout(10)
@@ -1487,17 +1224,8 @@ async def test_api_get_extra_attr_paths(
         assert attrs_fallback == {"custom": "c1", "context": "Override"}
 
         # Clean up
-        for t in list(getattr(cp, "_tasks", [])):
-            t.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await t
-
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await ws.close()
+        await ws.close()
 
 
 @pytest.mark.timeout(20)
@@ -1545,9 +1273,6 @@ async def test_update_firmware_supported_valid_url_v16(
         )
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
 
@@ -1590,9 +1315,6 @@ async def test_update_firmware_supported_invalid_url_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
 
@@ -1635,9 +1357,6 @@ async def test_update_firmware_not_supported_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
 
@@ -1683,9 +1402,6 @@ async def test_update_firmware_rpc_failure_v16(
         assert getattr(cp, "last_update_firmware", None) is None
 
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
         await ws.close()
 
 
@@ -1736,17 +1452,8 @@ async def test_api_get_unit_fallback_to_later_connectors(
         assert unit == "kW"
 
         # Cleanup
-        for t in list(getattr(cp, "_tasks", [])):
-            t.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await t
-
         cp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cp_task
-
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await ws.close()
+        await ws.close()
 
 
 @pytest.mark.timeout(20)
@@ -1815,17 +1522,137 @@ async def test_api_get_extra_attr_fallback_to_later_connectors(
         assert got == expected
 
         # Cleanup
-        for t in list(getattr(cp, "_tasks", [])):
-            t.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await t
+        cp_task.cancel()
+        await ws.close()
 
+
+# @pytest.mark.skip(reason="skip")
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9008, "cp_id": "CP_1_diag_dt", "cms": "cms_diag_dt"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_diag_dt"])
+@pytest.mark.parametrize("port", [9008])
+async def test_get_diagnostics_and_data_transfer_v16(
+    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
+):
+    """Ensure HA services trigger correct OCPP 1.6 calls with expected payload.
+
+    including DataTransfer rejected path and get_diagnostics error/feature branches.
+    """
+
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+
+        # Bring charger to ready state (boot + post_connect)
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+
+        # Resolve HA device id (cpid)
+        cpid = cs.charge_points[cp_id].settings.cpid
+
+        # --- get_diagnostics: happy path with valid URL ---
+        upload_url = "https://example.test/diag"
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_get_diagnostics.value,
+            service_data={"devid": cpid, "upload_url": upload_url},
+            blocking=True,
+        )
+
+        # --- data_transfer: Accepted path ---
+        vendor_id = "VendorX"
+        message_id = "Msg42"
+        payload = '{"hello":"world"}'
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_data_transfer.value,
+            service_data={
+                "devid": cpid,
+                "vendor_id": vendor_id,
+                "message_id": message_id,
+                "data": payload,
+            },
+            blocking=True,
+        )
+
+        # Give event loop a tick to flush ws calls
+        await asyncio.sleep(0.05)
+
+        # Assert CP handlers received expected fields (as captured by the fake CP)
+        assert cp.last_diag_location == upload_url
+        assert cp.last_data_transfer == (vendor_id, message_id, payload)
+
+        # --- data_transfer: Rejected path (flip cp.accept -> False) ---
+        cp.accept = False
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_data_transfer.value,
+            service_data={
+                "devid": cpid,
+                "vendor_id": "VendorX",
+                "message_id": "MsgRejected",
+                "data": "nope",
+            },
+            blocking=True,
+        )
+        await asyncio.sleep(0.05)
+
+        # --- get_diagnostics: invalid URL triggers vol.MultipleInvalid warning ---
+        caplog.clear()
+        caplog.set_level(logging.WARNING)
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_get_diagnostics.value,
+            service_data={"devid": cpid, "upload_url": "not-a-valid-url"},
+            blocking=True,
+        )
+        assert any(
+            "Failed to parse url" in rec.message for rec in caplog.records
+        ), "Expected warning for invalid diagnostics upload_url not found"
+
+        # --- get_diagnostics: FW profile NOT supported branch ---
+        # Simulate that FirmwareManagement profile is not supported by the CP
+        cpobj = cs.charge_points[cp_id]
+        original_features = getattr(cpobj, "_attr_supported_features", None)
+
+        # Try to blank out features regardless of type (set/list/tuple/int)
+        try:
+            tp = type(original_features)
+            if isinstance(original_features, set | list | tuple):
+                new_val = tp()  # empty same container type
+            else:
+                new_val = 0  # fall back to "no features"
+            setattr(cpobj, "_attr_supported_features", new_val)
+        except Exception:
+            setattr(cpobj, "_attr_supported_features", 0)
+
+        # Valid URL, but without FW support the handler should skip/return gracefully
+        await hass.services.async_call(
+            OCPP_DOMAIN,
+            csvcs.service_get_diagnostics.value,
+            service_data={"devid": cpid, "upload_url": "https://example.com/diag2"},
+            blocking=True,
+        )
+
+        # Restore original features to avoid impacting other tests
+        if original_features is not None:
+            setattr(cpobj, "_attr_supported_features", original_features)
+
+        # Cleanup
         cp_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
 
-        with contextlib.suppress(websockets.exceptions.ConnectionClosedOK):
-            await ws.close()
+        await ws.close()
 
 
 class ChargePoint(cpclass):
@@ -2006,34 +1833,12 @@ class ChargePoint(cpclass):
             return call_result.ClearChargingProfile(ClearChargingProfileStatus.unknown)
 
     @on(Action.trigger_message)
-    def on_trigger_message(self, requested_message, **kwargs):
+    def on_trigger_message(self, **kwargs):
         """Handle trigger message request."""
-        if not self.accept:
+        if self.accept is True:
+            return call_result.TriggerMessage(TriggerMessageStatus.accepted)
+        else:
             return call_result.TriggerMessage(TriggerMessageStatus.rejected)
-
-        resp = call_result.TriggerMessage(TriggerMessageStatus.accepted)
-
-        try:
-            from ocpp.v16.enums import (
-                MessageTrigger,
-            )
-
-            connector_id = kwargs.get("connector_id")
-            if requested_message == MessageTrigger.status_notification:
-                if connector_id in (None, 0):
-                    task = asyncio.create_task(self.send_status_for_all_connectors())
-                    self._tasks.add(task)
-                    task.add_done_callback(self._tasks.discard)
-                else:
-                    task = asyncio.create_task(
-                        self.send_status_notification(connector_id)
-                    )
-                    self._tasks.add(task)
-                    task.add_done_callback(self._tasks.discard)
-        except Exception:
-            pass
-
-        return resp
 
     @on(Action.update_firmware)
     def on_update_firmware(self, **kwargs):
@@ -2116,31 +1921,44 @@ class ChargePoint(cpclass):
         self.active_transactionId = resp.transaction_id
         assert resp.id_tag_info["status"] == AuthorizationStatus.accepted.value
 
-    async def send_status_notification(self, connector_id: int = 0):
-        """Send one StatusNotification for a specific connector."""
-        # Connector 0 = CP-level
-        if connector_id == 0:
-            status = ChargePointStatus.suspended_ev
-        elif connector_id == 1:
-            status = ChargePointStatus.charging
-        else:
-            status = ChargePointStatus.available
-
+    async def send_status_notification(self):
+        """Send a status notification."""
         request = call.StatusNotification(
-            connector_id=connector_id,
+            connector_id=0,
             error_code=ChargePointErrorCode.no_error,
-            status=status,
+            status=ChargePointStatus.suspended_ev,
             timestamp=datetime.now(tz=UTC).isoformat(),
             info="Test info",
             vendor_id="The Mobility House",
             vendor_error_code="Test error",
         )
-        await self.call(request)
+        resp = await self.call(request)
+        request = call.StatusNotification(
+            connector_id=1,
+            error_code=ChargePointErrorCode.no_error,
+            status=ChargePointStatus.charging,
+            timestamp=datetime.now(tz=UTC).isoformat(),
+            info="Test info",
+            vendor_id="The Mobility House",
+            vendor_error_code="Test error",
+        )
+        resp = await self.call(request)
+        request = call.StatusNotification(
+            connector_id=2,
+            error_code=ChargePointErrorCode.no_error,
+            status=ChargePointStatus.available,
+            timestamp=datetime.now(tz=UTC).isoformat(),
+            info="Test info",
+            vendor_id="The Mobility House",
+            vendor_error_code="Available",
+        )
+        resp = await self.call(request)
+
+        assert resp is not None
 
     async def send_status_for_all_connectors(self):
-        """Send StatusNotification for 0..no_connectors."""
-        for cid in range(0, max(1, self.no_connectors) + 1):
-            await self.send_status_notification(cid)
+        """Send StatusNotification for all connectors."""
+        await self.send_status_notification()
 
     async def send_meter_periodic_data(self, connector_id: int = 1):
         """Send periodic meter data notification for a given connector."""

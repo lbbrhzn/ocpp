@@ -63,12 +63,14 @@ class MultiConnectorChargePoint(cpclass):
         super().__init__(cp_id, ws)
         self.inventory_done = asyncio.Event()
         self.last_start_evse_id = None
+        self._tasks: set[asyncio.Task] = set()
 
     @on(Action.get_base_report)
     async def on_get_base_report(self, request_id: int, report_base: str, **kwargs):
         """Get base report."""
         assert report_base in (ReportBaseEnumType.full_inventory, "FullInventory")
-        asyncio.create_task(self._send_full_inventory(request_id))  # noqa: RUF006
+        task = asyncio.create_task(self._send_full_inventory(request_id))
+        self._tasks.add(task)
         return call_result.GetBaseReport(
             GenericDeviceModelStatusEnumType.accepted.value
         )
