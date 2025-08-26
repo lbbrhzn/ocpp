@@ -131,7 +131,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Current Import`
 * `Current Offered` (may be limited by the settings on the charger itself, check the EVO app)
 * `Energy Session` (charge for present/last session - kWh)
-* `Power Active Import` (active charging power - kWh)
+* `Power Active Import` (active charging power - kW)
 * `Temperature` (internal temperature - degrees C)
 * `Time Session` (duration of active/last charging session)
 * `Voltage` (seems to report a little higher than expected)
