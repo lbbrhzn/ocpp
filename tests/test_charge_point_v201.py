@@ -1235,7 +1235,7 @@ async def test_cms_responses_v201(hass, socket_enabled):
     config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
-    config_data[CONF_PORT] = 9010
+    config_data[CONF_PORT] = 9080
 
     config_entry = MockConfigEntry(
         domain=OCPP_DOMAIN,
