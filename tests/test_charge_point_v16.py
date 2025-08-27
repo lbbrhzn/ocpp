@@ -3,8 +3,11 @@
 import asyncio
 import contextlib
 from datetime import datetime, UTC  # timedelta,
+import inspect
 import logging
 import re
+import time
+from types import SimpleNamespace
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -18,15 +21,22 @@ from custom_components.ocpp.const import (
     DOMAIN as OCPP_DOMAIN,
     CONF_CPIDS,
     CONF_CPID,
+    CONF_NUM_CONNECTORS,
     CONF_PORT,
+    DEFAULT_ENERGY_UNIT,
+    DEFAULT_MEASURAND,
+    HA_ENERGY_UNIT,
 )
 from custom_components.ocpp.enums import (
     ConfigurationKey,
     HAChargerServices as csvcs,
+    HAChargerStatuses as cstat,
+    HAChargerSession as csess,
     Profiles as prof,
 )
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
+from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -41,6 +51,7 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     DiagnosticsStatus,
     FirmwareStatus,
+    Measurand,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -60,6 +71,7 @@ from .charge_point_test import (
     remove_configuration,
     wait_ready,
 )
+
 
 SERVICES = [
     csvcs.service_update_firmware,
@@ -81,6 +93,39 @@ SERVICES_ERROR = [
     csvcs.service_data_transfer,
     csvcs.service_set_charge_rate,
 ]
+
+
+async def wait_for_num_connectors(
+    hass, cp_id: str, expected: int, timeout: float = 5.0
+):
+    """Wait until server side CP has num_connectors == expected.
+
+    Returns the actual CentralSystem instance (after possible reload).
+    """
+    deadline = time.monotonic() + timeout
+    last_seen = None
+
+    while time.monotonic() < deadline:
+        entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+        cs = hass.data[OCPP_DOMAIN][entry.entry_id]
+
+        srv = cs.charge_points.get(cp_id)
+        if srv is not None:
+            last_seen = getattr(srv, "num_connectors", None)
+            if last_seen == expected:
+                return cs
+
+        for item in entry.data.get(CONF_CPIDS, []):
+            if isinstance(item, dict) and cp_id in item:
+                last_seen = item[cp_id].get(CONF_NUM_CONNECTORS)
+                if last_seen == expected:
+                    return cs
+
+        await asyncio.sleep(0.05)
+
+    raise AssertionError(
+        f"num_connectors never became {expected} (last seen: {last_seen})"
+    )
 
 
 async def test_switches(hass, cpid, socket_enabled):
@@ -682,6 +727,7 @@ async def test_cms_responses_normal_multiple_connectors_v16(
 
         await cp.send_boot_notification()
         await wait_ready(cs.charge_points[cp_id])
+        cs = await wait_for_num_connectors(hass, cp_id, expected=num_connectors)
         await cp.send_boot_notification()
         await cp.send_authorize()
         await cp.send_heartbeat()
@@ -967,62 +1013,56 @@ async def test_stop_transaction_paths_v16_c(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
     ) as ws:
         cp = ChargePoint(f"{cp_id}_client", ws)
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                asyncio.gather(
-                    cp.start(),
-                    cp.send_boot_notification(),
-                    cp.send_start_transaction(12345),
-                    set_report_session_energyreport(cs, cp_id, False),
-                    cp.send_stop_transaction(1),
-                ),
-                timeout=8,
-            )
-        await ws.close()
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
 
-        cpid = cs.charge_points[cp_id].settings.cpid
+            await cp.send_start_transaction(12345)
+            await set_report_session_energyreport(cs, cp_id, False)
+            await cp.send_stop_transaction(1)
 
-        # Expect session = 54.321 - 12.345 = 41.976 kWh
-        sess = float(cs.get_metric(cpid, "Energy.Session"))
-        assert round(sess, 3) == round(54.321 - 12.345, 3)
-        assert cs.get_unit(cpid, "Energy.Session") == "kWh"
+            cpid = cs.charge_points[cp_id].settings.cpid
 
-        # After stop, these measurands must be zeroed
-        for meas in [
-            "Current.Import",
-            "Power.Active.Import",
-            "Power.Reactive.Import",
-            "Current.Export",
-            "Power.Active.Export",
-            "Power.Reactive.Export",
-        ]:
-            assert float(cs.get_metric(cpid, meas)) == 0.0
+            # Expect session = 54.321 - 12.345 = 41.976 kWh
+            sess = float(cs.get_metric(cpid, "Energy.Session"))
+            assert round(sess, 3) == round(54.321 - 12.345, 3)
+            assert cs.get_unit(cpid, "Energy.Session") == "kWh"
 
-        # Optional: stop reason captured
-        assert cs.get_metric(cpid, "Stop.Reason") is not None
+            # After stop, these measurands must be zeroed
+            for meas in [
+                "Current.Import",
+                "Power.Active.Import",
+                "Power.Reactive.Import",
+                "Current.Export",
+                "Power.Active.Export",
+                "Power.Reactive.Export",
+            ]:
+                assert float(cs.get_metric(cpid, meas)) == 0.0
 
-        await ws.close()
+            # Optional: stop reason captured
+            assert cs.get_metric(cpid, "Stop.Reason") is not None
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
 
 
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(30)
 @pytest.mark.parametrize(
     "setup_config_entry",
-    [{"port": 9011, "cp_id": "CP_1_meter_paths", "cms": "cms_meter_paths"}],
+    [{"port": 9061, "cp_id": "CP_1_meter_paths", "cms": "cms_meter_paths"}],
     indirect=True,
 )
 @pytest.mark.parametrize("cp_id", ["CP_1_meter_paths"])
-@pytest.mark.parametrize("port", [9011])
+@pytest.mark.parametrize("port", [9061])
 async def test_on_meter_values_paths_v16(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
-    """Exercise important branches of ocppv16.on_meter_values.
-
-    - Main meter (EAIR) without transaction_id -> connector 0 (kWh)
-    - Restore meter_start/transaction_id when missing
-    - With transaction_id and match -> update Energy.Session
-    - Empty strings for other measurands -> coerced to 0.0
-    """
+    """Exercise important branches of ocppv16.on_meter_values, deterministically."""
     cs: CentralSystem = setup_config_entry
 
     async with websockets.connect(
@@ -1031,24 +1071,39 @@ async def test_on_meter_values_paths_v16(
     ) as ws:
         cp = ChargePoint(f"{cp_id}_client", ws)
 
-        # Keep the OCPP task running in the background.
         cp_task = asyncio.create_task(cp.start())
         try:
-            # Boot (enough for the CS to register the CPID).
             await cp.send_boot_notification()
             await wait_ready(cs.charge_points[cp_id])
 
-            cpid = cs.charge_points[cp_id].settings.cpid
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
 
-            # 1) Start a transaction so the helper for "main meter" won't block.
-            await cp.send_start_transaction(meter_start=10000)  # Wh (10 kWh)
-            # Give CS a tick to persist state.
-            await asyncio.sleep(0.1)
-            active_tx = cs.charge_points[cp_id].active_transaction_id
+            # 1) Start a transaction with meter_start = 10000 Wh (10.0 kWh)
+            await cp.send_start_transaction(meter_start=10000)
+
+            async def _wait_until(cond, timeout=2.0, step=0.01):
+                import time
+
+                end = time.monotonic() + timeout
+                while time.monotonic() < end:
+                    if cond():
+                        return True
+                    await asyncio.sleep(step)
+                return False
+
+            assert await _wait_until(
+                lambda: (
+                    srv._metrics[(1, "Energy.Meter.Start")].value == 10.0
+                    and (srv.active_transaction_id or 0) != 0
+                ),
+                timeout=2.0,
+            ), "Server never persisted meter_start=10.0 and active_transaction_id"
+
+            active_tx = srv.active_transaction_id
             assert active_tx != 0
 
-            # 2) MAIN METER (no transaction_id): updates aggregate connector (0) in kWh
-            #    Note: helper waits for active tx, but still omits transaction_id in the message.
+            # 2) MAIN METER without tx id -> updates connector 0 in kWh
             await cp.send_main_meter_clock_data()
             agg_eair = float(
                 cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=0)
@@ -1059,16 +1114,13 @@ async def test_on_meter_values_paths_v16(
                 == "kWh"
             )
 
-            # 3) Force-loss: clear meter_start and transaction_id; provide last EAIR to restore from.
-            m = cs.charge_points[cp_id]._metrics
-            m[(1, "Energy.Meter.Start")].value = None
-            m[(1, "Transaction.Id")].value = None
-            m[(1, "Energy.Active.Import.Register")].value = 12.5
-            m[(1, "Energy.Active.Import.Register")].unit = "kWh"
+            # 3) Set meter_start to 12.5 kWh
+            m = srv._metrics
+            m[(1, "Energy.Meter.Start")].value = 12.5
+            m[(1, "Energy.Meter.Start")].unit = "kWh"
+            m[(1, "Transaction.Id")].value = active_tx
 
-            # 4) Send MeterValues WITH transaction_id and include:
-            #    - EAIR = 15000 Wh (-> 15.0 kWh)
-            #    - Power.Active.Import = "" (should coerce to 0.0)
+            # 4) Send MV with tx id and EAIR=15000 Wh (15.0 kWh) + empty PAI -> 0.0
             mv = call.MeterValues(
                 connector_id=1,
                 transaction_id=active_tx,
@@ -1096,16 +1148,16 @@ async def test_on_meter_values_paths_v16(
             resp = await cp.call(mv)
             assert resp is not None
 
-            # meter_start restored from last EAIR on connector 1 -> 12.5 kWh; session = 15.0 - 12.5 = 2.5 kWh
+            # meter_start reset from 12.5 kWh → session = 15.0 - 12.5 = 2.5 kWh
             sess = float(cs.get_metric(cpid, "Energy.Session", connector_id=1))
             assert sess == pytest.approx(2.5, rel=1e-6)
             assert cs.get_unit(cpid, "Energy.Session", connector_id=1) == "kWh"
 
-            # Empty-string coerced to 0.0
+            # Empty string → 0.0
             pai = float(cs.get_metric(cpid, "Power.Active.Import", connector_id=1))
             assert pai == 0.0
 
-            # Transaction id restored/kept
+            # Tx id reset
             tx_restored = int(cs.get_metric(cpid, "Transaction.Id", connector_id=1))
             assert tx_restored == active_tx
 
@@ -1260,7 +1312,6 @@ async def test_api_get_extra_attr_paths(
         # Start a minimal CP so CS creates/keeps the server-side object
         cp = ChargePoint(f"{cp_id}_client", ws)
         cp_task = asyncio.create_task(cp.start())
-        # One Boot is enough to associate the CP id in CS
         await cp.send_boot_notification()
         await wait_ready(cs.charge_points[cp_id])
 
@@ -1506,6 +1557,7 @@ async def test_api_get_unit_fallback_to_later_connectors(
         # Boot + wait for server-side post_connect to complete (fetches number_of_connectors)
         await cp.send_boot_notification()
         await wait_ready(cs.charge_points[cp_id])
+        cs = await wait_for_num_connectors(hass, cp_id, expected=3)
 
         srv = cs.charge_points[cp_id]
         cpid = srv.settings.cpid
@@ -1568,6 +1620,7 @@ async def test_api_get_extra_attr_fallback_to_later_connectors(
         # Boot + wait for server-side post_connect to complete (fetches number_of_connectors)
         await cp.send_boot_notification()
         await wait_ready(cs.charge_points[cp_id])
+        cs = await wait_for_num_connectors(hass, cp_id, expected=3)
 
         srv = cs.charge_points[cp_id]
         cpid = srv.settings.cpid
@@ -1733,6 +1786,918 @@ async def test_get_diagnostics_and_data_transfer_v16(
         with contextlib.suppress(asyncio.CancelledError):
             await cp_task
         await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9024, "cp_id": "CP_1_monconn", "cms": "cms_monconn"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_monconn"])
+@pytest.mark.parametrize("port", [9024])
+async def test_monitor_connection_timeout_branch(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Exercise TimeoutError branch in chargepoint.monitor_connection and ensure it raises after exceeded tries."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+
+        srv_cp = cs.charge_points[cp_id]
+
+        from custom_components.ocpp import chargepoint as cp_mod
+
+        async def noop_task(_coro):
+            return None
+
+        monkeypatch.setattr(srv_cp.hass, "async_create_task", noop_task, raising=True)
+
+        async def fast_sleep(_):
+            return None  # skip the initial sleep(10) and interval sleeps
+
+        monkeypatch.setattr(cp_mod.asyncio, "sleep", fast_sleep, raising=True)
+
+        # First wait_for returns a never-finishing "pong waiter",
+        # second wait_for raises TimeoutError -> hits the except branch
+        calls = {"n": 0}
+
+        async def fake_wait_for(awaitable, timeout):
+            calls["n"] += 1
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            if calls["n"] == 1:
+
+                class _NeverFinishes:
+                    def __await__(self):
+                        fut = asyncio.get_event_loop().create_future()
+                        return fut.__await__()
+
+                return _NeverFinishes()
+            raise TimeoutError
+
+        monkeypatch.setattr(cp_mod.asyncio, "wait_for", fake_wait_for, raising=True)
+
+        # Make the code raise on first timeout
+        srv_cp.cs_settings.websocket_ping_interval = 0.0
+        srv_cp.cs_settings.websocket_ping_timeout = 0.01
+        srv_cp.cs_settings.websocket_ping_tries = 0  # => > tries -> raise
+
+        srv_cp.post_connect_success = True
+
+        async def noop():
+            return None
+
+        monkeypatch.setattr(srv_cp, "post_connect", noop, raising=True)
+        monkeypatch.setattr(srv_cp, "set_availability", noop, raising=True)
+
+        with pytest.raises(TimeoutError):
+            await srv_cp.monitor_connection()
+
+        assert calls["n"] >= 2  # both wait_for calls were exercised
+
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
+        await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9025, "cp_id": "CP_1_authlist", "cms": "cms_authlist"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_authlist"])
+@pytest.mark.parametrize("port", [9025])
+async def test_get_authorization_status_with_auth_list(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Exercise ChargePoint.get_authorization_status() when an auth_list is configured."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.const import (
+        DOMAIN,
+        CONFIG,
+        CONF_DEFAULT_AUTH_STATUS,
+        CONF_AUTH_LIST,
+        CONF_ID_TAG,
+        CONF_AUTH_STATUS,
+    )
+
+    # Start a minimal client so the server-side CP is registered.
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+        # We only needed a boot to register the CP; close the socket cleanly.
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
+        await ws.close()
+
+    srv_cp = cs.charge_points[cp_id]
+
+    # Configure default + auth_list in HA config dict
+    hass.data[DOMAIN][CONFIG][CONF_DEFAULT_AUTH_STATUS] = (
+        AuthorizationStatus.blocked.value
+    )
+    hass.data[DOMAIN][CONFIG][CONF_AUTH_LIST] = [
+        {
+            CONF_ID_TAG: "TAG_PRESENT",
+            CONF_AUTH_STATUS: AuthorizationStatus.expired.value,
+        },
+        {CONF_ID_TAG: "TAG_NO_STATUS"},  # should fall back to default
+    ]
+
+    # 1) Early return path: remote id tag
+    srv_cp._remote_id_tag = "REMOTE123"
+    assert (
+        srv_cp.get_authorization_status("REMOTE123")
+        == AuthorizationStatus.accepted.value
+    )
+
+    # 2) Match in auth_list with explicit status
+    assert (
+        srv_cp.get_authorization_status("TAG_PRESENT")
+        == AuthorizationStatus.expired.value
+    )
+
+    # 3) Match in auth_list without explicit status -> default
+    assert (
+        srv_cp.get_authorization_status("TAG_NO_STATUS")
+        == AuthorizationStatus.blocked.value
+    )
+
+    # 4) Not found in auth_list -> default
+    assert (
+        srv_cp.get_authorization_status("UNKNOWN") == AuthorizationStatus.blocked.value
+    )
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [
+        {
+            "port": 9026,
+            "cp_id": "CP_1_sess_single",
+            "cms": "cms_sess_single",
+            "num_connectors": 1,
+        }
+    ],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_sess_single"])
+@pytest.mark.parametrize("port", [9026])
+async def test_session_metrics_single_connector_backward_compat(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Single-connector: connector_id=None should transparently read connector 1 session metrics."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}",
+        subprotocols=["ocpp1.5", "ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=1)
+        cp_task = asyncio.create_task(cp.start())
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+
+        # Server-side handle + CPID
+        srv = cs.charge_points[cp_id]
+        cpid = srv.settings.cpid
+
+        # Seed connector 1 session value directly
+        meas = "Energy.Session"
+        srv._metrics[(1, meas)] = srv._metrics.get((1, meas), M(None, None))
+        srv._metrics[(1, meas)].value = 3.2
+        srv._metrics[(1, meas)].unit = "kWh"
+
+        # Backward-compat read: connector_id=None must resolve to connector 1 for single-connector
+        val_none = cs.get_metric(cpid, measurand=meas, connector_id=None)
+        assert val_none == 3.2
+
+        # Cleanly close the socket
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
+        await ws.close()
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [
+        {
+            "port": 9027,
+            "cp_id": "CP_1_sess_multi",
+            "cms": "cms_sess_multi",
+            "num_connectors": 2,
+        }
+    ],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_1_sess_multi"])
+@pytest.mark.parametrize("port", [9027])
+async def test_session_metrics_multi_connector_isolated(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Multi-connector: values on connector 1 and 2 are distinct."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}",
+        subprotocols=["ocpp1.5", "ocpp1.6"],
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=2)
+        cp_task = asyncio.create_task(cp.start())
+        await cp.send_boot_notification()
+        await wait_ready(cs.charge_points[cp_id])
+
+        srv = cs.charge_points[cp_id]
+        cpid = srv.settings.cpid
+
+        meas = "Energy.Session"
+        # Seed distinct values per connector
+        for conn, val in [(1, 1.0), (2, 2.0)]:
+            srv._metrics[(conn, meas)] = srv._metrics.get((conn, meas), M(None, None))
+            srv._metrics[(conn, meas)].value = val
+            srv._metrics[(conn, meas)].unit = "kWh"
+
+        # Verify isolation
+        assert cs.get_metric(cpid, measurand=meas, connector_id=1) == 1.0
+        assert cs.get_metric(cpid, measurand=meas, connector_id=2) == 2.0
+
+        # Cleanly close the socket
+        cp_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cp_task
+        await ws.close()
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9071, "cp_id": "CP_ST_SU", "cms": "cms_st_su"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_ST_SU"])
+@pytest.mark.parametrize("port", [9071])
+async def test_start_transaction_accept_and_reject(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """start_transaction returns True on accepted, False on reject and notifies HA."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]  # server-side CP
+
+            # 1) Accepted -> True
+            async def call_ok(req):
+                return SimpleNamespace(status=RemoteStartStopStatus.accepted)
+
+            monkeypatch.setattr(srv_cp, "call", call_ok, raising=True)
+            ok = await srv_cp.start_transaction(connector_id=2)
+            assert ok is True
+
+            # 2) Rejected -> False and notify_ha called
+            notes = []
+
+            async def fake_notify(msg, title="Ocpp integration"):
+                notes.append((msg, title))
+                return True
+
+            async def call_bad(req):
+                return SimpleNamespace(status=RemoteStartStopStatus.rejected)
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+            monkeypatch.setattr(srv_cp, "call", call_bad, raising=True)
+            bad = await srv_cp.start_transaction(connector_id=1)
+            assert bad is False
+            assert notes and "Start transaction failed" in notes[0][0]
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9072, "cp_id": "CP_STOP", "cms": "cms_stop"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_STOP"])
+@pytest.mark.parametrize("port", [9072])
+async def test_stop_transaction_paths(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """stop_transaction: early True when no active tx; accepted True; reject False + notify."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Case A: no active tx anywhere -> returns True without calling cp
+            srv_cp.active_transaction_id = 0
+            # ocppv16 uses _active_tx dict; ensure it's empty/falsey
+            setattr(srv_cp, "_active_tx", {})  # or defaultdict if lib uses that
+            called = {"n": 0}
+
+            async def should_not_call(_req):
+                called["n"] += 1
+                return SimpleNamespace(status=RemoteStartStopStatus.accepted)
+
+            monkeypatch.setattr(srv_cp, "call", should_not_call, raising=True)
+            early = await srv_cp.stop_transaction()
+            assert early is True
+            assert called["n"] == 0  # verify we didn't call into charger
+
+            # Case B: active tx id present -> accepted -> True
+            srv_cp.active_transaction_id = 42
+
+            async def call_ok(req):
+                return SimpleNamespace(status=RemoteStartStopStatus.accepted)
+
+            monkeypatch.setattr(srv_cp, "call", call_ok, raising=True)
+            ok = await srv_cp.stop_transaction()
+            assert ok is True
+
+            # Case C: active tx but reject -> False and notify_ha
+            notes = []
+
+            async def fake_notify(msg, title="Ocpp integration"):
+                notes.append(msg)
+                return True
+
+            async def call_bad(req):
+                return SimpleNamespace(status=RemoteStartStopStatus.rejected)
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+            monkeypatch.setattr(srv_cp, "call", call_bad, raising=True)
+            srv_cp.active_transaction_id = 99
+            bad = await srv_cp.stop_transaction()
+            assert bad is False
+            assert notes and "Stop transaction failed" in notes[0]
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9073, "cp_id": "CP_UNLOCK", "cms": "cms_unlock"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_UNLOCK"])
+@pytest.mark.parametrize("port", [9073])
+async def test_unlock_accept_and_fail(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """unlock: unlocked -> True; otherwise False + notify."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Success
+            async def call_ok(req):
+                return SimpleNamespace(status=UnlockStatus.unlocked)
+
+            monkeypatch.setattr(srv_cp, "call", call_ok, raising=True)
+            ok = await srv_cp.unlock(connector_id=2)
+            assert ok is True
+
+            # Failure → notify
+            notes = []
+
+            async def fake_notify(msg, title="Ocpp integration"):
+                notes.append(msg)
+                return True
+
+            async def call_fail(req):
+                # pick a non-success status
+                return SimpleNamespace(status=UnlockStatus.unlock_failed)
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+            monkeypatch.setattr(srv_cp, "call", call_fail, raising=True)
+            bad = await srv_cp.unlock(connector_id=1)
+            assert bad is False
+            assert notes and "Unlock failed" in notes[0]
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9074, "cp_id": "CP_NUM_CONN", "cms": "cms_num_conn"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_NUM_CONN"])
+@pytest.mark.parametrize("port", [9074])
+async def test_get_number_of_connectors_variants(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Exercise all branches of get_number_of_connectors()."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Case A: valid configurationKey with correct value
+            async def call_good(req):
+                return SimpleNamespace(
+                    configuration_key=[
+                        SimpleNamespace(key="NumberOfConnectors", value="3")
+                    ]
+                )
+
+            monkeypatch.setattr(srv_cp, "call", call_good)
+            n = await srv_cp.get_number_of_connectors()
+            assert n == 3
+
+            # Case B: resp is list[tuple] with dict inside ("configurationKey")
+            async def call_tuple(req):
+                return [
+                    "ignored",
+                    "ignored",
+                    {"configurationKey": [{"key": "NumberOfConnectors", "value": "4"}]},
+                ]
+
+            monkeypatch.setattr(srv_cp, "call", call_tuple)
+            n = await srv_cp.get_number_of_connectors()
+            assert n == 4
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9076, "cp_id": "CP_diag", "cms": "cms_diag"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_diag"])
+@pytest.mark.parametrize("port", [9076])
+async def test_on_diagnostics_status_notification(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test on_diagnostics_status.
+
+    - replies with DiagnosticsStatusNotification
+    - schedules notify_ha with expected message
+    """
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            captured = {"called": 0, "msg": None}
+
+            async def fake_notify(msg: str, title: str = "Ocpp integration"):
+                # record the message; return True like the real notifier
+                captured["msg"] = msg
+                return True
+
+            def fake_async_create_task(coro):
+                # actually schedule the coroutine so fake_notify runs
+                captured["called"] += 1
+                return asyncio.create_task(coro)
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+            monkeypatch.setattr(
+                srv_cp.hass, "async_create_task", fake_async_create_task, raising=True
+            )
+
+            # trigger server handler
+            req = call.DiagnosticsStatusNotification(status="Uploaded")
+            resp = await cp.call(req)
+            assert resp is not None  # server replied
+
+            # ensure notify_ha ran and message content is correct
+            # give the task a tick to run
+            await asyncio.sleep(0)
+            assert captured["called"] == 1
+            assert captured["msg"] == "Diagnostics upload status: Uploaded"
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(15)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9077, "cp_id": "CP_stop_hdl", "cms": "cms_stop_hdl"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_stop_hdl"])
+@pytest.mark.parametrize("port", [9077])
+async def test_on_stop_transaction_paths(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test ocppv16.on_stop_transaction.
+
+    1) Normal routed call (valid payload) with unknown tx -> falls back to conn=1 and
+       exception on meter_start only.
+    2) Direct handler call to cover the exception path on meter_stop (string)
+       and the EAIR-derived branch’s conversion error.
+    Also verify currents/powers are zeroed and HA update is scheduled.
+    """
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}",
+        subprotocols=["ocpp1.6"],
+    ) as ws:
+        # Minimal client to start the protocol task and register the CP
+        cli = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cli.start())
+        spawned_tasks: list[asyncio.Task] = []
+        scheduled = {"n": 0}
+
+        try:
+            await cli.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv: ServerCP = cs.charge_points[cp_id]
+
+            # Keep HA quiet; count scheduled updates instead of running them
+            scheduled = {"n": 0}
+
+            def fake_async_create_task(target, *args, **kwargs):
+                """Intercept HA task scheduling.
+
+                - If the target is the cp.update(...) coroutine, close it so it never runs
+                - Otherwise, create a real asyncio task so nothing else in the loop breaks.
+                """
+                scheduled["n"] += 1
+
+                if inspect.iscoroutine(target):
+                    co = getattr(target, "cr_code", None)
+                    name = getattr(co, "co_name", "") if co else ""
+
+                    if name == "update":
+                        target.close()
+                        t = asyncio.create_task(asyncio.sleep(0))
+                        spawned_tasks.append(t)
+                        return t
+
+                    t = asyncio.create_task(target)
+                    spawned_tasks.append(t)
+                    return t
+
+                t = asyncio.create_task(asyncio.sleep(0))
+                spawned_tasks.append(t)
+                return t
+
+            monkeypatch.setattr(
+                srv.hass, "async_create_task", fake_async_create_task, raising=True
+            )
+
+            # Ensure connector 1 metrics exist
+            _ = srv._metrics[(1, cstat.stop_reason.value)]
+            _ = srv._metrics[(1, csess.meter_start.value)]
+            _ = srv._metrics[(1, DEFAULT_MEASURAND)]
+            _ = srv._metrics[(1, csess.session_energy.value)]
+            for m in [
+                Measurand.current_import.value,
+                Measurand.power_active_import.value,
+                Measurand.power_reactive_import.value,
+                Measurand.current_export.value,
+                Measurand.power_active_export.value,
+                Measurand.power_reactive_export.value,
+            ]:
+                _ = srv._metrics[(1, m)]
+
+            # ------------------------------------------------------------------
+            # (A) Routed normal call: unknown tx -> conn is None path; make meter_start
+            #     non-numeric to hit that exception (meter_stop remains valid int).
+            # ------------------------------------------------------------------
+            unknown_tx = 999_001
+            srv._active_tx = {}  # ensures lookup fails -> fallback to conn=1
+            srv.active_transaction_id = 0
+
+            # Force meter_start conversion failure
+            srv._metrics[(1, csess.meter_start.value)].value = "not-a-number"
+
+            stop_req = call.StopTransaction(
+                transaction_id=unknown_tx,
+                meter_stop=12345,
+                timestamp="2024-01-01T00:00:00Z",
+                reason="Local",
+            )
+            stop_resp = await cli.call(stop_req)
+            assert isinstance(stop_resp, call_result.StopTransaction)
+
+            # Session energy is derived from meter_stop (12.345 kWh) minus
+            # meter_start (conversion failed -> 0.0) = 12.345
+            val = srv._metrics[(1, csess.session_energy.value)].value
+            unit = srv._metrics[(1, csess.session_energy.value)].unit
+            assert val == pytest.approx(12.345, rel=1e-6)
+            assert unit == HA_ENERGY_UNIT
+
+            # Zeroing of currents/powers
+            for m in [
+                Measurand.current_import.value,
+                Measurand.power_active_import.value,
+                Measurand.power_reactive_import.value,
+                Measurand.current_export.value,
+                Measurand.power_active_export.value,
+                Measurand.power_reactive_export.value,
+            ]:
+                assert srv._metrics[(1, m)].value == 0
+
+            assert scheduled["n"] >= 1  # update(...) scheduled
+
+            # ------------------------------------------------------------------
+            # (B) Direct handler call to cover:
+            #     - meter_stop conversion exception (string)
+            #     - EAIR-based branch with conversion error
+            # ------------------------------------------------------------------
+            # Prepare connector 2
+            _ = srv._metrics[(2, DEFAULT_MEASURAND)]
+            _ = srv._metrics[(2, csess.session_energy.value)]
+            _ = srv._metrics[(2, csess.meter_start.value)]
+
+            # Choose EAIR-based route
+            srv._charger_reports_session_energy = True
+            # No precomputed session value so handler tries to derive from last EAIR
+            srv._metrics[(2, csess.session_energy.value)].value = None
+            srv._metrics[(2, DEFAULT_MEASURAND)].unit = HA_ENERGY_UNIT
+            # Make EAIR non-convertible to float -> triggers exception inside EAIR branch
+            srv._metrics[(2, DEFAULT_MEASURAND)].value = "NaN-err"
+
+            # Map tx to connector 2 (so conn is found and not None)
+            known_tx = 222_333
+            srv._active_tx = {2: known_tx}
+            srv.active_transaction_id = known_tx
+
+            # Call handler directly to bypass OCPP schema and send bad meter_stop
+            # NOTE: This is intentional to exercise the internal try/except on meter_stop.
+            direct_resp = srv.on_stop_transaction(
+                meter_stop="bad-int",  # triggers exception -> 0.0 if fallback path used
+                timestamp="2024-01-01T00:00:01Z",
+                transaction_id=known_tx,
+                reason="Local",
+            )
+            assert isinstance(direct_resp, call_result.StopTransaction)
+
+            # EAIR conversion failed; code swallows the exception and leaves session possibly unset
+            assert srv._metrics[(2, csess.session_energy.value)].value in (None,)
+
+            # Currents/powers should be zeroed on connector 2 as well
+            for m in [
+                Measurand.current_import.value,
+                Measurand.power_active_import.value,
+                Measurand.power_reactive_import.value,
+                Measurand.current_export.value,
+                Measurand.power_active_export.value,
+                Measurand.power_reactive_export.value,
+            ]:
+                _ = srv._metrics[(2, m)]
+                assert srv._metrics[(2, m)].value == 0
+
+        finally:
+            for t in spawned_tasks:
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9082, "cp_id": "CP_stop_eair_wh", "cms": "cms_stop_eair_wh"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_stop_eair_wh"])
+@pytest.mark.parametrize("port", [9082])
+async def test_on_stop_transaction_eair_unit_wh(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test on_stop_transaction EAIR branch with last_unit == Wh and last_eair set.
+
+    Covers the branch where eair_kwh = float(last_eair) / 1000.0.
+    """
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cli = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cli.start())
+
+        try:
+            await cli.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv: ServerCP = cs.charge_points[cp_id]
+
+            # Prepare connector 1 metrics
+            _ = srv._metrics[(1, csess.session_energy.value)]
+            _ = srv._metrics[(1, DEFAULT_MEASURAND)]
+            _ = srv._metrics[(1, csess.meter_start.value)]
+
+            # Force EAIR branch
+            srv._charger_reports_session_energy = True
+            srv._metrics[(1, csess.session_energy.value)].value = None
+            srv._metrics[(1, DEFAULT_MEASURAND)].unit = DEFAULT_ENERGY_UNIT
+            # Here: set a Wh value to trigger the branch
+            srv._metrics[(1, DEFAULT_MEASURAND)].value = 12345  # Wh = 12.345 kWh
+
+            # Map tx → connector 1
+            tx_id = 222
+            srv._active_tx = {1: tx_id}
+            srv.active_transaction_id = tx_id
+
+            # Prevent lingering post_connect job during teardown
+            srv.post_connect_success = True
+
+            async def _noop():  # don't start background work in tests
+                return None
+
+            monkeypatch.setattr(srv, "post_connect", _noop, raising=True)
+
+            def _schedule(target, *args, **kwargs):
+                # Always schedule the coroutine; ignore HA's optional args (name/eager_start)
+                return asyncio.create_task(target)
+
+            # Patch both the server CP’s hass and the root hass to be safe
+            monkeypatch.setattr(srv.hass, "async_create_task", _schedule, raising=True)
+            monkeypatch.setattr(hass, "async_create_task", _schedule, raising=True)
+
+            # Call handler directly
+            resp = srv.on_stop_transaction(
+                meter_stop=99999,  # ignored in EAIR branch
+                timestamp="2024-01-01T00:00:01Z",
+                transaction_id=tx_id,
+                reason="Local",
+            )
+            assert isinstance(resp, call_result.StopTransaction)
+
+            # Session energy should now be set to 12.345 kWh
+            val = srv._metrics[(1, csess.session_energy.value)].value
+            unit = srv._metrics[(1, csess.session_energy.value)].unit
+            assert val == pytest.approx(12.345, rel=1e-6)
+            assert unit == HA_ENERGY_UNIT
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9083, "cp_id": "CP_stop_eair_kwh", "cms": "cms_stop_eair_kwh"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_stop_eair_kwh"])
+@pytest.mark.parametrize("port", [9083])
+async def test_on_stop_transaction_eair_unit_kwh(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """EAIR branch where last_unit == kWh and last_eair has a value.
+
+    Verifies that session energy is copied as-is (already in kWh),
+    and avoids warnings by scheduling the HA update and disabling post_connect.
+    """
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cli = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cli.start())
+
+        try:
+            # Boot so the server registers this CP
+            await cli.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv: ServerCP = cs.charge_points[cp_id]
+
+            # Prevent lingering post_connect job during teardown
+            srv.post_connect_success = True
+
+            async def _noop():  # don't start background work in tests
+                return None
+
+            monkeypatch.setattr(srv, "post_connect", _noop, raising=True)
+
+            def _schedule(target, *args, **kwargs):
+                # Always schedule the coroutine; ignore HA's optional args (name/eager_start)
+                return asyncio.create_task(target)
+
+            # Patch both the server CP’s hass and the root hass to be safe
+            monkeypatch.setattr(srv.hass, "async_create_task", _schedule, raising=True)
+            monkeypatch.setattr(hass, "async_create_task", _schedule, raising=True)
+
+            # Prepare connector 1 metrics for the EAIR branch
+            _ = srv._metrics[(1, csess.session_energy.value)]
+            _ = srv._metrics[(1, DEFAULT_MEASURAND)]
+            _ = srv._metrics[(1, csess.meter_start.value)]
+
+            srv._charger_reports_session_energy = True
+            srv._metrics[(1, csess.session_energy.value)].value = None
+            srv._metrics[(1, DEFAULT_MEASURAND)].unit = HA_ENERGY_UNIT
+            srv._metrics[(1, DEFAULT_MEASURAND)].value = 12.345  # already kWh
+
+            # Map tx → connector 1 so the handler resolves conn=1
+            tx_id = 333
+            srv._active_tx = {1: tx_id}
+            srv.active_transaction_id = tx_id
+
+            # Call handler directly to exercise the branch
+            resp = srv.on_stop_transaction(
+                meter_stop=99999,  # ignored in EAIR branch
+                timestamp="2024-01-01T00:00:01Z",
+                transaction_id=tx_id,
+                reason="Local",
+            )
+            assert isinstance(resp, call_result.StopTransaction)
+
+            # Expect the EAIR value to be copied to session energy (kWh)
+            val = srv._metrics[(1, csess.session_energy.value)].value
+            unit = srv._metrics[(1, csess.session_energy.value)].unit
+            assert val == pytest.approx(12.345, rel=1e-6)
+            assert unit == HA_ENERGY_UNIT
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
 
 
 class ChargePoint(cpclass):

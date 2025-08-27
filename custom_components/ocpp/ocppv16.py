@@ -111,12 +111,44 @@ class ChargePoint(cp):
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
-        val = await self.get_configuration(ckey.number_of_connectors.value)
+        resp = None
+
         try:
-            n = int(val)
-        except (TypeError, ValueError):
-            n = 1  # fallback
-        return max(1, n)
+            req = call.GetConfiguration(key=["NumberOfConnectors"])
+            resp = await self.call(req)
+        except Exception:
+            resp = None
+
+        cfg = None
+        if resp is not None:
+            cfg = getattr(resp, "configuration_key", None)
+
+            if (
+                cfg is None
+                and isinstance(resp, list | tuple)
+                and len(resp) >= 3
+                and isinstance(resp[2], dict)
+            ):
+                cfg = resp[2].get("configurationKey") or resp[2].get(
+                    "configuration_key"
+                )
+
+        if cfg:
+            for kv in cfg:
+                k = getattr(kv, "key", None)
+                v = getattr(kv, "value", None)
+                if k is None and isinstance(kv, dict):
+                    k = kv.get("key")
+                    v = kv.get("value")
+                if k == "NumberOfConnectors" and v not in (None, ""):
+                    try:
+                        n = int(str(v).strip())
+                        if n > 0:
+                            return n
+                    except (ValueError, TypeError):
+                        pass
+
+        return 1
 
     async def get_heartbeat_interval(self):
         """Retrieve heartbeat interval from the charger and store it."""
@@ -744,7 +776,9 @@ class ChargePoint(cp):
             self._metrics[(connector_id, csess.session_time.value)].value = round(
                 (int(time.time()) - tx_start) / 60
             )
-            self._metrics[(connector_id, csess.session_time.value)].unit = "min"
+            self._metrics[
+                (connector_id, csess.session_time.value)
+            ].unit = UnitOfTime.MINUTES
 
         # Update Energy.Session ONLY from EAIR in this message if txId exists and matches
         if tx_has_id and transaction_matches:
@@ -793,14 +827,12 @@ class ChargePoint(cp):
         """Handle a status notification."""
 
         if connector_id == 0 or connector_id is None:
-            self._metrics[0][cstat.status.value].value = status
-            self._metrics[0][cstat.error_code.value].value = error_code
+            self._metrics[(0, cstat.status.value)].value = status
+            self._metrics[(0, cstat.error_code.value)].value = error_code
         else:
+            self._metrics[(connector_id, cstat.status_connector.value)].value = status
             self._metrics[
-                (connector_id or 0, cstat.status_connector.value)
-            ].value = status
-            self._metrics[
-                (connector_id or 0, cstat.error_code_connector.value)
+                (connector_id, cstat.error_code_connector.value)
             ].value = error_code
 
             if status in (

@@ -26,7 +26,6 @@ from ocpp.charge_point import ChargePoint as cp
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
 from ocpp.v16.enums import (
-    UnitOfMeasure,
     AuthorizationStatus,
     Measurand,
     Phase,
@@ -53,10 +52,12 @@ from .const import (
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
+    CONF_NUM_CONNECTORS,
     CONF_CPIDS,
     CONFIG,
     DATA_UPDATED,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_NUM_CONNECTORS,
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
     DOMAIN,
@@ -276,15 +277,22 @@ class ChargePoint(cp):
 
         # Init standard metrics for connector 0
         self._metrics[(0, cdet.identifier.value)].value = id
-        self._metrics[(0, csess.session_time.value)].unit = TIME_MINUTES
-        self._metrics[(0, csess.session_energy.value)].unit = UnitOfMeasure.kwh.value
-        self._metrics[(0, csess.meter_start.value)].unit = UnitOfMeasure.kwh.value
         self._metrics[(0, cstat.reconnects.value)].value = 0
 
         self._attr_supported_features = prof.NONE
         alphabet = string.ascii_uppercase + string.digits
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
-        self.num_connectors: int = 1
+        self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+
+    def _init_connector_slots(self, conn_id: int) -> None:
+        """Ensure connector-scoped metrics exist and carry the right units."""
+        _ = self._metrics[(conn_id, cstat.status_connector.value)]
+        _ = self._metrics[(conn_id, cstat.error_code_connector.value)]
+        _ = self._metrics[(conn_id, csess.transaction_id.value)]
+
+        self._metrics[(conn_id, csess.session_time.value)].unit = TIME_MINUTES
+        self._metrics[(conn_id, csess.session_energy.value)].unit = HA_ENERGY_UNIT
+        self._metrics[(conn_id, csess.meter_start.value)].unit = HA_ENERGY_UNIT
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
@@ -320,21 +328,20 @@ class ChargePoint(cp):
             num_connectors: int = await self.get_number_of_connectors()
             self.num_connectors = num_connectors
             for conn in range(1, self.num_connectors + 1):
-                _ = self._metrics[(conn, cstat.status_connector.value)]
-                _ = self._metrics[(conn, cstat.error_code_connector.value)]
-                _ = self._metrics[(conn, csess.session_energy.value)]
-                _ = self._metrics[(conn, csess.meter_start.value)]
-                _ = self._metrics[(conn, csess.transaction_id.value)]
-            self._metrics[(0, cdet.connectors.value)].value = num_connectors
+                self._init_connector_slots(conn)
+            self._metrics[(0, cdet.connectors.value)].value = self.num_connectors
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
             for i in range(len(updated_entry[CONF_CPIDS])):
                 if self.id in updated_entry[CONF_CPIDS][i]:
-                    updated_entry[CONF_CPIDS][i][self.id][CONF_MONITORED_VARIABLES] = (
-                        accepted_measurands
-                    )
+                    s = updated_entry[CONF_CPIDS][i][self.id]
+                    if s.get(CONF_MONITORED_VARIABLES) != accepted_measurands or s.get(
+                        CONF_NUM_CONNECTORS
+                    ) != int(self.num_connectors):
+                        s[CONF_MONITORED_VARIABLES] = accepted_measurands
+                        s[CONF_NUM_CONNECTORS] = int(self.num_connectors)
                     break
             # if an entry differs this will unload/reload and stop/restart the central system/websocket
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
@@ -342,7 +349,7 @@ class ChargePoint(cp):
             await self.set_standard_configuration()
 
             self.post_connect_success = True
-            _LOGGER.debug(f"'{self.id}' post connection setup completed successfully")
+            _LOGGER.debug("'%s' post connection setup completed successfully", self.id)
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
@@ -822,22 +829,6 @@ class ChargePoint(cp):
         """Flag of Ocpp features that are supported."""
         return self._attr_supported_features
 
-    def get_metric(self, measurand: str, connector_id: int = 0):
-        """Return last known value for given measurand."""
-        val = self._metrics[(connector_id, measurand)].value
-        if val is not None:
-            return val
-
-        if connector_id and connector_id > 0:
-            if measurand == cstat.status_connector.value:
-                agg = self._metrics[(0, cstat.status_connector.value)]
-                return agg.extra_attr.get(connector_id, agg.value)
-            if measurand == cstat.error_code_connector.value:
-                agg = self._metrics[(0, cstat.error_code_connector.value)]
-                return agg.extra_attr.get(connector_id, agg.value)
-
-        return None
-
     def get_ha_metric(self, measurand: str, connector_id: int | None = None):
         """Return last known value in HA for given measurand, or None if not available."""
         base = self.settings.cpid.lower()
@@ -854,30 +845,6 @@ class ChargePoint(cp):
             if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN, None):
                 return st.state
         return None
-
-    def get_extra_attr(self, measurand: str, connector_id: int = 0):
-        """Return extra attributes for given measurand (per connector)."""
-        attrs = self._metrics[(connector_id, measurand)].extra_attr
-        if attrs:
-            return attrs
-
-        if connector_id and connector_id > 0:
-            if measurand in (
-                cstat.status_connector.value,
-                cstat.error_code_connector.value,
-            ):
-                agg = self._metrics[(0, measurand)]
-                if connector_id in agg.extra_attr:
-                    return {connector_id: agg.extra_attr[connector_id]}
-        return {}
-
-    def get_unit(self, measurand: str, connector_id: int = 0):
-        """Return unit of given measurand."""
-        return self._metrics[(connector_id, measurand)].unit
-
-    def get_ha_unit(self, measurand: str, connector_id: int = 0):
-        """Return HA unit of given measurand."""
-        return self._metrics[(connector_id, measurand)].ha_unit
 
     async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
         """Notify user via HA web frontend."""

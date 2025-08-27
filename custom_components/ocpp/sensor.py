@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import CONF_MONITORED_VARIABLES
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
@@ -24,11 +25,12 @@ from .const import (
     CONF_NUM_CONNECTORS,
     DATA_UPDATED,
     DEFAULT_CLASS_UNITS_HA,
+    DEFAULT_NUM_CONNECTORS,
     DOMAIN,
     ICON,
     Measurand,
 )
-from .enums import HAChargerDetails, HAChargerStatuses
+from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
 
 @dataclass
@@ -42,11 +44,24 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the sensor platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
     entities: list[ChargePointMetric] = []
+    ent_reg = er.async_get(hass)
+
     # setup all chargers added to config
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
-        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
+
+        num_connectors = 1
+        for item in entry.data.get(CONF_CPIDS, []):
+            for _, cfg in item.items():
+                if cfg.get(CONF_CPID) == cpid:
+                    num_connectors = int(
+                        cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
+                    )
+                    break
+            else:
+                continue
+            break
 
         configured = [
             m.strip()
@@ -76,6 +91,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
         CONNECTOR_ONLY = measurands + [
             HAChargerStatuses.status_connector.value,
             HAChargerStatuses.error_code_connector.value,
+            HAChargerSession.transaction_id.value,
+            HAChargerSession.session_time.value,
+            HAChargerSession.session_energy.value,
+            HAChargerSession.meter_start.value,
         ]
 
         def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
@@ -86,6 +105,22 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 metric=ms,
                 entity_category=EntityCategory.DIAGNOSTIC if cat_diag else None,
             )
+
+        def _uid(cpid: str, key: str, connector_id: int | None) -> str:
+            """Mirror ChargePointMetric unique_id construction."""
+            key = key.lower()
+            parts = [DOMAIN, cpid, key, SENSOR_DOMAIN]
+            if connector_id is not None:
+                parts.insert(2, f"conn{connector_id}")
+            return ".".join(parts)
+
+        if num_connectors > 1:
+            for metric in CONNECTOR_ONLY:
+                uid = _uid(cpid, metric, connector_id=None)
+                stale_eid = ent_reg.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
+                if stale_eid:
+                    # Remove the old entity so it doesn't linger as 'unavailable'
+                    ent_reg.async_remove(stale_eid)
 
         # Root/charger-entities
         for metric in CHARGER_ONLY:
@@ -143,7 +178,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class ChargePointMetric(RestoreSensor, SensorEntity):
     """Individual sensor for charge point metrics."""
 
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
     entity_description: OcppSensorDescription
 
     def __init__(
@@ -171,7 +206,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         if self.connector_id is not None:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"Connector {self.connector_id}",
+                name=f"{cpid} Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:
@@ -180,6 +215,11 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
                 name=cpid,
             )
 
+        if self.connector_id is not None:
+            object_id = f"{self.cpid}_connector_{self.connector_id}_{self.entity_description.key}"
+        else:
+            object_id = f"{self.cpid}_{self.entity_description.key}"
+        self.entity_id = f"{SENSOR_DOMAIN}.{object_id}"
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
 
@@ -220,6 +260,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         ] or self.metric in [
             HAChargerStatuses.latency_ping.value,
             HAChargerStatuses.latency_pong.value,
+            HAChargerSession.session_time.value,
         ]:
             state_class = SensorStateClass.MEASUREMENT
 

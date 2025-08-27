@@ -11,10 +11,17 @@ from homeassistant.components.button import (
     ButtonEntity,
     ButtonEntityDescription,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
-from .const import CONF_CPID, CONF_CPIDS, CONF_NUM_CONNECTORS, DOMAIN
+from .const import (
+    CONF_CPID,
+    CONF_CPIDS,
+    CONF_NUM_CONNECTORS,
+    DEFAULT_NUM_CONNECTORS,
+    DOMAIN,
+)
 from .enums import HAChargerServices
 
 
@@ -50,12 +57,32 @@ async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the Button platform."""
     central_system: CentralSystem = hass.data[DOMAIN][entry.entry_id]
     entities: list[ChargePointButton] = []
+    ent_reg = er.async_get(hass)
 
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
 
-        num_connectors = int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1) or 1)
+        num_connectors = 1
+        for item in entry.data.get(CONF_CPIDS, []):
+            for _, cfg in item.items():
+                if cfg.get(CONF_CPID) == cpid:
+                    num_connectors = int(
+                        cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
+                    )
+                    break
+            else:
+                continue
+            break
+
+        if num_connectors > 1:
+            for desc in BUTTONS:
+                if not desc.per_connector:
+                    continue
+                uid_flat = ".".join([BUTTON_DOMAIN, DOMAIN, cpid, desc.key])
+                stale_eid = ent_reg.async_get_entity_id(BUTTON_DOMAIN, DOMAIN, uid_flat)
+                if stale_eid:
+                    ent_reg.async_remove(stale_eid)
 
         for desc in BUTTONS:
             if desc.per_connector:
@@ -97,7 +124,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class ChargePointButton(ButtonEntity):
     """Individual button for charge point."""
 
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
     entity_description: OcppButtonDescription
 
     def __init__(
@@ -122,7 +149,7 @@ class ChargePointButton(ButtonEntity):
         if self.connector_id:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"Connector {self.connector_id}",
+                name=f"{cpid} Connector {self.connector_id}",
                 via_device=(DOMAIN, cpid),
             )
         else:
@@ -130,6 +157,11 @@ class ChargePointButton(ButtonEntity):
                 identifiers={(DOMAIN, cpid)},
                 name=cpid,
             )
+        if self.connector_id is not None:
+            object_id = f"{self.cpid}_connector_{self.connector_id}_{self.entity_description.key}"
+        else:
+            object_id = f"{self.cpid}_{self.entity_description.key}"
+        self.entity_id = f"{BUTTON_DOMAIN}.{object_id}"
 
     @property
     def available(self) -> bool:
