@@ -65,7 +65,7 @@ ocpp:
 logger:
   default: info
   logs:
-    custom_components.cpps: debug
+    custom_components.ocpp: debug
 
 # If you need to debug uncomment the line below (doc: https://www.home-assistant.io/integrations/debugpy/)
 # debugpy:
