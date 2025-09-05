@@ -56,13 +56,13 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 ## [EN+ Caro Series Home Wallbox](https://www.en-plustech.com/product/caro-series-wallbox/)
 This charger is often white-labelled by other vendors, including [cord](https://www.cord-ev.com/cord-one.html) and [EV Switch](https://www.evswitchstore.com.au/pages/ev-charger-range).
 
-Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant if the OCPP integration does not discover your charger, and also to request a firmware update for versions earlier than 1.0.25.130. 
+Note the charger's serial number - this is the number that you need to specify for the `Charge point identity` when you configure the OCPP integration in Home Assistant if the OCPP integration does not discover your charger, and also to request a firmware update for versions earlier than 1.0.25.130.
 
 For firmware versions earlier than 1.0.25.130 the only way you can update firmware is by connecting to the evchargo OCPP server at `wss://ocpp16.evchargo.com:33033/` and emailing your serial number to `support@en-plus.com.cn` requesting that your firmware is updated.
 
 You will probably want to update your firmware if it is earlier than 1.0.25.130 before configuring your charger to connect to your own OCPP server.
 
-Firmware 1.0.25.130 has a firmware update option on the configuration interface (on IP address 192.168.4.1) which you can access by power-cycling the charger and connecting to its access point (see below). 
+Firmware 1.0.25.130 has a firmware update option on the configuration interface (on IP address 192.168.4.1) which you can access by power-cycling the charger and connecting to its access point (see below).
 
 If you have already installed the OCPP integration and have the default `charger` charge point installed, then you will need to re-configure this with the correct charge point identity (by removing and re-adding the OCPP integration) to change from the default `charger` charge point identity before configuring the charger.
 
@@ -80,7 +80,7 @@ Save, and the charger will reboot.
 
 Reconnect to the charger's SSID, and log in again to 192.168.4.1 to confirm that the Network Status is online.  This confirms that the charger has an internet connection via Ethernet or WiFi and is connected to your OCPP server in Home Assistant.  Once enabled, the charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
 
-Even though the device accepts all measurands, the key working ones are 
+Even though the device accepts all measurands, the key working ones are
    - `Current.Import`
    - `Current.Offered`
    - `Energy.Active.Import.Register`
@@ -112,6 +112,16 @@ Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.
 
 The "Charger idle sampling interval" is not supported. Set this to **0** to avoid a "ClockAlignedDataInterval is read-only" warning.
 
+## [Rolec EVO](https://www.rolecserv.com/ev-products/evo)
+Tested single phase 7kW model (ROLEC5011) with firmware 1.2.7, appears to be working fine.
+
+Need to configure the OCPP server using the **Rolec Connect** mobile app, and
+set the current to the maximum (32A), otherwise the exposed `Maximum Current`
+entity in HA will be capped.
+
+You can still connect with the EVO app via Bluetooth after setting the OCPP server,
+but certain features (eg. scheduling) may not work.
+
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
@@ -131,12 +141,12 @@ A few plugin tweaks to get full functionality...
    - Optionally create an automation updating the hearbeat interval (you have to set a value different to the one in the chargepoint) when the chargepoint reboots.
    - I haven't tested using secure mode.
    - If you have problems with charging profiles, check your firmware version is 1.6.3 (the latest in Mar 2025)
-   - Firmware updates can be done through the app, by reconnecting the charger to the original OCPP backend (wss://cpc.uk.charge.ampeco.tech:443/syncev/) and if it says you're on the latest, call them (+44 1952 983 940) to get it updated. 
+   - Firmware updates can be done through the app, by reconnecting the charger to the original OCPP backend (wss://cpc.uk.charge.ampeco.tech:443/syncev/) and if it says you're on the latest, call them (+44 1952 983 940) to get it updated.
 
 ## [Teison Smart MINI Wallbox](https://www.teison.com/ac_smart_mini_ev_wallbox.html)
 Use *My Teison* app to enable webSocket. In the socket URL field enter the address of your Home Assistant server including the port. In the socket port field enter *ocpp1.6* for insecure connection or *socpp1.6* for secure connection with certificates. Once enabled, charger doesn't connect to the vendor server anymore and can be controlled only from Home Assistant or locally via Bluetooth.
 
-Even though the device accepts all measurands, the working ones are 
+Even though the device accepts all measurands, the working ones are
    - `Current.Import`
    - `Energy.Active.Import.Register`
    - `Power.Active.Import`
@@ -144,7 +154,7 @@ Even though the device accepts all measurands, the working ones are
    - `Voltage`
 
 If the devices loses connection to Home Assistant (due to Wi-Fi disconnection or update, for example) it doesn't seem to reconnect automatically. It is necessary to reboot the charger via Bluetooth for it to reconnect.
-     
+
 ## [United Chargers Inc. - Grizzl-E](https://grizzl-e.com/about/)
 
 Grizzl-E chargers with firmware 3.x.x work mostly without issue, such as the following:

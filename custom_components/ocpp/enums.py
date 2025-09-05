@@ -1,6 +1,6 @@
 """Additional enumerated values to use in home assistant."""
 
-from enum import Enum, Flag, auto
+from enum import Enum, IntFlag, auto
 
 
 class HAChargerServices(str, Enum):
@@ -62,7 +62,7 @@ class HAChargerSession(str, Enum):
     meter_start = "Energy.Meter.Start"  # in kWh
 
 
-class Profiles(Flag):
+class Profiles(IntFlag):
     """Flags to indicate supported feature profiles."""
 
     NONE = 0
@@ -72,6 +72,12 @@ class Profiles(Flag):
     RES = auto()  # Reservation
     REM = auto()  # RemoteTrigger
     AUTH = auto()  # LocalAuthListManagement
+
+    def labels(self):
+        """Get labels for profiles."""
+        if self == Profiles.NONE:
+            return "NONE"
+        return "|".join([p.name for p in Profiles if p & self])
 
 
 class OcppMisc(str, Enum):

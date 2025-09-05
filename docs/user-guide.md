@@ -124,7 +124,35 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
 
-### OCPP Compatibility Issues
+## Useful Entities for Rolec EVO
+
+### Metrics
+
+* `Current Import`
+* `Current Offered` (may be limited by the settings on the charger itself, check the EVO app)
+* `Energy Session` (charge for present/last session - kWh)
+* `Power Active Import` (active charging power - kW)
+* `Temperature` (internal temperature - degrees C)
+* `Time Session` (duration of active/last charging session)
+* `Voltage` (seems to report a little higher than expected)
+
+There are several other metrics too, I'm not sure what they mean, and also `Export` variants of some of the `Import` entities, but they seem to always be zero for me.
+
+### Diagnostics
+
+* `Status Connector` (Available, Preparing, Charging, etc)
+
+There are many other diagnostic entities about the features, ids, model, firmware etc, not sure if they'd be much practical use.
+
+### Controls
+
+* `Availability` (turning off switches the halo from flashing blue to constant red)
+* `Charge Control`
+* `Maximum Current` (if `Current Offered` doesn't reach this when charging, raise the current to the max in the EVO app itself, connect via Bluetooth)
+* `Reset` (reboot the charger)
+* `Unlock` (I think this will unlock the charging cable, if permanent lock is enabled from the app)
+
+## OCPP Compatibility Issues
 
 ### ABB Terra AC
 

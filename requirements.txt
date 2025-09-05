@@ -1,9 +1,9 @@
 colorlog==6.9.0
 uv>=0.4
-ruff==0.12.9
+ruff==0.12.11
 ocpp==2.1.0
 websockets==15.0.1
-jsonschema==4.24.0
+jsonschema==4.25.1
 pre-commit==4.3.0
 pytest-homeassistant-custom-component==0.13.256
 setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
