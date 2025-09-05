@@ -41,7 +41,7 @@ async def set_number(hass: HomeAssistant, cpid: str, key: str, value: int):
     await hass.services.async_call(
         NUMBER_DOMAIN,
         "set_value",
-        service_data={"value": str(value)},
+        service_data={"value": value},
         blocking=True,
         target={ATTR_ENTITY_ID: f"{NUMBER_DOMAIN}.{cpid}_{key}"},
     )
