@@ -20,6 +20,7 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    CONF_NUM_CONNECTORS,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -39,6 +40,7 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_NUM_CONNECTORS,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -106,7 +108,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 0
+    MINOR_VERSION = 1
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
@@ -115,6 +117,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._cp_id: str
         self._entry: ConfigEntry
         self._measurands: str = ""
+        self._detected_num_connectors: int = DEFAULT_NUM_CONNECTORS
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         """Handle user central system initiated configuration."""
@@ -141,6 +144,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._cp_id = discovery_info["cp_id"]
         self._data = {**self._entry.data}
 
+        self._detected_num_connectors = discovery_info.get(
+            CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS
+        )
+
         await self.async_set_unique_id(self._cp_id)
         # Abort the flow if a config entry with the same unique ID exists
         self._abort_if_unique_id_configured()
@@ -155,7 +162,12 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Don't allow duplicate cpids to be used
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
-            self._data[CONF_CPIDS].append({self._cp_id: user_input})
+
+            cp_data = {
+                **user_input,
+                CONF_NUM_CONNECTORS: self._detected_num_connectors,
+            }
+            self._data[CONF_CPIDS].append({self._cp_id: cp_data})
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     DEFAULT_MONITORED_VARIABLES
