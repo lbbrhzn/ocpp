@@ -122,7 +122,7 @@ async def test_migration_entry(
     assert config_entry.data.keys() == MOCK_CONFIG_DATA.keys()
     # check versions match
     assert config_entry.version == 2
-    assert config_entry.minor_version == 0
+    assert config_entry.minor_version == 1
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)

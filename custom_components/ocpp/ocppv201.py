@@ -1,12 +1,10 @@
 """Representation of a OCPP 2.0.1 or 2.1 charging station."""
 
 import asyncio
+import contextlib
 from datetime import datetime, UTC
 from dataclasses import dataclass, field
 import logging
-
-import ocpp.exceptions
-from ocpp.exceptions import OCPPError
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
@@ -14,6 +12,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError, HomeAssistantError
 from websockets.asyncio.server import ServerConnection
 
+import ocpp.exceptions
+from ocpp.exceptions import OCPPError
 from ocpp.routing import on
 from ocpp.v201 import call, call_result
 from ocpp.v16.enums import ChargePointStatus as ChargePointStatusv16
@@ -57,7 +57,6 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
 )
-import contextlib
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 logging.getLogger(DOMAIN).setLevel(logging.INFO)

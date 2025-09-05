@@ -74,10 +74,13 @@ async def async_setup_entry(hass, entry, async_add_devices):
         CHARGER_ONLY = [
             HAChargerStatuses.status.value,
             HAChargerStatuses.error_code.value,
+            HAChargerStatuses.firmware_status.value,
             HAChargerStatuses.heartbeat.value,
+            HAChargerStatuses.id_tag.value,
             HAChargerStatuses.latency_ping.value,
             HAChargerStatuses.latency_pong.value,
             HAChargerStatuses.reconnects.value,
+            HAChargerDetails.identifier.value,
             HAChargerDetails.vendor.value,
             HAChargerDetails.model.value,
             HAChargerDetails.serial.value,
@@ -86,11 +89,13 @@ async def async_setup_entry(hass, entry, async_add_devices):
             HAChargerDetails.connectors.value,
             HAChargerDetails.config_response.value,
             HAChargerDetails.data_response.value,
+            HAChargerDetails.data_transfer.value,
         ]
 
         CONNECTOR_ONLY = measurands + [
             HAChargerStatuses.status_connector.value,
             HAChargerStatuses.error_code_connector.value,
+            HAChargerStatuses.stop_reason.value,
             HAChargerSession.transaction_id.value,
             HAChargerSession.session_time.value,
             HAChargerSession.session_energy.value,
@@ -305,6 +310,16 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         value = self.central_system.get_metric(
             self.cpid, self.metric, self.connector_id
         )
+
+        # Special case for features - show profiles as labels from IntFlag
+        if self.metric == HAChargerDetails.features.value and value is not None:
+            if hasattr(value, "labels"):
+                self._attr_native_value = value.labels()
+            else:
+                self._attr_native_value = str(value)
+
+            return self._attr_native_value
+
         if value is not None:
             self._attr_native_value = value
         return self._attr_native_value

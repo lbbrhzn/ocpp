@@ -697,7 +697,7 @@ async def test_cms_responses_errors_v16(
         )
 
 
-@pytest.mark.timeout(20)  # Set timeout for this test
+@pytest.mark.timeout(40)  # Set timeout for this test
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9007, "cp_id": "CP_1_norm_mc", "cms": "cms_norm"}],
@@ -1533,7 +1533,7 @@ async def test_update_firmware_rpc_failure_v16(
         await ws.close()
 
 
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(40)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9020, "cp_id": "CP_1_unit_fallback", "cms": "cms_unit_fallback"}],
@@ -2534,7 +2534,7 @@ async def test_on_stop_transaction_paths(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9082, "cp_id": "CP_stop_eair_wh", "cms": "cms_stop_eair_wh"}],

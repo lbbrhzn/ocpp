@@ -25,6 +25,7 @@ from .const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    CONF_NUM_CONNECTORS,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
@@ -44,6 +45,7 @@ from .const import (
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+    DEFAULT_NUM_CONNECTORS,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
@@ -191,6 +193,36 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, minor_version=0, version=2
         )
+
+    if config_entry.version == 2 and config_entry.minor_version == 0:
+        data = {**config_entry.data}
+        cpids = data.get(CONF_CPIDS, [])
+
+        changed = False
+        for idx, cp_map in enumerate(cpids):
+            if not isinstance(cp_map, dict) or not cp_map:
+                continue
+            cp_id, cp_data = next(iter(cp_map.items()))
+            if CONF_NUM_CONNECTORS not in cp_data:
+                cp_data = {**cp_data, CONF_NUM_CONNECTORS: DEFAULT_NUM_CONNECTORS}
+                cpids[idx] = {cp_id: cp_data}
+                changed = True
+
+        if changed:
+            data[CONF_CPIDS] = cpids
+            hass.config_entries.async_update_entry(
+                config_entry,
+                data=data,
+                version=2,
+                minor_version=1,
+            )
+        else:
+            hass.config_entries.async_update_entry(
+                config_entry,
+                data=data,
+                version=2,
+                minor_version=1,
+            )
 
     _LOGGER.info(
         "Migration to configuration version %s.%s successful",

@@ -73,6 +73,12 @@ class Profiles(IntFlag):
     REM = auto()  # RemoteTrigger
     AUTH = auto()  # LocalAuthListManagement
 
+    def labels(self):
+        """Get labels for profiles."""
+        if self == Profiles.NONE:
+            return "NONE"
+        return "|".join([p.name for p in Profiles if p & self])
+
 
 class OcppMisc(str, Enum):
     """Miscellaneous strings used in ocpp v1.6 responses."""

@@ -318,7 +318,9 @@ class ChargePoint(cp):
         """Get supported features."""
         self._attr_supported_features = await self.get_supported_features()
         self._metrics[(0, cdet.features.value)].value = self._attr_supported_features
-        _LOGGER.debug("Feature profiles returned: %s", self._attr_supported_features)
+        _LOGGER.debug(
+            "Feature profiles returned: %s", self._attr_supported_features.labels()
+        )
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
