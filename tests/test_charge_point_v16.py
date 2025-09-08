@@ -43,6 +43,7 @@ from ocpp.v16.enums import (
     Action,
     AuthorizationStatus,
     AvailabilityStatus,
+    AvailabilityType,
     ChargePointErrorCode,
     ChargePointStatus,
     ChargingProfileStatus,
@@ -52,6 +53,7 @@ from ocpp.v16.enums import (
     DiagnosticsStatus,
     FirmwareStatus,
     Measurand,
+    Phase,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -2617,7 +2619,7 @@ async def test_on_stop_transaction_eair_unit_wh(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(30)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9083, "cp_id": "CP_stop_eair_kwh", "cms": "cms_stop_eair_kwh"}],
@@ -2697,6 +2699,646 @@ async def test_on_stop_transaction_eair_unit_kwh(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9077, "cp_id": "CP_phases", "cms": "cms_phases"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_phases"])
+@pytest.mark.parametrize("port", [9077])
+@pytest.mark.parametrize("num_connectors", [1, 2])
+async def test_current_import_phase_extra_attrs_single_and_multi_connector(
+    hass, socket_enabled, cp_id, port, setup_config_entry, num_connectors
+):
+    """Verify that phase extra attributes (L1/L2/L3) for Current.Import are populated.
+
+    - with 1 connector: reading without connector_id should resolve via fallback.
+    - with 2 connectors: each connector returns its own phase set.
+    """
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+
+        try:
+            # Boot and wait until server is ready to receive MeterValues
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # Server-side CP instance
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+            # Force connector count for this test parameterization
+            srv_cp.num_connectors = num_connectors
+
+            # Helper to send a MeterValues frame with phase currents
+            async def send_current_import_phases(
+                connector_id: int, l1: float, l2: float, l3: float
+            ):
+                ts = datetime.now(UTC).isoformat()
+                req = call.MeterValues(
+                    connector_id=connector_id,
+                    meter_value=[
+                        {
+                            "timestamp": ts,
+                            "sampledValue": [
+                                {
+                                    "measurand": "Current.Import",
+                                    "phase": Phase.l1.value,
+                                    "unit": "A",
+                                    "value": str(l1),
+                                },
+                                {
+                                    "measurand": "Current.Import",
+                                    "phase": Phase.l2.value,
+                                    "unit": "A",
+                                    "value": str(l2),
+                                },
+                                {
+                                    "measurand": "Current.Import",
+                                    "phase": Phase.l3.value,
+                                    "unit": "A",
+                                    "value": str(l3),
+                                },
+                            ],
+                        }
+                    ],
+                )
+                # Send to server
+                await cp.call(req)
+
+            # Send phases for connector 1
+            await send_current_import_phases(1, 5.0, 7.0, 8.0)
+
+            # If two connectors, send different phases for connector 2
+            if num_connectors == 2:
+                await send_current_import_phases(2, 11.0, 13.0, 17.0)
+
+            # Let server handlers run
+            await asyncio.sleep(0)
+
+            # Assertions
+            if num_connectors == 1:
+                # Without connector_id -> should resolve (fallback) to connector 1
+                attrs = cs.get_extra_attr(cp_id, "Current.Import", connector_id=None)
+                assert (
+                    attrs is not None
+                ), "Expected extra_attr dict for single-connector"
+                assert attrs.get("L1") == 5.0
+                assert attrs.get("L2") == 7.0
+                assert attrs.get("L3") == 8.0
+
+                # Explicit connector_id=1 also works
+                attrs1 = cs.get_extra_attr(cp_id, "Current.Import", connector_id=1)
+                assert attrs1 is not None
+                assert attrs1.get("L1") == 5.0
+                assert attrs1.get("L2") == 7.0
+                assert attrs1.get("L3") == 8.0
+
+            else:
+                # Two connectors: verify separation
+                attrs1 = cs.get_extra_attr(cp_id, "Current.Import", connector_id=1)
+                attrs2 = cs.get_extra_attr(cp_id, "Current.Import", connector_id=2)
+
+                assert (
+                    attrs1 is not None and attrs2 is not None
+                ), "Expected extra_attr dicts for both connectors"
+
+                # Connector 1 values
+                assert attrs1.get("L1") == 5.0
+                assert attrs1.get("L2") == 7.0
+                assert attrs1.get("L3") == 8.0
+
+                # Connector 2 values
+                assert attrs2.get("L1") == 11.0
+                assert attrs2.get("L2") == 13.0
+                assert attrs2.get("L3") == 17.0
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+class _ExplosiveStatus:
+    """A status object that raises on equality checks, but can be stringified."""
+
+    def __str__(self) -> str:
+        return "ExplosiveStatus"
+
+    def __repr__(self) -> str:
+        return "ExplosiveStatus"
+
+    # Cause 'status in (Accepted, Scheduled)' to raise inside try:
+    def __eq__(self, other):
+        raise RuntimeError("eq() boom on status comparison")
+
+
+class _RespWithExplosiveStatus:
+    def __init__(self):
+        self.status = _ExplosiveStatus()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9078, "cp_id": "CP_avail", "cms": "cms_avail"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail"])
+@pytest.mark.parametrize("port", [9078])
+async def test_set_availability_timeout_branch(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test set_availability timeout branch."""
+
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            async def fake_call_timeout(req):
+                raise TimeoutError("simulated timeout")
+
+            monkeypatch.setattr(srv_cp, "call", fake_call_timeout, raising=True)
+
+            ok = await srv_cp.set_availability(state=True, connector_id=1)
+            assert ok is False  # timeout-grenen ska returnera False
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9079, "cp_id": "CP_avail2", "cms": "cms_avail2"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail2"])
+@pytest.mark.parametrize("port", [9079])
+async def test_set_availability_exception_branch(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test set_availability exception branch."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            async def fake_call_error(req):
+                raise RuntimeError("generic error")
+
+            monkeypatch.setattr(srv_cp, "call", fake_call_error, raising=True)
+
+            ok = await srv_cp.set_availability(state=False, connector_id=2)
+            assert ok is False
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9090, "cp_id": "CP_avail3", "cms": "cms_avail3"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail3"])
+@pytest.mark.parametrize("port", [9090])
+async def test_set_availability_final_try_exception_path_with_notify(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Trigger the last try/except-branch.
+
+    - resp.status exists but the comparison 'status in (...)' throws (via __eq__).
+    - Expect: warning + notify_ha and return False.
+    """
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            async def fake_call_ok(req):
+                # Returnera ett objekt där status-jämförelsen spränger inne i try-blocket
+                return _RespWithExplosiveStatus()
+
+            captured = {"msg": None}
+
+            async def fake_notify(msg: str, title: str = "Ocpp integration"):
+                captured["msg"] = msg
+                return True
+
+            monkeypatch.setattr(srv_cp, "call", fake_call_ok, raising=True)
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+
+            ok = await srv_cp.set_availability(state=True, connector_id=1)
+            assert ok is False
+            # Kontrollera att notify_ha kördes med rätt innehåll
+            assert (
+                captured["msg"]
+                == "Warning: Set availability failed with response ExplosiveStatus"
+            )
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9091, "cp_id": "CP_avail4", "cms": "cms_avail4"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail4"])
+@pytest.mark.parametrize("port", [9091])
+@pytest.mark.parametrize(
+    "status,expected",
+    [(AvailabilityStatus.accepted, True), (AvailabilityStatus.scheduled, True)],
+)
+async def test_set_availability_happy_paths(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch, status, expected
+):
+    """Test set_availability happy paths."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            async def fake_call_ok(req):
+                assert isinstance(req, call.ChangeAvailability)
+                assert req.type in (
+                    AvailabilityType.operative,
+                    AvailabilityType.inoperative,
+                )
+                return SimpleNamespace(status=status)
+
+            monkeypatch.setattr(srv_cp, "call", fake_call_ok, raising=True)
+
+            ok = await srv_cp.set_availability(state=True, connector_id=1)
+            assert ok is expected
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9092, "cp_id": "CP_avail5", "cms": "cms_avail5"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail5"])
+@pytest.mark.parametrize("port", [9092])
+async def test_set_availability_connector_id_parse_error_falls_back_to_zero(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Send non-int connector_id; should fallback to conn=0 and still work."""
+    cs: CentralSystem = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            captured = {"seen_conn": None}
+
+            async def fake_call_capture(req):
+                assert isinstance(req, call.ChangeAvailability)
+                captured["seen_conn"] = req.connector_id
+                return SimpleNamespace(status=AvailabilityStatus.accepted)
+
+            monkeypatch.setattr(srv_cp, "call", fake_call_capture, raising=True)
+
+            ok = await srv_cp.set_availability(state=True, connector_id="not-an-int")
+            assert ok is True
+            assert captured["seen_conn"] == 0  # fallback to 0
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9093, "cp_id": "CP_setrate_1", "cms": "cms_setrate_1"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_setrate_1"])
+@pytest.mark.parametrize("port", [9093])
+async def test_set_charge_rate_custom_profile_exception_then_fallback_all_fail(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Custom profile path raises -> should not crash; code continues with fallback attempts.
+
+    Make all attempts fail -> returns False and notify_ha is called.
+    """
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            async def fake_get_conf(key):
+                return "Current"  # use amps
+
+            monkeypatch.setattr(
+                srv_cp, "get_configuration", fake_get_conf, raising=True
+            )
+
+            wanted_profile = {"foo": "bar"}  # will be passed in
+
+            calls = {"set": 0, "clear": 0}
+
+            async def fake_call(req):
+                # First branch: custom profile call should raise
+                if (
+                    isinstance(req, call.SetChargingProfile)
+                    and req.cs_charging_profiles == wanted_profile
+                ):
+                    raise RuntimeError("custom profile failed")
+                # Fallback phase:
+                if isinstance(req, call.ClearChargingProfile):
+                    calls["clear"] += 1
+                    return SimpleNamespace(status="Accepted")
+                if isinstance(req, call.SetChargingProfile):
+                    calls["set"] += 1
+                    return SimpleNamespace(status=ChargingProfileStatus.rejected)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            captured = {"msg": None}
+
+            async def fake_notify(msg: str, title: str = "Ocpp integration"):
+                captured["msg"] = msg
+                return True
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+
+            ok = await srv_cp.set_charge_rate(
+                limit_amps=16, conn_id=1, profile=wanted_profile
+            )
+            assert ok is False
+            assert calls["set"] >= 1
+            assert "SetChargingProfile failed" in (captured["msg"] or "")
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9094, "cp_id": "CP_setrate_2", "cms": "cms_setrate_2"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_setrate_2"])
+@pytest.mark.parametrize("port", [9094])
+async def test_set_charge_rate_pre_clear_by_id_raises_then_all_rejected(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """ClearChargingProfile(id=pid) raises (ignored) + all SetChargingProfile return Rejected.
+
+    With active transaction present, attempts should include TxProfile.
+    Expect False and notify_ha(last_status=Rejected).
+    """
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Active tx on connector 1 -> should attempt TxProfile
+            srv_cp.active_transaction_id = 123
+            srv_cp._active_tx = {1: 123}
+
+            async def fake_get_conf(key):
+                return "Current"  # use amps
+
+            monkeypatch.setattr(
+                srv_cp, "get_configuration", fake_get_conf, raising=True
+            )
+
+            attempts_seen = []
+
+            async def fake_call(req):
+                if isinstance(req, call.ClearChargingProfile):
+                    # simulate firmware throwing here -> must be swallowed
+                    raise TypeError("clear-by-id boom")
+                if isinstance(req, call.SetChargingProfile):
+                    attempts_seen.append(req.connector_id)
+                    return SimpleNamespace(status=ChargingProfileStatus.rejected)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            captured = {"msg": None}
+
+            async def fake_notify(msg: str, title: str = "Ocpp integration"):
+                captured["msg"] = msg
+                return True
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+
+            ok = await srv_cp.set_charge_rate(limit_amps=10, conn_id=1)
+            assert ok is False
+            # Should have tried CPMax (0), TxDefault (1), and TxProfile (1 or detected tx connector)
+            assert 0 in attempts_seen
+            assert 1 in attempts_seen
+            assert "last status=Rejected" in (captured["msg"] or "")
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9095, "cp_id": "CP_setrate_3", "cms": "cms_setrate_3"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_setrate_3"])
+@pytest.mark.parametrize("port", [9095])
+async def test_set_charge_rate_set_call_raises_for_all_attempts(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """SetChargingProfile raises for all attempts -> function should catch and continue.
+
+    After all attempts fail, returns False and notify_ha(last_status=None).
+    """
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Force active tx so TxProfile is attempted too
+            srv_cp.active_transaction_id = 456
+            srv_cp._active_tx = {1: 456}
+
+            async def fake_get_conf(key):
+                return "Current"
+
+            monkeypatch.setattr(
+                srv_cp, "get_configuration", fake_get_conf, raising=True
+            )
+
+            async def fake_call(req):
+                if isinstance(req, call.ClearChargingProfile):
+                    return SimpleNamespace(status="Accepted")
+                if isinstance(req, call.SetChargingProfile):
+                    raise TypeError("set-profile boom")
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            captured = {"msg": None}
+
+            async def fake_notify(msg: str, title: str = "Ocpp integration"):
+                captured["msg"] = msg
+                return True
+
+            monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
+
+            ok = await srv_cp.set_charge_rate(limit_amps=6, conn_id=1)
+            assert ok is False
+            # last_status stays None because we never got a resp to read .status from
+            assert "last status=None" in (captured["msg"] or "")
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9096, "cp_id": "CP_setrate_4", "cms": "cms_setrate_4"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_setrate_4"])
+@pytest.mark.parametrize("port", [9096])
+async def test_set_charge_rate_units_none_fallback_to_amps_and_accept_first(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """get_configuration returns None -> fallback to Amps; first attempt returns Accepted -> True."""
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        cp_task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv_cp: ServerCP = cs.charge_points[cp_id]
+
+            # Force fallback path
+            async def fake_get_conf(key):
+                return None
+
+            monkeypatch.setattr(
+                srv_cp, "get_configuration", fake_get_conf, raising=True
+            )
+
+            async def fake_call(req):
+                if isinstance(req, call.ClearChargingProfile):
+                    return SimpleNamespace(status="Accepted")
+                if isinstance(req, call.SetChargingProfile):
+                    # Accept immediately (CPMax on connector 0)
+                    return SimpleNamespace(status=ChargingProfileStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.set_charge_rate(limit_amps=20, conn_id=0)
+            assert ok is True
+
+        finally:
+            cp_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cp_task
             await ws.close()
 
 

@@ -105,10 +105,6 @@ class ChargePoint(cp):
         )
         self._active_tx: dict[int, int] = {}  # connector_id -> transaction_id
 
-    def _profile_ids_for_connector(self, conn_id: int) -> tuple[int, int]:
-        """Return (profile_id, stack_level) that is stable and unique per connector."""
-        return 1000 + max(1, int(conn_id)), 1
-
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
         resp = None
@@ -315,22 +311,49 @@ class ChargePoint(cp):
         purpose: ChargingProfilePurposeType | None = None,
     ) -> bool:
         """Clear charging profiles (per connector and/or purpose)."""
-        target_connector = int(conn_id) if conn_id is not None else None
-        req = call.ClearChargingProfile(
-            connector_id=target_connector,
-            charging_profile_purpose=purpose.value if purpose is not None else None,
-        )
-        resp = await self.call(req)
-        if resp.status in (
-            ClearChargingProfileStatus.accepted,
-            ClearChargingProfileStatus.unknown,
-        ):
-            return True
-        _LOGGER.warning("Failed with response: %s", resp.status)
-        await self.notify_ha(
-            f"Warning: Clear profile failed with response {resp.status}"
-        )
-        return False
+        try:
+            req = call.ClearChargingProfile(
+                connector_id=(int(conn_id) if conn_id is not None else None),
+                charging_profile_purpose=(purpose.value if purpose else None),
+            )
+            resp = await self.call(req)
+            return resp.status in (
+                ClearChargingProfileStatus.accepted,
+                ClearChargingProfileStatus.unknown,
+            )
+        except Exception as ex:
+            _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
+            return False
+
+    def _profile_ids_for(
+        self, conn_id: int, purpose: str, tx_id: int | None = None
+    ) -> tuple[int, int]:
+        """Return (chargingProfileId, stackLevel) unique per (purpose, connector).
+
+        - Keeps IDs small and stable across restarts.
+        - For TxProfile you may include tx_id to avoid clashes if multiple are alive.
+        """
+        PURPOSE_CODE = {
+            "ChargePointMaxProfile": 1,
+            "TxDefaultProfile": 2,
+            "TxProfile": 3,
+        }
+        if purpose == "ChargePointMaxProfile":
+            conn_seg = 0
+        else:
+            try:
+                conn_seg = max(1, int(conn_id or 1))
+            except Exception:
+                conn_seg = 1
+
+        base = 1000
+        pid = base + PURPOSE_CODE[purpose] + conn_seg * 10
+
+        if purpose == "TxProfile" and tx_id is not None:
+            pid = pid * 1000 + (int(tx_id) % 1000)
+
+        stack_level = 1
+        return pid, stack_level
 
     async def set_charge_rate(
         self,
@@ -341,18 +364,17 @@ class ChargePoint(cp):
     ) -> bool:
         """Set charge rate."""
         if profile is not None:
-            req = call.SetChargingProfile(
-                connector_id=int(conn_id),
-                cs_charging_profiles=profile,
-            )
-            resp = await self.call(req)
-            if resp.status == ChargingProfileStatus.accepted:
-                return True
-            _LOGGER.warning("Failed with response: %s", resp.status)
-            await self.notify_ha(
-                f"Warning: Set charging profile failed with response {resp.status}"
-            )
-            return False
+            try:
+                resp = await self.call(
+                    call.SetChargingProfile(
+                        connector_id=int(conn_id), cs_charging_profiles=profile
+                    )
+                )
+                if resp.status == ChargingProfileStatus.accepted:
+                    return True
+                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
+            except Exception as ex:
+                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
 
         resp_units = await self.get_configuration(
             ckey.charging_schedule_allowed_charging_rate_unit.value
@@ -369,84 +391,116 @@ class ChargePoint(cp):
             else ChargingRateUnitType.watts.value
         )
 
-        conn_id = int(conn_id or 0)
-        is_station_level = conn_id == 0
+        # Build attempt order (CPMax -> TxDefault -> TxProfile if active)
+        attempts: list[tuple[int, str]] = []
+        attempts.append((0, "ChargePointMaxProfile"))
+        if conn_id and conn_id > 0:
+            attempts.append((conn_id, "TxDefaultProfile"))
 
-        if is_station_level:
-            purpose = ChargingProfilePurposeType.charge_point_max_profile
-            resp_stack = await self.get_configuration(
-                ckey.charge_profile_max_stack_level.value
+        has_active = bool(getattr(self, "active_transaction_id", 0))
+        if has_active:
+            tx_conn = next(
+                (c for c, tx in getattr(self, "_active_tx", {}).items() if tx),
+                conn_id or 1,
             )
+            attempts.append((tx_conn, "TxProfile"))
+
+        await self.clear_profile(
+            None, ChargingProfilePurposeType.charge_point_max_profile
+        )
+        if conn_id and conn_id > 0:
+            await self.clear_profile(
+                conn_id, ChargingProfilePurposeType.tx_default_profile
+            )
+
+        def _mk_profile(purpose: str, cid: int) -> dict:
+            tx_id = (
+                self.active_transaction_id
+                if (purpose == "TxProfile" and has_active)
+                else None
+            )
+            pid, stack = self._profile_ids_for(cid, purpose, tx_id=tx_id)
+            return {
+                om.charging_profile_id.value: pid,
+                om.stack_level.value: stack,
+                om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose.value: purpose,
+                om.charging_schedule.value: {
+                    om.charging_rate_unit.value: unit_val,
+                    om.charging_schedule_period.value: [
+                        {om.start_period.value: 0, om.limit.value: limit_val}
+                    ],
+                },
+            }
+
+        # Try each purpose/connector in order; optionally clear-by-id before setting
+        last_status = None
+        for cid, purpose in attempts:
             try:
-                stack_level = int(resp_stack)
-            except Exception:
-                stack_level = 1
-            profile_id = 8
-        else:
-            purpose = ChargingProfilePurposeType.tx_default_profile
-            profile_id, stack_level = self._profile_ids_for_connector(conn_id)
+                try:
+                    tx_id = (
+                        self.active_transaction_id
+                        if (purpose == "TxProfile" and has_active)
+                        else None
+                    )
+                    pid, _ = self._profile_ids_for(cid, purpose, tx_id=tx_id)
+                    await self.call(call.ClearChargingProfile(id=pid))
+                except Exception:
+                    pass
 
-        is_default = (limit_amps >= 32) and (limit_watts >= 22000)
-        if is_default:
-            return await self.clear_profile(
-                conn_id=None if is_station_level else conn_id,
-                purpose=purpose,
-            )
-
-        cs_profile = {
-            om.charging_profile_id.value: profile_id,
-            om.stack_level.value: stack_level,
-            om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-            om.charging_profile_purpose.value: purpose.value,
-            om.charging_schedule.value: {
-                om.charging_rate_unit.value: unit_val,
-                om.charging_schedule_period.value: [
-                    {om.start_period.value: 0, om.limit.value: limit_val}
-                ],
-            },
-        }
-
-        req = call.SetChargingProfile(
-            connector_id=conn_id,
-            cs_charging_profiles=cs_profile,
-        )
-        resp = await self.call(req)
-        if resp.status == ChargingProfileStatus.accepted:
-            return True
-
-        if is_station_level and resp.status != ChargingProfileStatus.accepted:
-            _LOGGER.debug("Station profile rejected, trying lower stack level …")
-            cs_profile[om.stack_level.value] = max(1, stack_level - 1)
-            resp = await self.call(
-                call.SetChargingProfile(
-                    connector_id=0,
-                    cs_charging_profiles=cs_profile,
+                req = call.SetChargingProfile(
+                    connector_id=cid, cs_charging_profiles=_mk_profile(purpose, cid)
                 )
-            )
-            if resp.status == ChargingProfileStatus.accepted:
-                return True
+                resp = await self.call(req)
+                last_status = resp.status
+                if resp.status == ChargingProfileStatus.accepted:
+                    _LOGGER.debug(
+                        "SetChargingProfile accepted with purpose=%s connectorId=%s",
+                        purpose,
+                        cid,
+                    )
+                    return True
+                _LOGGER.debug(
+                    "SetChargingProfile %s on connector %s -> %s",
+                    purpose,
+                    cid,
+                    resp.status,
+                )
+            except Exception as ex:
+                _LOGGER.debug(
+                    "SetChargingProfile %s on connector %s raised %s", purpose, cid, ex
+                )
 
-        _LOGGER.warning("Failed with response: %s", resp.status)
-        await self.notify_ha(
-            f"Warning: Set charging profile failed with response {resp.status}"
-        )
+        _LOGGER.warning("SetChargingProfile failed (last status=%s).", last_status)
+        await self.notify_ha(f"SetChargingProfile failed (last status={last_status}).")
         return False
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
-        if state is True:
-            typ = AvailabilityType.operative.value
-        else:
-            typ = AvailabilityType.inoperative.value
+        try:
+            conn = 0 if connector_id in (None, 0) else int(connector_id)
+        except Exception:
+            conn = 0
 
-        req = call.ChangeAvailability(connector_id=int(connector_id or 0), type=typ)
-        resp = await self.call(req)
-        if resp.status in [
-            AvailabilityStatus.accepted,
-            AvailabilityStatus.scheduled,
-        ]:
-            return True
-        else:
+        typ = AvailabilityType.operative if state else AvailabilityType.inoperative
+        req = call.ChangeAvailability(connector_id=conn, type=typ)
+
+        try:
+            resp = await self.call(req)
+        except TimeoutError as ex:
+            _LOGGER.debug("ChangeAvailability timed out (conn=%s): %s", conn, ex)
+            return False
+        except Exception as ex:
+            _LOGGER.debug("ChangeAvailability failed (conn=%s): %s", conn, ex)
+            return False
+
+        try:
+            status = getattr(resp, "status", None)
+            return status in (
+                AvailabilityStatus.accepted,
+                AvailabilityStatus.scheduled,
+            )
+        except Exception:
             _LOGGER.warning("Failed with response: %s", resp.status)
             await self.notify_ha(
                 f"Warning: Set availability failed with response {resp.status}"
@@ -764,6 +818,27 @@ class ChargePoint(cp):
                             self._metrics[(0, DEFAULT_MEASURAND)].extra_attr[
                                 om.context.value
                             ] = item.context
+        else:
+            # Update EAIR on the specific connector during active transactions as well
+            for bucket in meter_values:
+                for item in bucket:
+                    measurand = item.measurand or DEFAULT_MEASURAND
+                    if measurand == DEFAULT_MEASURAND:
+                        eair_kwh = cp.get_energy_kwh(item)
+                        self._metrics[
+                            (connector_id, DEFAULT_MEASURAND)
+                        ].value = eair_kwh
+                        self._metrics[
+                            (connector_id, DEFAULT_MEASURAND)
+                        ].unit = HA_ENERGY_UNIT
+                        if item.location is not None:
+                            self._metrics[(connector_id, DEFAULT_MEASURAND)].extra_attr[
+                                om.location.value
+                            ] = item.location
+                        if item.context is not None:
+                            self._metrics[(connector_id, DEFAULT_MEASURAND)].extra_attr[
+                                om.context.value
+                            ] = item.context
 
         self.process_measurands(meter_values, transaction_matches, connector_id)
 
@@ -849,6 +924,10 @@ class ChargePoint(cp):
                 ]:
                     if meas in self._metrics[connector_id]:
                         self._metrics[(connector_id, meas)].value = 0
+
+        if status == ChargePointStatus.available:
+            self._metrics[(connector_id or 1, cstat.id_tag.value)].value = ""
+            self._metrics[(connector_id or 1, csess.transaction_id.value)].value = 0
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
@@ -953,6 +1032,9 @@ class ChargePoint(cp):
         self._metrics[(conn, cstat.stop_reason.value)].value = kwargs.get(
             om.reason.name, None
         )
+
+        self._metrics[(conn, cstat.id_tag.value)].value = ""
+        self._metrics[(conn, csess.transaction_id.value)].value = 0
 
         use_eair_from_tx = bool(self._charger_reports_session_energy)
 
