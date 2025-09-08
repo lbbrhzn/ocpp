@@ -167,15 +167,19 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 **user_input,
                 CONF_NUM_CONNECTORS: self._detected_num_connectors,
             }
-            self._data[CONF_CPIDS].append({self._cp_id: cp_data})
+            cpids_list = self._data.get(CONF_CPIDS, []).copy()
+            cpids_list.append({self._cp_id: cp_data})
+            self._data = {**self._data, CONF_CPIDS: cpids_list}
+
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     DEFAULT_MONITORED_VARIABLES
                 )
-                return self.async_update_reload_and_abort(
-                    self._entry,
-                    data_updates=self._data,
+                self.hass.config_entries.async_update_entry(
+                    self._entry, data=self._data
                 )
+                return self.async_abort(reason="Added/Updated charge point")
+
             else:
                 return await self.async_step_measurands()
 
@@ -201,10 +205,11 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     self._measurands
                 )
-                return self.async_update_reload_and_abort(
-                    self._entry,
-                    data_updates=self._data,
+
+                self.hass.config_entries.async_update_entry(
+                    self._entry, data=self._data
                 )
+                return self.async_abort(reason="Added/Updated charge point")
 
         return self.async_show_form(
             step_id="measurands",
