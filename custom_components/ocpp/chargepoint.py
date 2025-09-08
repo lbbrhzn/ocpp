@@ -327,8 +327,7 @@ class ChargePoint(cp):
         try:
             self.status = STATE_OK
             await self.fetch_supported_features()
-            num_connectors: int = await self.get_number_of_connectors()
-            self.num_connectors = num_connectors
+            self.num_connectors = await self.get_number_of_connectors()
             for conn in range(1, self.num_connectors + 1):
                 self._init_connector_slots(conn)
             self._metrics[(0, cdet.connectors.value)].value = self.num_connectors
@@ -355,13 +354,20 @@ class ChargePoint(cp):
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
-            await self.set_availability()
+            try:
+                await self.set_availability()
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                _LOGGER.debug("post_connect: set_availability ignored error: %s", ex)
+
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     await self.trigger_boot_notification()
                 await self.trigger_status_notification()
-        except NotImplementedError as e:
-            _LOGGER.error("Configuration of the charger failed: %s", e)
+
+        except Exception as e:
+            _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -640,8 +646,17 @@ class ChargePoint(cp):
             )
         return auth_status
 
-    def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
+    def process_phases(self, data: list[MeasurandValue], connector_id: int | None = 0):
         """Process phase data from meter values."""
+        # For single-connector chargers, use connector 1.
+        n_connectors = getattr(self, CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS) or 1
+        if connector_id in (None, 0):
+            target_cid = 1 if n_connectors == 1 else 0
+        else:
+            try:
+                target_cid = int(connector_id)
+            except Exception:
+                target_cid = 1 if n_connectors == 1 else 0
 
         def average_of_nonzero(values):
             nonzero_values: list = [v for v in values if v != 0.0]
@@ -662,14 +677,12 @@ class ChargePoint(cp):
                     measurand_data[measurand] = {}
                 measurand_data[measurand][om.unit.value] = unit
                 measurand_data[measurand][phase] = value
-                self._metrics[(connector_id, measurand)].unit = unit
-                self._metrics[(connector_id, measurand)].extra_attr[om.unit.value] = (
-                    unit
+                self._metrics[(target_cid, measurand)].unit = unit
+                self._metrics[(target_cid, measurand)].extra_attr[om.unit.value] = unit
+                self._metrics[(target_cid, measurand)].extra_attr[phase] = value
+                self._metrics[(target_cid, measurand)].extra_attr[om.context.value] = (
+                    context
                 )
-                self._metrics[(connector_id, measurand)].extra_attr[phase] = value
-                self._metrics[(connector_id, measurand)].extra_attr[
-                    om.context.value
-                ] = context
 
         line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
@@ -707,15 +720,16 @@ class ChargePoint(cp):
 
             if metric_value is not None:
                 metric_unit = phase_info.get(om.unit.value)
+                m = self._metrics[(target_cid, metric)]
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[(connector_id, metric)].value = metric_value / 1000
-                    self._metrics[(connector_id, metric)].unit = HA_POWER_UNIT
+                    m.value = metric_value / 1000
+                    m.unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[(connector_id, metric)].value = metric_value / 1000
-                    self._metrics[(connector_id, metric)].unit = HA_ENERGY_UNIT
+                    m.value = metric_value / 1000
+                    m.unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[(connector_id, metric)].value = metric_value
-                    self._metrics[(connector_id, metric)].unit = metric_unit
+                    m.value = metric_value
+                    m.unit = metric_unit
 
     @staticmethod
     def get_energy_kwh(measurand_value: MeasurandValue) -> float:

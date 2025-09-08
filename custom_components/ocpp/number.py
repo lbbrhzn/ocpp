@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Final
 
 from homeassistant.components.number import (
@@ -30,6 +31,9 @@ from .const import (
     ICON,
 )
 from .enums import Profiles
+
+_LOGGER: logging.Logger = logging.getLogger(__package__)
+logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 
 @dataclass
@@ -213,13 +217,25 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         )
 
     async def async_set_native_value(self, value):
-        """Set new value for max current (station-wide when _op_connector_id==0, otherwise per-connector)."""
-        num_value = float(value)
-        resp = await self.central_system.set_max_charge_rate_amps(
-            self.cpid,
-            num_value,
-            connector_id=self._op_connector_id,
-        )
-        if resp is True:
-            self._attr_native_value = num_value
-            self.async_write_ha_state()
+        """Set new value for max current (station-wide when _op_connector_id==0, otherwise per-connector).
+
+        - Optimistic UI: move the slider immediately; attempt backend; never raise.
+        """
+        self._attr_native_value = float(value)
+        self.async_write_ha_state()
+
+        try:
+            ok = await self.central_system.set_max_charge_rate_amps(
+                self.cpid, self._attr_native_value, connector_id=self._op_connector_id
+            )
+            if not ok:
+                _LOGGER.warning(
+                    "Set current limit rejected by CP (kept optimistic UI at %.1f A).",
+                    value,
+                )
+        except Exception as ex:
+            _LOGGER.warning(
+                "Set current limit failed: %s (kept optimistic UI at %.1f A).",
+                ex,
+                value,
+            )
