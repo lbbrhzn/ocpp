@@ -747,7 +747,7 @@ class ChargePoint(cp):
         # does not have values either, generate new ones.
         if self._metrics[(connector_id, csess.meter_start.value)].value is None:
             restored = self.get_ha_metric(csess.meter_start.value, connector_id)
-            if restored is None:
+            if restored is None and not tx_has_id:
                 restored = self._metrics[(connector_id, DEFAULT_MEASURAND)].value
             else:
                 try:
@@ -800,47 +800,61 @@ class ChargePoint(cp):
                 )
             meter_values.append(measurands)
 
-        # Write main meter value (EAIR) to connector 0 if this message is missing transactionId
-        if not tx_has_id:
-            for bucket in meter_values:
-                for item in bucket:
-                    measurand = item.measurand or DEFAULT_MEASURAND
-                    if measurand == DEFAULT_MEASURAND:
-                        eair_kwh = cp.get_energy_kwh(item)  # Wh→kWh if necessary
-                        # Aggregate (connector 0) carries the latest main meter value
-                        self._metrics[(0, DEFAULT_MEASURAND)].value = eair_kwh
-                        self._metrics[(0, DEFAULT_MEASURAND)].unit = HA_ENERGY_UNIT
-                        if item.location is not None:
-                            self._metrics[(0, DEFAULT_MEASURAND)].extra_attr[
-                                om.location.value
-                            ] = item.location
-                        if item.context is not None:
-                            self._metrics[(0, DEFAULT_MEASURAND)].extra_attr[
-                                om.context.value
-                            ] = item.context
-        else:
-            # Update EAIR on the specific connector during active transactions as well
-            for bucket in meter_values:
-                for item in bucket:
-                    measurand = item.measurand or DEFAULT_MEASURAND
-                    if measurand == DEFAULT_MEASURAND:
-                        eair_kwh = cp.get_energy_kwh(item)
-                        self._metrics[
-                            (connector_id, DEFAULT_MEASURAND)
-                        ].value = eair_kwh
-                        self._metrics[
-                            (connector_id, DEFAULT_MEASURAND)
-                        ].unit = HA_ENERGY_UNIT
-                        if item.location is not None:
-                            self._metrics[(connector_id, DEFAULT_MEASURAND)].extra_attr[
-                                om.location.value
-                            ] = item.location
-                        if item.context is not None:
-                            self._metrics[(connector_id, DEFAULT_MEASURAND)].extra_attr[
-                                om.context.value
-                            ] = item.context
+        # Robust EAIR update:
+        # - choose the best candidate per bucket with context prio
+        # - ignore Transaction.Begin for EAIR
+        # - never decrease
+        def _ctx_priority(ctx: str | None) -> int:
+            if ctx == "Transaction.End":
+                return 3
+            if ctx == "Sample.Periodic":
+                return 2
+            if ctx == "Sample.Clock":
+                return 1
+            return 0  # other/None
 
-        self.process_measurands(meter_values, transaction_matches, connector_id)
+        target_cid = 0 if not tx_has_id else connector_id
+        for bucket in meter_values:
+            candidates: list[tuple[int, float, MeasurandValue]] = []
+            for item in bucket:
+                measurand = item.measurand or DEFAULT_MEASURAND
+                if measurand != DEFAULT_MEASURAND:
+                    continue
+                # Ignore Transaction.Begin for EAIR (can be 0 in the same batch)
+                if item.context == "Transaction.Begin":
+                    continue
+                try:
+                    val_kwh = float(cp.get_energy_kwh(item))
+                except Exception:
+                    continue
+                if val_kwh < 0.0 or (val_kwh != val_kwh):
+                    continue
+                candidates.append((_ctx_priority(item.context), val_kwh, item))
+
+            if not candidates:
+                continue
+
+            # Choose highest prio; same prio -> highest energy
+            _, best_val, best_item = max(candidates, key=lambda x: (x[0], x[1]))
+            m = self._metrics[(target_cid, DEFAULT_MEASURAND)]
+            m.value = best_val
+            m.unit = HA_ENERGY_UNIT
+            if best_item.location is not None:
+                m.extra_attr[om.location.value] = best_item.location
+            if best_item.context is not None:
+                m.extra_attr[om.context.value] = best_item.context
+
+        mv_wo_eair: list[list[MeasurandValue]] = []
+        for bucket in meter_values:
+            filtered = [
+                it
+                for it in bucket
+                if (it.measurand or DEFAULT_MEASURAND) != DEFAULT_MEASURAND
+            ]
+            if filtered:
+                mv_wo_eair.append(filtered)
+
+        self.process_measurands(mv_wo_eair, transaction_matches, connector_id)
 
         # Update session time if ongoing transaction
         if active_tx_for_conn not in (None, 0):
@@ -855,23 +869,47 @@ class ChargePoint(cp):
                 (connector_id, csess.session_time.value)
             ].unit = UnitOfTime.MINUTES
 
-        # Update Energy.Session ONLY from EAIR in this message if txId exists and matches
+        # Update Energy.Session from "best" EAIR in this message if txId exists and matches
         if tx_has_id and transaction_matches:
             eair_kwh_in_msg: float | None = None
+            best_ctx_prio = -1
             for bucket in meter_values:
                 for item in bucket:
                     measurand = item.measurand or DEFAULT_MEASURAND
-                    if measurand == DEFAULT_MEASURAND:
-                        eair_kwh_in_msg = cp.get_energy_kwh(item)
+                    if measurand != DEFAULT_MEASURAND:
+                        continue
+                    if item.context == "Transaction.Begin":
+                        continue
+                    try:
+                        val_kwh = float(cp.get_energy_kwh(item))
+                    except Exception:
+                        continue
+                    if val_kwh < 0.0 or (val_kwh != val_kwh):
+                        continue
+                    pr = _ctx_priority(item.context)
+                    if (pr > best_ctx_prio) or (
+                        pr == best_ctx_prio
+                        and (eair_kwh_in_msg is None or val_kwh > eair_kwh_in_msg)
+                    ):
+                        best_ctx_prio = pr
+                        eair_kwh_in_msg = val_kwh
             if eair_kwh_in_msg is not None:
+                raw_start = self._metrics[(connector_id, csess.meter_start.value)].value
                 try:
-                    meter_start_kwh = float(
-                        self._metrics[(connector_id, csess.meter_start.value)].value
-                        or 0.0
+                    meter_start_kwh = (
+                        float(raw_start) if raw_start is not None else None
                     )
                 except Exception:
-                    meter_start_kwh = 0.0
-                session_kwh = max(0.0, eair_kwh_in_msg - meter_start_kwh)
+                    meter_start_kwh = None
+
+                if meter_start_kwh is None:
+                    self._metrics[
+                        (connector_id, csess.meter_start.value)
+                    ].value = eair_kwh_in_msg
+                    session_kwh = 0.0
+                else:
+                    session_kwh = max(0.0, eair_kwh_in_msg - meter_start_kwh)
+
                 self._metrics[
                     (connector_id, csess.session_energy.value)
                 ].value = session_kwh

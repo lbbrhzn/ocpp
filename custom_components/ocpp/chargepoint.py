@@ -646,8 +646,13 @@ class ChargePoint(cp):
             )
         return auth_status
 
-    def process_phases(self, data: list[MeasurandValue], connector_id: int | None = 0):
-        """Process phase data from meter values."""
+    def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
+        """Process phase data from meter values.
+
+        - Voltage: average (L1-N/L2-N/L3-N or L-L / √3).
+        - Current.*: average of L1/L2/L3 (ignore N).
+        - Other (e.g. Power.*): sum of L1/L2/L3 (ignore N).
+        """
         # For single-connector chargers, use connector 1.
         n_connectors = getattr(self, CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS) or 1
         if connector_id in (None, 0):
@@ -684,52 +689,79 @@ class ChargePoint(cp):
                     context
                 )
 
-        line_phases = [Phase.l1.value, Phase.l2.value, Phase.l3.value, Phase.n.value]
+        line_phases_all = [
+            Phase.l1.value,
+            Phase.l2.value,
+            Phase.l3.value,
+            Phase.n.value,
+        ]
+        phases_l123 = [Phase.l1.value, Phase.l2.value, Phase.l3.value]
         line_to_neutral_phases = [Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value]
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
+        def _avg_l123(phase_info: dict) -> float:
+            return average_of_nonzero(
+                [phase_info.get(phase, 0.0) for phase in phases_l123]
+            )
+
+        def _sum_l123(phase_info: dict) -> float:
+            return sum(phase_info.get(phase, 0.0) for phase in phases_l123)
+
         for metric, phase_info in measurand_data.items():
             metric_value = None
+            mname = str(metric)
+
             if metric in [Measurand.voltage.value]:
                 if not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Line to neutral voltages are averaged
                     metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_to_neutral_phases]
+                        [phase_info.get(phase, 0.0) for phase in line_to_neutral_phases]
                     )
                 elif not phase_info.keys().isdisjoint(line_to_line_phases):
                     # Line to line voltages are averaged and converted to line to neutral
                     metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_to_line_phases]
+                        [phase_info.get(phase, 0.0) for phase in line_to_line_phases]
                     ) / sqrt(3)
-                elif not phase_info.keys().isdisjoint(line_phases):
+                elif not phase_info.keys().isdisjoint(line_phases_all):
                     # Workaround for chargers that don't follow engineering convention
                     # Assumes voltages are line to neutral
-                    metric_value = average_of_nonzero(
-                        [phase_info.get(phase, 0) for phase in line_phases]
-                    )
+                    metric_value = _avg_l123(phase_info)
+
             else:
-                if not phase_info.keys().isdisjoint(line_phases):
-                    metric_value = sum(
-                        phase_info.get(phase, 0) for phase in line_phases
-                    )
-                elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
-                    # Workaround for some chargers that erroneously use line to neutral for current
-                    metric_value = sum(
-                        phase_info.get(phase, 0) for phase in line_to_neutral_phases
-                    )
+                is_current = mname.lower().startswith("current")
+                if is_current:
+                    # Current.* shown per phase -> avg of L1/L2/L3, ignore N
+                    if not phase_info.keys().isdisjoint(phases_l123):
+                        metric_value = _avg_l123(phase_info)
+                    elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
+                        # Workaround for some chargers that erroneously use line to neutral for current
+                        metric_value = average_of_nonzero(
+                            [
+                                phase_info.get(phase, 0.0)
+                                for phase in line_to_neutral_phases
+                            ]
+                        )
+                else:
+                    # Other (e.g. Power.*): total is sum over phases
+                    if not phase_info.keys().isdisjoint(phases_l123):
+                        metric_value = _sum_l123(phase_info)
+                    elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
+                        metric_value = sum(
+                            phase_info.get(phase, 0.0)
+                            for phase in line_to_neutral_phases
+                        )
 
             if metric_value is not None:
                 metric_unit = phase_info.get(om.unit.value)
-                m = self._metrics[(target_cid, metric)]
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    m.value = metric_value / 1000
-                    m.unit = HA_POWER_UNIT
+                    self._metrics[(target_cid, metric)].value = metric_value / 1000
+                    self._metrics[(target_cid, metric)].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    m.value = metric_value / 1000
-                    m.unit = HA_ENERGY_UNIT
+                    self._metrics[(target_cid, metric)].value = metric_value / 1000
+                    self._metrics[(target_cid, metric)].unit = HA_ENERGY_UNIT
                 else:
-                    m.value = metric_value
-                    m.unit = metric_unit
+                    self._metrics[(target_cid, metric)].value = metric_value
+                    self._metrics[(target_cid, metric)].unit = metric_unit
 
     @staticmethod
     def get_energy_kwh(measurand_value: MeasurandValue) -> float:

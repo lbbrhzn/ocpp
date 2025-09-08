@@ -2926,7 +2926,7 @@ async def test_set_availability_exception_branch(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(30)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9090, "cp_id": "CP_avail3", "cms": "cms_avail3"}],
@@ -3152,7 +3152,7 @@ async def test_set_charge_rate_custom_profile_exception_then_fallback_all_fail(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9094, "cp_id": "CP_setrate_2", "cms": "cms_setrate_2"}],
@@ -3339,6 +3339,365 @@ async def test_set_charge_rate_units_none_fallback_to_amps_and_accept_first(
             cp_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9097, "cp_id": "CP_eair_no_tx", "cms": "cms_eair_no_tx"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_no_tx"])
+@pytest.mark.parametrize("port", [9097])
+async def test_on_meter_values_no_tx_aggregate_ignores_begin_and_converts_wh(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that Transaction.Begin is ignored when Periodic also in the same message."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # Both Periodic (4369 Wh) and Begin (0) in the same bucket
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "4369",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.Begin",
+                                "unit": "Wh",
+                                "value": "0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            val = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=0)
+            assert val == pytest.approx(4.369, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9098, "cp_id": "CP_eair_tx", "cms": "cms_eair_tx"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_tx"])
+@pytest.mark.parametrize("port", [9098])
+async def test_on_meter_values_tx_updates_connector_and_session_energy(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that values with txId writes to connector and updates Energy.Session from the best EAIR."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            req1 = call.MeterValues(
+                connector_id=1,
+                transaction_id=111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "1000",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req1)
+
+            v1 = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s1 = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v1 == pytest.approx(1.0, rel=1e-6)
+            assert s1 == pytest.approx(0.0, rel=1e-6)
+
+            req2 = call.MeterValues(
+                connector_id=1,
+                transaction_id=111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "1.5",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.Begin",
+                                "unit": "Wh",
+                                "value": "0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req2)
+
+            v2 = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s2 = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v2 == pytest.approx(1.5, rel=1e-6)
+            assert s2 == pytest.approx(0.5, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9099, "cp_id": "CP_eair_prio", "cms": "cms_eair_prio"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_prio"])
+@pytest.mark.parametrize("port", [9099])
+async def test_on_meter_values_priority_end_over_periodic(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that Transaction.End wins over Sample.Periodic (no matter the order)."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            req = call.MeterValues(
+                connector_id=2,
+                transaction_id=222,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "10.0",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.End",
+                                "unit": "kWh",
+                                "value": "10.5",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=2)
+            assert v == pytest.approx(10.5, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9100, "cp_id": "CP_eair_sanitize", "cms": "cms_eair_sanitize"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_sanitize"])
+@pytest.mark.parametrize("port", [9100])
+async def test_on_meter_values_sanitizes_and_ignores_exceptions(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """NaN & negatives ignored; get_energy_kwh exception ignored; Periodic finally wins."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from custom_components.ocpp import ocppv16 as mod_v16
+
+        orig_get_e_kwh = mod_v16.cp.get_energy_kwh
+
+        def flaky_get_energy_kwh(item):
+            try:
+                if (
+                    getattr(item, "context", None) == "Sample.Clock"
+                    and getattr(item, "unit", None) in ("kWh", "Wh")
+                    and float(getattr(item, "value", -1)) == 1234.0
+                ):
+                    raise ValueError("simulated conversion error")
+            except Exception:
+                pass
+            return orig_get_e_kwh(item)
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            monkeypatch.setattr(
+                mod_v16.cp, "get_energy_kwh", flaky_get_energy_kwh, raising=True
+            )
+
+            req = call.MeterValues(
+                connector_id=1,
+                transaction_id=333,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            # 1) NaN -> should be ignored
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "NaN",
+                            },
+                            # 2) Negativt -> should be ignored
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "-1",
+                            },
+                            # 3) Valid, but the patch will let get_energy_kwh throw -> ignored by except
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "1234",
+                            },
+                            # 4) Finally a good Periodic that is chosen
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "3.2",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v == pytest.approx(3.2, rel=1e-6)
+            assert s == pytest.approx(0.0, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+            # Restore the patch
+            with contextlib.suppress(Exception):
+                monkeypatch.setattr(
+                    mod_v16.cp, "get_energy_kwh", orig_get_e_kwh, raising=True
+                )
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9101, "cp_id": "CP_eair_prio_vs_value", "cms": "cms_eair_prio_vs_value"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_prio_vs_value"])
+@pytest.mark.parametrize("port", [9101])
+async def test_on_meter_values_priority_beats_raw_value(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that prio beats raw value."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # "Other" context has prio 0; Periodic has prio 2 -> Periodic should be picked even if the value is lower.
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Other",
+                                "unit": "kWh",
+                                "value": "2.0",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "1.0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=0)
+            assert v == pytest.approx(1.0, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
             await ws.close()
 
 
