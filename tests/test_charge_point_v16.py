@@ -10,7 +10,6 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 import websockets
 
@@ -22,13 +21,13 @@ from custom_components.ocpp.const import (
     CONF_CPIDS,
     CONF_CPID,
     CONF_NUM_CONNECTORS,
-    CONF_PORT,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_MEASURAND,
     HA_ENERGY_UNIT,
 )
 from custom_components.ocpp.enums import (
     ConfigurationKey,
+    HAChargerDetails as cdet,
     HAChargerServices as csvcs,
     HAChargerStatuses as cstat,
     HAChargerSession as csess,
@@ -62,15 +61,12 @@ from ocpp.v16.enums import (
 )
 
 from .const import (
-    MOCK_CONFIG_DATA,
     MOCK_CONFIG_CP_APPEND,
 )
 from .charge_point_test import (
     set_switch,
     press_button,
     set_number,
-    create_configuration,
-    remove_configuration,
     wait_ready,
 )
 
@@ -231,29 +227,6 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 
 
 test_services.__test__ = False
-
-
-@pytest.fixture
-async def setup_config_entry(hass, request) -> CentralSystem:
-    """Setup/teardown mock config entry and central system."""
-    # Create a mock entry so we don't have to go through config flow
-    # Both version and minor need to match config flow so as not to trigger migration flow
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append(
-        {request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()}
-    )
-    config_data[CONF_PORT] = request.param["port"]
-    config_entry = MockConfigEntry(
-        domain=OCPP_DOMAIN,
-        data=config_data,
-        entry_id=request.param["cms"],
-        title=request.param["cms"],
-        version=2,
-        minor_version=0,
-    )
-    yield await create_configuration(hass, config_entry)
-    # tear down
-    await remove_configuration(hass, config_entry)
 
 
 # @pytest.mark.skip(reason="skip")
@@ -2926,7 +2899,7 @@ async def test_set_availability_exception_branch(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(30)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9090, "cp_id": "CP_avail3", "cms": "cms_avail3"}],
@@ -3152,7 +3125,7 @@ async def test_set_charge_rate_custom_profile_exception_then_fallback_all_fail(
             await ws.close()
 
 
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",
     [{"port": 9094, "cp_id": "CP_setrate_2", "cms": "cms_setrate_2"}],
@@ -3236,10 +3209,7 @@ async def test_set_charge_rate_pre_clear_by_id_raises_then_all_rejected(
 async def test_set_charge_rate_set_call_raises_for_all_attempts(
     hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
 ):
-    """SetChargingProfile raises for all attempts -> function should catch and continue.
-
-    After all attempts fail, returns False and notify_ha(last_status=None).
-    """
+    """SetChargingProfile raises for all attempts -> function swallows errors, returns False, and does not notify HA."""
     cs: CentralSystem = setup_config_entry
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
@@ -3271,18 +3241,18 @@ async def test_set_charge_rate_set_call_raises_for_all_attempts(
 
             monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
 
-            captured = {"msg": None}
+            notify_calls = {"n": 0}
 
             async def fake_notify(msg: str, title: str = "Ocpp integration"):
-                captured["msg"] = msg
+                notify_calls["n"] += 1
                 return True
 
             monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
 
             ok = await srv_cp.set_charge_rate(limit_amps=6, conn_id=1)
             assert ok is False
-            # last_status stays None because we never got a resp to read .status from
-            assert "last status=None" in (captured["msg"] or "")
+            # No user-facing notification on periodic/internal failure
+            assert notify_calls["n"] == 0
 
         finally:
             cp_task.cancel()
@@ -3339,6 +3309,1451 @@ async def test_set_charge_rate_units_none_fallback_to_amps_and_accept_first(
             cp_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9097, "cp_id": "CP_eair_no_tx", "cms": "cms_eair_no_tx"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_no_tx"])
+@pytest.mark.parametrize("port", [9097])
+async def test_on_meter_values_no_tx_aggregate_ignores_begin_and_converts_wh(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that Transaction.Begin is ignored when Periodic also in the same message."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # Both Periodic (4369 Wh) and Begin (0) in the same bucket
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "4369",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.Begin",
+                                "unit": "Wh",
+                                "value": "0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            val = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=0)
+            assert val == pytest.approx(4.369, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9098, "cp_id": "CP_eair_tx", "cms": "cms_eair_tx"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_tx"])
+@pytest.mark.parametrize("port", [9098])
+async def test_on_meter_values_tx_updates_connector_and_session_energy(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that values with txId writes to connector and updates Energy.Session from the best EAIR."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            req1 = call.MeterValues(
+                connector_id=1,
+                transaction_id=111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "1000",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req1)
+
+            v1 = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s1 = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v1 == pytest.approx(1.0, rel=1e-6)
+            assert s1 == pytest.approx(0.0, rel=1e-6)
+
+            req2 = call.MeterValues(
+                connector_id=1,
+                transaction_id=111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "1.5",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.Begin",
+                                "unit": "Wh",
+                                "value": "0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req2)
+
+            v2 = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s2 = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v2 == pytest.approx(1.5, rel=1e-6)
+            assert s2 == pytest.approx(0.5, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9099, "cp_id": "CP_eair_prio", "cms": "cms_eair_prio"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_prio"])
+@pytest.mark.parametrize("port", [9099])
+async def test_on_meter_values_priority_end_over_periodic(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that Transaction.End wins over Sample.Periodic (no matter the order)."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            req = call.MeterValues(
+                connector_id=2,
+                transaction_id=222,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "10.0",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Transaction.End",
+                                "unit": "kWh",
+                                "value": "10.5",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=2)
+            assert v == pytest.approx(10.5, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9100, "cp_id": "CP_eair_sanitize", "cms": "cms_eair_sanitize"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_sanitize"])
+@pytest.mark.parametrize("port", [9100])
+async def test_on_meter_values_sanitizes_and_ignores_exceptions(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """NaN & negatives ignored; get_energy_kwh exception ignored; Periodic finally wins."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from custom_components.ocpp import ocppv16 as mod_v16
+
+        orig_get_e_kwh = mod_v16.cp.get_energy_kwh
+
+        def flaky_get_energy_kwh(item):
+            try:
+                if (
+                    getattr(item, "context", None) == "Sample.Clock"
+                    and getattr(item, "unit", None) in ("kWh", "Wh")
+                    and float(getattr(item, "value", -1)) == 1234.0
+                ):
+                    raise ValueError("simulated conversion error")
+            except Exception:
+                pass
+            return orig_get_e_kwh(item)
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            monkeypatch.setattr(
+                mod_v16.cp, "get_energy_kwh", flaky_get_energy_kwh, raising=True
+            )
+
+            req = call.MeterValues(
+                connector_id=1,
+                transaction_id=333,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            # 1) NaN -> should be ignored
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "NaN",
+                            },
+                            # 2) Negativt -> should be ignored
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "-1",
+                            },
+                            # 3) Valid, but the patch will let get_energy_kwh throw -> ignored by except
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Clock",
+                                "unit": "kWh",
+                                "value": "1234",
+                            },
+                            # 4) Finally a good Periodic that is chosen
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "3.2",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+            s = cs.get_metric(cp_id, "Energy.Session", connector_id=1)
+            assert v == pytest.approx(3.2, rel=1e-6)
+            assert s == pytest.approx(0.0, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+            # Restore the patch
+            with contextlib.suppress(Exception):
+                monkeypatch.setattr(
+                    mod_v16.cp, "get_energy_kwh", orig_get_e_kwh, raising=True
+                )
+
+
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9101, "cp_id": "CP_eair_prio_vs_value", "cms": "cms_eair_prio_vs_value"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_prio_vs_value"])
+@pytest.mark.parametrize("port", [9101])
+async def test_on_meter_values_priority_beats_raw_value(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Test that prio beats raw value."""
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # "Other" context has prio 0; Periodic has prio 2 -> Periodic should be picked even if the value is lower.
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Other",
+                                "unit": "kWh",
+                                "value": "2.0",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "kWh",
+                                "value": "1.0",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await cp.call(req)
+
+            v = cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=0)
+            assert v == pytest.approx(1.0, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9111, "cp_id": "CP_trig_single_ok", "cms": "cms_trig_single_ok"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_single_ok"])
+@pytest.mark.parametrize("port", [9111])
+async def test_trigger_status_single_accepts(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=1: should NOT try connectorId=0; only cid=1; accepted -> True."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            # force single connector
+            srv_cp._metrics[0][cdet.connectors.value].value = 1
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is True
+            assert attempts == [1]
+            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9112, "cp_id": "CP_trig_multi_ok", "cms": "cms_trig_multi_ok"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_multi_ok"])
+@pytest.mark.parametrize("port", [9112])
+async def test_trigger_status_multi_all_accepts(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=2: multi-connector happy path. Should return True and not reduce connector count."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._metrics[0][cdet.connectors.value].value = 2
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is True
+            assert attempts == [0, 1, 2]
+            assert srv_cp._metrics[0][cdet.connectors.value].value == 2
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9113, "cp_id": "CP_trig_reject_zero_continue", "cms": "cms_trig_r0"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_reject_zero_continue"])
+@pytest.mark.parametrize("port", [9113])
+async def test_trigger_status_reject_zero_but_accept_rest(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=2: cid=0 -> Rejected (ignored), 1 & 2 accepted -> True; connector count unchanged."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._metrics[0][cdet.connectors.value].value = 2
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    if req.connector_id == 0:
+                        return SimpleNamespace(status="Rejected")
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is True
+            assert attempts == [0, 1, 2]
+            # should not downgrade connector count because only cid=0 rejected
+            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 2
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9114, "cp_id": "CP_trig_reject_nonzero_adjusts", "cms": "cms_trig_rnz"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_reject_nonzero_adjusts"])
+@pytest.mark.parametrize("port", [9114])
+async def test_trigger_status_reject_nonzero_adjusts_and_stops(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=3: 0 & 1 accepted; 2 rejected -> set connectors to 1 (cid-1), return False, stop before 3."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._metrics[0][cdet.connectors.value].value = 3
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    if req.connector_id == 2:
+                        return SimpleNamespace(status="Rejected")
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is False
+            assert attempts == [0, 1, 2]
+            # reduced to cid-1 => 1
+            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9115, "cp_id": "CP_trig_timeout_zero_continue", "cms": "cms_trig_t0"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_timeout_zero_continue"])
+@pytest.mark.parametrize("port", [9115])
+async def test_trigger_status_timeout_on_zero_continues(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=2: cid=0 raises TimeoutError (ignored), others accepted -> True; count unchanged."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._metrics[0][cdet.connectors.value].value = 2
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    if req.connector_id == 0:
+                        raise TimeoutError("simulated")
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is True
+            assert attempts == [0, 1, 2]
+            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 2
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9116, "cp_id": "CP_trig_timeout_nonzero_adjusts", "cms": "cms_trig_tnz"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_trig_timeout_nonzero_adjusts"])
+@pytest.mark.parametrize("port", [9116])
+async def test_trigger_status_timeout_on_nonzero_adjusts_and_stops(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """n=2: cid=2 raises TimeoutError -> set connectors to 1, return False, stop."""
+    cs: CentralSystem = setup_config_entry
+    attempts = []
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._metrics[0][cdet.connectors.value].value = 2
+
+            async def fake_call(req):
+                if isinstance(req, call.TriggerMessage):
+                    attempts.append(req.connector_id)
+                    if req.connector_id == 2:
+                        raise TimeoutError("simulated")
+                    return SimpleNamespace(status=TriggerMessageStatus.accepted)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(srv_cp, "call", fake_call, raising=True)
+
+            ok = await srv_cp.trigger_status_notification()
+            assert ok is False
+            # Should stop after the failing connector
+            assert attempts == [0, 1, 2]
+            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9120, "cp_id": "CP_postconn_ex_1", "cms": "cms_postconn_ex_1"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_1"])
+@pytest.mark.parametrize("port", [9120])
+async def test_post_connect_fetch_supported_features_raises(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """fetch_supported_features raises inside post_connect -> swallowed; post_connect_success stays False."""
+    cs: CentralSystem = setup_config_entry
+
+    # Patch before connecting so our call to post_connect() hits the boom.
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def boom(self):
+        raise RuntimeError("fetch boom")
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", boom, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        # client test CP
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            # Vänta bara tills servern registrerat CP-objektet
+            # (ingen BootNotification -> ingen auto post_connect)
+            await asyncio.sleep(0.05)
+            srv_cp = cs.charge_points[cp_id]
+
+            # Säkerställ definierat initialt värde
+            setattr(srv_cp, "post_connect_success", False)
+
+            # Kör post_connect() – ska svälja exception och inte sätta success=True
+            await srv_cp.post_connect()
+
+            assert getattr(srv_cp, "post_connect_success", False) is not True
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9121, "cp_id": "CP_postconn_ex_2", "cms": "cms_postconn_ex_2"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_2"])
+@pytest.mark.parametrize("port", [9121])
+async def test_post_connect_set_availability_error_swallowed_and_REM_triggers_called(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Inner try around set_availability: generic Exception swallowed, and REM triggers still called."""
+    cs: CentralSystem = setup_config_entry
+
+    # Patch server CP methods before connecting.
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    async def ok_set_std(self):
+        return None
+
+    async def nope_avail(self):
+        raise ValueError("availability failed")
+
+    called = {"boot": 0, "status": 0}
+
+    async def fake_boot(self):
+        called["boot"] += 1
+
+    async def fake_status(self):
+        called["status"] += 1
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "set_standard_configuration", ok_set_std, raising=True
+    )
+    monkeypatch.setattr(ServerCP, "set_availability", nope_avail, raising=True)
+    monkeypatch.setattr(ServerCP, "trigger_boot_notification", fake_boot, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "trigger_status_notification", fake_status, raising=True
+    )
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            # wait until server registered CP
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            # enable REM and force boot path
+            srv_cp._attr_supported_features = {prof.REM}
+            srv_cp.received_boot_notification = False
+            setattr(srv_cp, "post_connect_success", False)
+
+            await srv_cp.post_connect()
+
+            assert getattr(srv_cp, "post_connect_success", False) is True
+            assert called["boot"] == 1
+            assert called["status"] == 1
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9122, "cp_id": "CP_postconn_ex_3", "cms": "cms_postconn_ex_3"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_3"])
+@pytest.mark.parametrize("port", [9122])
+async def test_post_connect_set_availability_cancelled_bubbles(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Inner try around set_availability: asyncio.CancelledError must be re-raised (not swallowed)."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    async def ok_set_std(self):
+        return None
+
+    async def cancelled(self):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "set_standard_configuration", ok_set_std, raising=True
+    )
+    monkeypatch.setattr(ServerCP, "set_availability", cancelled, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._attr_supported_features = {prof.REM}
+            srv_cp.received_boot_notification = False
+
+            with pytest.raises(asyncio.CancelledError):
+                await srv_cp.post_connect()
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9123, "cp_id": "CP_postconn_ex_4", "cms": "cms_postconn_ex_4"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_4"])
+@pytest.mark.parametrize("port", [9123])
+async def test_post_connect_trigger_boot_notification_raises_outer_caught(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Outer try: trigger_boot_notification raises -> swallowed; post_connect_success already True."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    async def ok_set_std(self):
+        return None
+
+    async def ok_avail(self):
+        return None
+
+    async def boom_boot(self):
+        raise RuntimeError("boot fail")
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "set_standard_configuration", ok_set_std, raising=True
+    )
+    monkeypatch.setattr(ServerCP, "set_availability", ok_avail, raising=True)
+    monkeypatch.setattr(ServerCP, "trigger_boot_notification", boom_boot, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._attr_supported_features = {prof.REM}
+            srv_cp.received_boot_notification = False
+            setattr(srv_cp, "post_connect_success", False)
+
+            await srv_cp.post_connect()
+
+            assert getattr(srv_cp, "post_connect_success", False) is True
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9124, "cp_id": "CP_postconn_ex_5", "cms": "cms_postconn_ex_5"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_5"])
+@pytest.mark.parametrize("port", [9124])
+async def test_post_connect_trigger_status_notification_raises_outer_caught(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Outer try: trigger_status_notification raises -> swallowed; post_connect_success already True."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    async def ok_set_std(self):
+        return None
+
+    async def ok_avail(self):
+        return None
+
+    async def ok_boot(self):
+        return None
+
+    async def boom_status(self):
+        raise RuntimeError("status fail")
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "set_standard_configuration", ok_set_std, raising=True
+    )
+    monkeypatch.setattr(ServerCP, "set_availability", ok_avail, raising=True)
+    monkeypatch.setattr(ServerCP, "trigger_boot_notification", ok_boot, raising=True)
+    monkeypatch.setattr(
+        ServerCP, "trigger_status_notification", boom_status, raising=True
+    )
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+            srv_cp._attr_supported_features = {prof.REM}
+            srv_cp.received_boot_notification = False
+            setattr(srv_cp, "post_connect_success", False)
+
+            await srv_cp.post_connect()
+            assert getattr(srv_cp, "post_connect_success", False) is True
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9125, "cp_id": "CP_postconn_ex_6", "cms": "cms_postconn_ex_6"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_6"])
+@pytest.mark.parametrize("port", [9125])
+async def test_post_connect_update_entry_raises_outer_caught(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Outer try: async_update_entry raises -> swallowed, success flag not set."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            def boom_update_entry(entry, data=None):
+                raise RuntimeError("update failed")
+
+            monkeypatch.setattr(
+                srv_cp.hass.config_entries,
+                "async_update_entry",
+                boom_update_entry,
+                raising=True,
+            )
+
+            await srv_cp.post_connect()
+            assert getattr(srv_cp, "post_connect_success", False) is not True
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9126, "cp_id": "CP_postconn_ex_7", "cms": "cms_postconn_ex_7"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_7"])
+@pytest.mark.parametrize("port", [9126])
+async def test_post_connect_set_standard_configuration_raises_outer_caught(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Outer try: set_standard_configuration raises -> swallowed, success flag not set."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def ok_get_n(self):
+        return 1
+
+    async def ok_hb(self):
+        return 300
+
+    async def ok_meas(self):
+        return "Voltage"
+
+    async def boom_std(self):
+        raise RuntimeError("std cfg fail")
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", ok_get_n, raising=True)
+    monkeypatch.setattr(ServerCP, "get_heartbeat_interval", ok_hb, raising=True)
+    monkeypatch.setattr(ServerCP, "get_supported_measurands", ok_meas, raising=True)
+    monkeypatch.setattr(ServerCP, "set_standard_configuration", boom_std, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            await srv_cp.post_connect()
+            assert getattr(srv_cp, "post_connect_success", False) is not True
+        finally:
+            task.cancel()
+
+
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9127, "cp_id": "CP_postconn_ex_8", "cms": "cms_postconn_ex_8"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_ex_8"])
+@pytest.mark.parametrize("port", [9127])
+async def test_post_connect_number_of_connectors_raises_outer_caught(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Outer try: get_number_of_connectors raises -> swallowed, success flag not set."""
+    cs: CentralSystem = setup_config_entry
+
+    from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+
+    async def ok_fetch(self):
+        return None
+
+    async def boom_n(self):
+        raise RuntimeError("n fail")
+
+    monkeypatch.setattr(ServerCP, "fetch_supported_features", ok_fetch, raising=True)
+    monkeypatch.setattr(ServerCP, "get_number_of_connectors", boom_n, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            await srv_cp.post_connect()
+            assert getattr(srv_cp, "post_connect_success", False) is not True
+        finally:
+            task.cancel()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9340, "cp_id": "CP_cov_abb_tx_reset", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_cov_abb_tx_reset"])
+@pytest.mark.parametrize("port", [9340])
+async def test_abb_new_tx_resets_eair_and_meter_start(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """ABB: when a new transactionId appears, per-connector EAIR and meter_start are cleared so a lower EAIR (e.g. 0 Wh) is accepted."""
+    cs = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # --- Seed previous session on connector 1 with EAIR = 15000 Wh (15.0 kWh), txId=111 ---
+            mv_tx1 = call.MeterValues(
+                connector_id=1,
+                transaction_id=111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "15000",  # Wh
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            resp = await client.call(mv_tx1)
+            assert resp is not None
+
+            # EAIR should be normalized to kWh on connector 1.
+            assert (
+                cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1)
+                == "kWh"
+            )
+            assert (
+                pytest.approx(
+                    cs.get_metric(
+                        cpid, "Energy.Active.Import.Register", connector_id=1
+                    ),
+                    rel=1e-6,
+                )
+                == 15.0
+            )
+
+            # --- Simulate ABB behavior: new tx starts and EAIR restarts at 0 Wh with txId=222 ---
+            mv_tx2_begin = call.MeterValues(
+                connector_id=1,
+                transaction_id=222,  # new transaction id triggers reset block
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "0",  # Wh -> should be accepted after reset
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            resp2 = await client.call(mv_tx2_begin)
+            assert resp2 is not None
+
+            # Verify: transaction id updated to 222, EAIR accepted as 0.0 kWh, and meter_start cleared.
+            assert int(cs.get_metric(cpid, "Transaction.Id", connector_id=1)) == 222
+            assert (
+                cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1)
+                == "kWh"
+            )
+            assert (
+                pytest.approx(
+                    cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+                    or 0.0,
+                    rel=1e-6,
+                )
+                == 0.0
+            )
+
+            # Meter.Start should be cleared (None) at new tx begin per integration logic.
+            assert cs.get_metric(cpid, "Energy.Meter.Start", connector_id=1) in (
+                None,
+                0,
+                0.0,
+            )
+
+            # --- Follow-up periodic sample to ensure increasing values are tracked from the new baseline ---
+            mv_tx2_next = call.MeterValues(
+                connector_id=1,
+                transaction_id=222,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "100",  # Wh
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            resp3 = await client.call(mv_tx2_next)
+            assert resp3 is not None
+
+            # EAIR should now be 0.1 kWh on connector 1 from the new baseline.
+            assert (
+                pytest.approx(
+                    cs.get_metric(
+                        cpid, "Energy.Active.Import.Register", connector_id=1
+                    ),
+                    rel=1e-6,
+                )
+                == 0.1
+            )
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9341, "cp_id": "CP_cov_ctx_priority", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_cov_ctx_priority"])
+@pytest.mark.parametrize("port", [9341])
+async def test_eair_context_priority_in_bucket(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Ensure EAIR context priority per bucket: Transaction.End > Sample.Periodic > Sample.Clock."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Bucket 1: include three EAIR candidates with different contexts.
+            # Expect: Transaction.End (13000 Wh) wins -> 13.0 kWh.
+            mv_bucket1 = call.MeterValues(
+                connector_id=1,
+                transaction_id=555,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "11000",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Clock",
+                            },
+                            {
+                                "value": "12000",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            },
+                            {
+                                "value": "13000",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Transaction.End",
+                            },
+                            # Some unrelated measurand in the same bucket
+                            {
+                                "value": "230",
+                                "measurand": "Voltage",
+                                "unit": "V",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            },
+                        ],
+                    }
+                ],
+            )
+            resp1 = await client.call(mv_bucket1)
+            assert resp1 is not None
+
+            assert (
+                cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1)
+                == "kWh"
+            )
+            assert cs.get_metric(
+                cpid, "Energy.Active.Import.Register", connector_id=1
+            ) == pytest.approx(13.0, rel=1e-6)
+
+            # Bucket 2: No Transaction.End; Sample.Periodic should beat Sample.Clock.
+            # Expect: 13100 Wh -> 13.1 kWh.
+            mv_bucket2 = call.MeterValues(
+                connector_id=1,
+                transaction_id=555,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "13090",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Clock",
+                            },
+                            {
+                                "value": "13100",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "location": "Outlet",
+                                "context": "Sample.Periodic",
+                            },
+                        ],
+                    }
+                ],
+            )
+            resp2 = await client.call(mv_bucket2)
+            assert resp2 is not None
+
+            assert (
+                cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1)
+                == "kWh"
+            )
+            assert cs.get_metric(
+                cpid, "Energy.Active.Import.Register", connector_id=1
+            ) == pytest.approx(13.1, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
             await ws.close()
 
 

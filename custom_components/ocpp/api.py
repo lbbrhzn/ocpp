@@ -290,10 +290,19 @@ class CentralSystem:
             await charge_point.reconnect(websocket)
 
     def _get_metrics(self, id: str):
-        """Return metrics."""
+        """Return (cp_id, metrics mapping, cp instance, safe int num_connectors)."""
         cp_id = self.cpids.get(id, id)
         cp = self.charge_points.get(cp_id)
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
+
+        def _safe_int(value, default=1):
+            try:
+                iv = int(value)
+                return iv if iv > 0 else default
+            except Exception:
+                return default
+
+        n_connectors = _safe_int(getattr(cp, "num_connectors", 1), default=1)
+
         return (
             (cp_id, cp._metrics, cp, n_connectors)
             if cp is not None
