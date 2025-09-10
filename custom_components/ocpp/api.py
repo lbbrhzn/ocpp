@@ -290,10 +290,19 @@ class CentralSystem:
             await charge_point.reconnect(websocket)
 
     def _get_metrics(self, id: str):
-        """Return metrics."""
+        """Return (cp_id, metrics mapping, cp instance, safe int num_connectors)."""
         cp_id = self.cpids.get(id, id)
         cp = self.charge_points.get(cp_id)
-        n_connectors = getattr(cp, "num_connectors", 1) or 1
+
+        def _safe_int(value, default=1):
+            try:
+                iv = int(value)
+                return iv if iv > 0 else default
+            except Exception:
+                return default
+
+        n_connectors = _safe_int(getattr(cp, "num_connectors", 1), default=1)
+
         return (
             (cp_id, cp._metrics, cp, n_connectors)
             if cp is not None
@@ -367,7 +376,10 @@ class CentralSystem:
 
         def _try_unit(key):
             with contextlib.suppress(Exception):
-                return m[key].unit
+                val = m[key].unit
+                if isinstance(val, str) and val.strip() == "":
+                    return None
+                return val
             return None
 
         if connector_id is not None:
@@ -380,6 +392,8 @@ class CentralSystem:
 
         with contextlib.suppress(Exception):
             val = m[measurand].unit
+            if isinstance(val, str) and val.strip() == "":
+                val = None
             if val is not None:
                 return val
 
@@ -404,7 +418,10 @@ class CentralSystem:
 
         def _try_ha_unit(key):
             with contextlib.suppress(Exception):
-                return m[key].ha_unit
+                val = m[key].ha_unit
+                if isinstance(val, str) and val.strip() == "":
+                    return None
+                return val
             return None
 
         if connector_id is not None:
@@ -417,6 +434,8 @@ class CentralSystem:
 
         with contextlib.suppress(Exception):
             val = m[measurand].ha_unit
+            if isinstance(val, str) and val.strip() == "":
+                val = None
             if val is not None:
                 return val
 
@@ -441,7 +460,10 @@ class CentralSystem:
 
         def _try_extra(key):
             with contextlib.suppress(Exception):
-                return m[key].extra_attr
+                val = m[key].extra_attr
+                if isinstance(val, dict) and not val:
+                    return None
+                return val
             return None
 
         if connector_id is not None:
@@ -454,6 +476,8 @@ class CentralSystem:
 
         with contextlib.suppress(Exception):
             val = m[measurand].extra_attr
+            if isinstance(val, dict) and not val:
+                val = None
             if val is not None:
                 return val
 

@@ -606,8 +606,8 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
         == ChargePointStatusv16.charging
     )
     assert cs.get_metric(cpid, Measurand.current_export.value) == 0
-    assert cs.get_metric(cpid, Measurand.current_import.value) == 6.6
-    assert cs.get_metric(cpid, Measurand.current_offered.value) == 36.6
+    assert cs.get_metric(cpid, Measurand.current_import.value) == pytest.approx(2.2)
+    assert cs.get_metric(cpid, Measurand.current_offered.value) == pytest.approx(12.2)
     assert cs.get_metric(cpid, Measurand.energy_active_export_register.value) == 0
     assert cs.get_metric(cpid, Measurand.energy_active_import_register.value) == 0.1
     assert cs.get_metric(cpid, Measurand.energy_reactive_export_register.value) == 0

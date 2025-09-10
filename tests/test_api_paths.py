@@ -19,7 +19,7 @@ from custom_components.ocpp.enums import (
 from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.chargepoint import SetVariableResult
 
-from .test_charge_point_v16 import MOCK_CONFIG_DATA
+from tests.const import MOCK_CONFIG_DATA
 
 
 class DummyCP:
