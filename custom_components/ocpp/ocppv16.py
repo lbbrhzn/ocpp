@@ -949,20 +949,18 @@ class ChargePoint(cp):
                     n_connectors = 1
                 if n_connectors == 1:
                     mm = self._metrics[(0, DEFAULT_MEASURAND)]
-                    main_seen = mm.extra_attr.get("source") == "main"
-                    if not main_seen:
-                        prev_main = mm.value
-                        allow_main = new_tx_started or (
-                            prev_main is None or best_val_kwh >= float(prev_main)
-                        )
-                        if allow_main:
-                            mm.value = best_val_kwh
-                            mm.unit = HA_ENERGY_UNIT
-                            mm.extra_attr["source"] = "mirrored_tx"
-                            if best_item.context is not None:
-                                mm.extra_attr[om.context.value] = best_item.context
-                            if best_item.location is not None:
-                                mm.extra_attr[om.location.value] = best_item.location
+                    prev_main = mm.value
+                    allow_main = new_tx_started or (
+                        prev_main is None or best_val_kwh >= float(prev_main)
+                    )
+                    if allow_main:
+                        mm.value = best_val_kwh
+                        mm.unit = HA_ENERGY_UNIT
+                        mm.extra_attr["source"] = "mirrored_tx"
+                        if best_item.context is not None:
+                            mm.extra_attr[om.context.value] = best_item.context
+                        if best_item.location is not None:
+                            mm.extra_attr[om.location.value] = best_item.location
 
         # --- Step 2: Process non-EAIR measurands via existing pipeline ---
         mv_wo_eair: list[list[MeasurandValue]] = []
