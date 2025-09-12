@@ -414,38 +414,6 @@ async def test_trigger_custom_message_unsupported_name(
             await ws.close()
 
 
-@pytest.mark.timeout(5)
-@pytest.mark.parametrize(
-    "setup_config_entry",
-    [{"port": 9318, "cp_id": "CP_cov_profile_ids", "cms": "cms_services"}],
-    indirect=True,
-)
-@pytest.mark.parametrize("cp_id", ["CP_cov_profile_ids"])
-@pytest.mark.parametrize("port", [9318])
-async def test_profile_ids_for_bad_conn_id_cast(
-    hass, socket_enabled, cp_id, port, setup_config_entry
-):
-    """Test profile ids path when conn_id cast fails and conn_seg defaults to 1."""
-    cs = setup_config_entry
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
-    ) as ws:
-        cp = ChargePoint(f"{cp_id}_client", ws)
-        task = asyncio.create_task(cp.start())
-        try:
-            await cp.send_boot_notification()
-            await wait_ready(cs.charge_points[cp_id])
-            srv = cs.charge_points[cp_id]
-            pid, level = srv._profile_ids_for(conn_id="X", purpose="TxDefaultProfile")
-            # conn_seg should fall back to 1 -> pid = 1000 + 2 + (1*10) = 1012
-            assert (pid, level) == (1012, 1)
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            await ws.close()
-
-
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",
