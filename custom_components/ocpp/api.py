@@ -580,7 +580,9 @@ class CentralSystem:
                     connector_id=connector_id
                 )
             if service_name == csvcs.service_charge_stop.name:
-                resp = await self.charge_points[cp_id].stop_transaction()
+                resp = await self.charge_points[cp_id].stop_transaction(
+                    connector_id=connector_id
+                )
             if service_name == csvcs.service_reset.name:
                 resp = await self.charge_points[cp_id].reset()
             if service_name == csvcs.service_unlock.name:

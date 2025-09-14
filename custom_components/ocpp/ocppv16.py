@@ -597,29 +597,48 @@ class ChargePoint(cp):
             )
             return False
 
-    async def stop_transaction(self):
+    async def stop_transaction(self, connector_id: int | None = None):
         """Request remote stop of current transaction.
 
-        Leaves charger in finishing state until unplugged.
-        Use reset() to make the charger available again for remote start
+        If connector_id is provided, only stop the transaction running on that connector.
         """
-        if self.active_transaction_id == 0 and not any(self._active_tx.values()):
-            return True
-        tx_id = self.active_transaction_id or next(
-            (v for v in self._active_tx.values() if v), 0
-        )
+        # Resolve which transaction to stop
+        tx_id = 0
+        if connector_id is not None:
+            # Per-connector stop: do NOT fall back to other connectors
+            try:
+                tx_id = int(self._active_tx.get(int(connector_id), 0) or 0)
+            except Exception:
+                tx_id = 0
+
+            # For single-connector chargers, maintain compatibility with legacy global field
+            if tx_id == 0:
+                try:
+                    n = int(getattr(self, "num_connectors", 0) or 0)
+                except Exception:
+                    n = 0
+                if n == 1 and int(connector_id) in (0, 1):
+                    tx_id = int(self.active_transaction_id or 0)
+        else:
+            # Global stop (legacy behavior): stop the known active tx, or any active tx
+            tx_id = int(self.active_transaction_id or 0)
+            if tx_id == 0:
+                tx_id = next((int(v) for v in self._active_tx.values() if v), 0)
+
+        # Nothing to stop - succeed as no-op
         if tx_id == 0:
             return True
+
         req = call.RemoteStopTransaction(transaction_id=tx_id)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
-        else:
-            _LOGGER.warning("Failed with response: %s", resp.status)
-            await self.notify_ha(
-                f"Warning: Stop transaction failed with response {resp.status}"
-            )
-            return False
+
+        _LOGGER.warning("Failed with response: %s", resp.status)
+        await self.notify_ha(
+            f"Warning: Stop transaction failed with response {resp.status}"
+        )
+        return False
 
     async def reset(self, typ: str = ResetType.hard):
         """Hard reset charger unless soft reset requested."""

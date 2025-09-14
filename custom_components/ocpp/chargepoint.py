@@ -416,7 +416,7 @@ class ChargePoint(cp):
         """Remote start a transaction."""
         return False
 
-    async def stop_transaction(self) -> bool:
+    async def stop_transaction(self, connector_id: int | None = None) -> bool:
         """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.

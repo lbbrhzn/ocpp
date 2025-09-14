@@ -456,19 +456,39 @@ class ChargePoint(cp):
         resp: call_result.RequestStartTransaction = await self.call(req)
         return resp.status == RequestStartStopStatusEnumType.accepted.value
 
-    async def stop_transaction(self) -> bool:
-        """Request remote stop of current transaction (default EVSE 1)."""
+    async def stop_transaction(self, connector_id: int | None = None) -> bool:
+        """Request remote stop of current transaction.
+
+        If connector_id is provided, only stop the transaction running on that EVSE.
+        If connector_id is None, stop the first active transaction found (legacy behavior).
+        """
         await self._get_inventory()
-        tx_id = ""
-        total = self._total_connectors() or 1
-        for g in range(1, total + 1):
-            val = self._metrics[(g, csess.transaction_id.value)].value
-            if val:
-                tx_id = val
-                break
+
+        # Determine total EVSEs (connectors) if available
+        total = int(self._total_connectors() or 1)
+
+        tx_id: str | None = None
+
+        if connector_id is not None:
+            # Per-connector stop: do NOT fall back to other EVSEs
+            evse = int(connector_id)
+            if evse < 1 or evse > total:
+                _LOGGER.info("Requested EVSE %s is out of range (1..%s)", evse, total)
+                return False
+            val = self._metrics[(evse, csess.transaction_id.value)].value
+            tx_id = str(val) if val else None
+        else:
+            # Global stop: find the first active transaction across EVSEs
+            for evse in range(1, total + 1):
+                val = self._metrics[(evse, csess.transaction_id.value)].value
+                if val:
+                    tx_id = str(val)
+                    break
+
         if not tx_id:
             _LOGGER.info("No active transaction found to stop")
             return False
+
         req: call.RequestStopTransaction = call.RequestStopTransaction(
             transaction_id=tx_id
         )
