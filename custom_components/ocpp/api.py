@@ -531,10 +531,12 @@ class CentralSystem:
             "finishing",
             "occupied",
             "reserved",
+            "unavailable",  # do NOT make HA entities unavailable for this OCPP state
         }
 
         ret = _norm(status_val) in ok_statuses_norm
-        return ret
+        # If backend/WS is down, entity should be unavailable regardless.
+        return ret and (cp.status == STATE_OK)
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""

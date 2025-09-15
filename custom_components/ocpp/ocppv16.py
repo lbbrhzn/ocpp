@@ -570,10 +570,34 @@ class ChargePoint(cp):
 
         try:
             status = getattr(resp, "status", None)
-            return status in (
-                AvailabilityStatus.accepted,
-                AvailabilityStatus.scheduled,
-            )
+
+            pending_key = "availability_pending"
+            target_str = "Operative" if state else "Inoperative"
+            scope_str = "station" if conn == 0 else "connector"
+
+            metric_key = (conn, cstat.status_connector.value)
+            metric = self._metrics.get(metric_key)
+
+            if status == AvailabilityStatus.scheduled:
+                info = {
+                    "target": target_str,
+                    "scope": scope_str,
+                    "since": datetime.now(tz=UTC).isoformat(),
+                }
+                if metric is not None:
+                    metric.extra_attr[pending_key] = info
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return True
+
+            if status == AvailabilityStatus.accepted:
+                if metric is not None:
+                    metric.extra_attr.pop(pending_key, None)
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return True
+
+            _LOGGER.warning("Failed with response: %s", resp.status)
+            return False
+
         except Exception:
             _LOGGER.warning("Failed with response: %s", resp.status)
             await self.notify_ha(
