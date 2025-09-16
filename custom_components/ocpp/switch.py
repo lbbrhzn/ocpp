@@ -67,6 +67,25 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         default_state=True,
         per_connector=False,
     ),
+    OcppSwitchDescription(
+        key="connnector_availability",
+        name="Connector Availability",
+        icon=ICON,
+        on_action=HAChargerServices.service_availability.name,
+        off_action=HAChargerServices.service_availability.name,
+        metric_state=HAChargerStatuses.status_connector.value,  # connector-level status
+        metric_condition=[
+            ChargePointStatus.available.value,
+            ChargePointStatus.preparing.value,
+            ChargePointStatus.charging.value,
+            ChargePointStatus.suspended_evse.value,
+            ChargePointStatus.suspended_ev.value,
+            ChargePointStatus.finishing.value,
+            ChargePointStatus.reserved.value,
+        ],
+        default_state=True,
+        per_connector=True,
+    ),
 ]
 
 
@@ -105,6 +124,9 @@ async def async_setup_entry(hass, entry, async_add_devices):
 
         for desc in SWITCHES:
             if desc.per_connector:
+                # Only create Connector Availability switches for multi-connector chargers
+                if desc.key == "connnector_availability" and num_connectors <= 1:
+                    continue
                 for conn_id in range(1, num_connectors + 1):
                     entities.append(
                         ChargePointSwitch(

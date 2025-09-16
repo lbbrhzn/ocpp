@@ -416,7 +416,7 @@ class ChargePoint(cp):
         """Remote start a transaction."""
         return False
 
-    async def stop_transaction(self) -> bool:
+    async def stop_transaction(self, connector_id: int | None = None) -> bool:
         """Request remote stop of current transaction.
 
         Leaves charger in finishing state until unplugged.
@@ -823,9 +823,54 @@ class ChargePoint(cp):
         connector_id: int = 0,
     ):
         """Process all values from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
+
         for bucket in meter_values:
+            # --- Preselect best EAIR in this bucket (ignore Transaction.Begin) ---
+            best_eair_idx = None
+            best_pr = -1
+            best_val = None
+            for j, sv in enumerate(bucket):
+                meas = sv.measurand if sv.measurand is not None else DEFAULT_MEASURAND
+                if meas != DEFAULT_MEASURAND:
+                    continue
+                ctx = sv.context
+                # Always ignore Transaction.Begin for EAIR (prevents resets to 0)
+                if ctx == ReadingContext.transaction_begin.value:
+                    continue
+                try:
+                    kwh = float(
+                        ChargePoint.get_energy_kwh(
+                            MeasurandValue(
+                                meas,
+                                sv.value,
+                                sv.phase,
+                                sv.unit,
+                                sv.context,
+                                sv.location,
+                            )
+                        )
+                    )
+                except Exception:
+                    continue
+                if kwh < 0.0 or kwh != kwh:
+                    continue
+                pr = 0
+                if ctx == ReadingContext.transaction_end.value:
+                    pr = 3
+                elif ctx == ReadingContext.sample_periodic.value:
+                    pr = 2
+                elif ctx == ReadingContext.sample_clock.value:
+                    pr = 1
+                if (pr > best_pr) or (
+                    pr == best_pr and (best_val is None or kwh > best_val)
+                ):
+                    best_pr = pr
+                    best_val = kwh
+                    best_eair_idx = j
+
             unprocessed: list[MeasurandValue] = []
-            for sampled_value in bucket:
+
+            for idx, sampled_value in enumerate(bucket):
                 measurand = sampled_value.measurand
                 value = sampled_value.value
                 unit = sampled_value.unit
@@ -833,120 +878,109 @@ class ChargePoint(cp):
                 location = sampled_value.location
                 context = sampled_value.context
 
-                # If the measurand is missing: treat as EAIR but respect existing unit
-                if measurand is None:
+                # Backwards compatibility
+                if sampled_value.measurand is None:
                     measurand = DEFAULT_MEASURAND
-                    if unit is None:
-                        unit = DEFAULT_ENERGY_UNIT
+                    unit = unit or DEFAULT_ENERGY_UNIT
 
-                # If EAIR and unit missing, assume Wh (charger not sending unit)
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
 
                 # Normalize units
-                if unit == DEFAULT_ENERGY_UNIT or (
-                    measurand == DEFAULT_MEASURAND and unit is None
-                ):
-                    # Wh → kWh
+                if unit == DEFAULT_ENERGY_UNIT:
                     value = ChargePoint.get_energy_kwh(
                         MeasurandValue(measurand, value, phase, unit, context, location)
                     )
                     unit = HA_ENERGY_UNIT
-                elif unit == DEFAULT_POWER_UNIT:
-                    # W → kW
+
+                if unit == DEFAULT_POWER_UNIT:
                     value = value / 1000
                     unit = HA_POWER_UNIT
 
-                # Only flag if meter_start explicitly is 0 (not None)
                 if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
+                    # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
                 if phase is None:
-                    # Set main measurand
-                    self._metrics[(connector_id, measurand)].value = value
-                    self._metrics[(connector_id, measurand)].unit = unit
+                    is_eair = measurand == DEFAULT_MEASURAND
+
+                    # Determine if this is a single-connector charger (only if explicitly known)
+                    try:
+                        n_connectors = int(getattr(self, "num_connectors", 1) or 1)
+                    except Exception:
+                        n_connectors = 1
+
+                    single = n_connectors == 1
+
+                    # Choose target connector id
+                    if is_eair:
+                        if connector_id and connector_id > 0:
+                            # Always honor a positive connector_id for EAIR, even without txId
+                            target_cid = connector_id
+                        else:
+                            # connector_id == 0 or missing → map based on topology
+                            target_cid = 1 if single else 0
+                    else:
+                        target_cid = connector_id
+
+                    # For EAIR: process only the best candidate in this bucket, skip others (incl. Transaction.Begin)
+                    if is_eair and idx != best_eair_idx:
+                        continue
+
+                    self._metrics[(target_cid, measurand)].value = value
+                    self._metrics[(target_cid, measurand)].unit = unit
 
                     if location is not None:
-                        self._metrics[(connector_id, measurand)].extra_attr[
+                        self._metrics[(target_cid, measurand)].extra_attr[
                             om.location.value
                         ] = location
                     if context is not None:
-                        self._metrics[(connector_id, measurand)].extra_attr[
+                        self._metrics[(target_cid, measurand)].extra_attr[
                             om.context.value
                         ] = context
 
-                    # Energy.Session is calculated here only for OCPP 2.x (not 1.6)
-                    if (
-                        measurand == DEFAULT_MEASURAND
-                        and is_transaction
-                        and self._ocpp_version != "1.6"
-                    ):
-                        # Ensure session metric is present and well-formed
-                        sess_key = (connector_id, "Energy.Session")
-                        if sess_key not in self._metrics:
-                            self._metrics[sess_key] = Metric(0.0, HA_ENERGY_UNIT)
-                        else:
-                            if self._metrics[sess_key].unit is None:
-                                self._metrics[sess_key].unit = HA_ENERGY_UNIT
-                            if self._metrics[sess_key].value is None:
-                                self._metrics[sess_key].value = 0.0
-
-                        # Bootstrap baseline for 2.x if missing:
-                        ms_key = (
-                            connector_id,
-                            csess.meter_start.value,
-                        )  # "Energy.Meter.Start"
-                        if ms_key not in self._metrics:
-                            # Create the slot with kWh unit to match normalized EAIR above
-                            self._metrics[ms_key] = Metric(None, HA_ENERGY_UNIT)
-
-                        ms_metric = self._metrics[ms_key]
-                        if ms_metric.value is None:
-                            # First EAIR in this transaction: set baseline to current EAIR (kWh)
-                            ms_metric.value = value
-                            # Keep session at 0.0 for the baseline sample
-                        else:
-                            # Compute positive delta only (guard against counter resets)
-                            delta = value - ms_metric.value
-                            if delta >= 0:
-                                self._metrics[sess_key].value = round(delta, 6)
-
-                        if (
-                            self._charger_reports_session_energy
-                            and context != ReadingContext.transaction_begin.value
-                        ):
-                            # The charger reports session energy directly (2.x case)
-                            self._metrics[
-                                (connector_id, csess.session_energy.value)
-                            ].value = value
-                            self._metrics[
-                                (connector_id, csess.session_energy.value)
-                            ].unit = HA_ENERGY_UNIT
-                            self._metrics[
-                                (connector_id, csess.session_energy.value)
-                            ].extra_attr[cstat.id_tag.name] = self._metrics[
-                                (connector_id, cstat.id_tag.value)
-                            ].value
-                        else:
-                            # Derive: EAIR_kWh - meter_start_kWh
-                            ms_val = self._metrics[
-                                (connector_id, csess.meter_start.value)
-                            ].value
-                            if ms_val is not None:
+                    # Session handling, only for EAIR during a transaction (per-connector)
+                    if is_transaction and is_eair:
+                        if self._charger_reports_session_energy:
+                            # Charger reports session energy directly; ignore Transaction.Begin.
+                            if context != ReadingContext.transaction_begin.value:
                                 self._metrics[
-                                    (connector_id, csess.session_energy.value)
-                                ].value = (
-                                    round(1000 * (float(value) - float(ms_val))) / 1000
-                                )
+                                    (target_cid, csess.session_energy.value)
+                                ].value = value
                                 self._metrics[
-                                    (connector_id, csess.session_energy.value)
-                                ].unit = HA_ENERGY_UNIT
+                                    (target_cid, csess.session_energy.value)
+                                ].unit = unit
+                                self._metrics[
+                                    (target_cid, csess.session_energy.value)
+                                ].extra_attr[cstat.id_tag.name] = self._metrics[
+                                    (target_cid, cstat.id_tag.value)
+                                ].value
+                        else:
+                            # Initialize baseline on first tx-bound EAIR; then derive Session = EAIR - meter_start.
+                            ms_metric = self._metrics[(target_cid, csess.meter_start)]
+                            if ms_metric.value is None:
+                                ms_metric.value = value
+                                ms_metric.unit = unit
+                                self._metrics[
+                                    (target_cid, csess.session_energy.value)
+                                ].value = 0.0
+                                self._metrics[
+                                    (target_cid, csess.session_energy.value)
+                                ].unit = unit
+                            elif ms_metric.unit == unit:
+                                self._metrics[
+                                    (target_cid, csess.session_energy.value)
+                                ].value = round(1000 * (value - ms_metric.value)) / 1000
+                                self._metrics[
+                                    (target_cid, csess.session_energy.value)
+                                ].unit = unit
                 else:
-                    # Handle phase values separately
                     unprocessed.append(sampled_value)
 
-            # Sum/calculate phase values
-            self.process_phases(unprocessed, connector_id)
+            try:
+                self.process_phases(unprocessed, connector_id)
+            except TypeError:
+                self.process_phases(unprocessed)
 
     @property
     def supported_features(self) -> int:

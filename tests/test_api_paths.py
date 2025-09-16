@@ -52,7 +52,7 @@ class DummyCP:
         self.calls.append(("start_transaction", {"connector_id": connector_id}))
         return True
 
-    async def stop_transaction(self):
+    async def stop_transaction(self, connector_id: int | None = None):
         """Stop transaction."""
         self.calls.append(("stop_transaction", {}))
         return True
@@ -232,7 +232,8 @@ async def test_get_available_paths(hass):
     cp = _install_dummy_cp(cs, status=STATE_UNAVAILABLE)
     assert cs.get_available("test_cpid", connector_id=0) is False
 
-    # specific connector via per-connector metric
+    # specific connector via per-connector metric, charger available
+    cp = _install_dummy_cp(cs, status=STATE_OK)
     meas = cstat.status_connector.value
     cp._metrics[(1, meas)] = M("Charging", None)
     assert cs.get_available("test_cpid", connector_id=1) is True

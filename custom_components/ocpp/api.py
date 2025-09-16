@@ -531,10 +531,12 @@ class CentralSystem:
             "finishing",
             "occupied",
             "reserved",
+            "unavailable",  # do NOT make HA entities unavailable for this OCPP state
         }
 
         ret = _norm(status_val) in ok_statuses_norm
-        return ret
+        # If backend/WS is down, entity should be unavailable regardless.
+        return ret and (cp.status == STATE_OK)
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""
@@ -580,7 +582,9 @@ class CentralSystem:
                     connector_id=connector_id
                 )
             if service_name == csvcs.service_charge_stop.name:
-                resp = await self.charge_points[cp_id].stop_transaction()
+                resp = await self.charge_points[cp_id].stop_transaction(
+                    connector_id=connector_id
+                )
             if service_name == csvcs.service_reset.name:
                 resp = await self.charge_points[cp_id].reset()
             if service_name == csvcs.service_unlock.name:

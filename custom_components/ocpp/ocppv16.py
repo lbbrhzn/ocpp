@@ -56,7 +56,6 @@ from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
-    DEFAULT_ENERGY_UNIT,
     DOMAIN,
     HA_ENERGY_UNIT,
 )
@@ -421,7 +420,6 @@ class ChargePoint(cp):
             else ChargingRateUnitType.watts.value
         )
 
-        # Read max stack level (default to 1 on parse errors)
         try:
             stack_level_resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level.value
@@ -439,12 +437,27 @@ class ChargePoint(cp):
                 ],
             }
 
+        # Helper to generate a unique, stable chargingProfileId per purpose+connector
+        def _profile_id(purpose: str, cid: int) -> int:
+            base = {
+                ChargingProfilePurposeType.charge_point_max_profile.value: 1000,
+                ChargingProfilePurposeType.tx_default_profile.value: 2000,
+                ChargingProfilePurposeType.tx_profile.value: 3000,
+            }.get(purpose, 9000)
+            try:
+                n = int(cid or 0)
+            except Exception:
+                n = 0
+            return base + max(0, n)
+
         # Try ChargePointMaxProfile (connectorId = 0)
         try:
             req = call.SetChargingProfile(
                 connector_id=0,
                 cs_charging_profiles={
-                    om.charging_profile_id.value: 8,
+                    om.charging_profile_id.value: _profile_id(
+                        ChargingProfilePurposeType.charge_point_max_profile.value, 0
+                    ),
                     om.stack_level.value: stack_level,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.charge_point_max_profile.value,
@@ -455,22 +468,63 @@ class ChargePoint(cp):
             if resp.status == ChargingProfileStatus.accepted:
                 return True
             _LOGGER.debug(
-                "ChargePointMaxProfile not accepted (%s); will try TxDefaultProfile.",
+                "ChargePointMaxProfile not accepted (%s); will continue.",
                 resp.status,
             )
         except Exception as ex:
             _LOGGER.debug("ChargePointMaxProfile call raised: %s", ex)
 
-        # Fallback: TxDefaultProfile on target connector
-        # If no connector given, prefer 1 as a reasonable default.
+        # Target connector (default 1 if unspecified/0)
         target_cid = int(conn_id) if conn_id and int(conn_id) > 0 else 1
+
+        # Read active transaction on this connector
         try:
-            # Some chargers are picky: try a slightly lower stack level if possible.
-            tx_stack = max(1, stack_level - 1)
+            active_tx_id = int(self._active_tx.get(target_cid, 0) or 0)
+        except Exception:
+            active_tx_id = 0
+
+        txp_ok = False
+        txd_ok = False
+
+        # If an active transaction exists on this connector, try TxProfile first (affects ongoing charging)
+        if active_tx_id > 0:
+            try:
+                txp_stack = max(1, stack_level)  # keep same or higher than defaults
+                req = call.SetChargingProfile(
+                    connector_id=target_cid,
+                    cs_charging_profiles={
+                        om.charging_profile_id.value: _profile_id(
+                            ChargingProfilePurposeType.tx_profile.value, target_cid
+                        ),
+                        om.stack_level.value: txp_stack,
+                        om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
+                        om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
+                        om.charging_schedule.value: _mk_schedule(
+                            units_value, limit_value
+                        ),
+                        # Bind to the ongoing transaction
+                        om.transaction_id.value: active_tx_id,
+                    },
+                )
+                resp = await self.call(req)
+                if resp.status == ChargingProfileStatus.accepted:
+                    txp_ok = True
+                else:
+                    _LOGGER.debug("TxProfile not accepted (%s).", resp.status)
+            except Exception as ex:
+                _LOGGER.debug("TxProfile call raised: %s.", ex)
+
+        # Always attempt TxDefaultProfile as well (for future sessions)
+        try:
+            tx_stack = max(
+                1, stack_level - 1
+            )  # slightly lower to avoid overriding TxProfile
             req = call.SetChargingProfile(
                 connector_id=target_cid,
                 cs_charging_profiles={
-                    om.charging_profile_id.value: 8,
+                    om.charging_profile_id.value: _profile_id(
+                        ChargingProfilePurposeType.tx_default_profile.value, target_cid
+                    ),
                     om.stack_level.value: tx_stack,
                     om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
@@ -479,16 +533,21 @@ class ChargePoint(cp):
             )
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
-                return True
-            _LOGGER.warning("Set TxDefaultProfile rejected: %s", resp.status)
-            await self.notify_ha(
-                f"Warning: Set charging profile failed with response {resp.status}"
-            )
-            return False
+                txd_ok = True
+            else:
+                _LOGGER.debug("Set TxDefaultProfile rejected: %s", resp.status)
+                if txp_ok:
+                    _LOGGER.debug(
+                        f"Note: Active TxProfile applied, but TxDefaultProfile was rejected ({resp.status})."
+                    )
         except Exception as ex:
-            _LOGGER.warning("Set TxDefaultProfile failed: %s", ex)
-            await self.notify_ha(f"Warning: Set charging profile failed: {ex}")
-            return False
+            _LOGGER.debug("Set TxDefaultProfile failed: %s", ex)
+            if txp_ok:
+                _LOGGER.debug(
+                    f"Note: Active TxProfile applied, but TxDefaultProfile failed: {ex}"
+                )
+
+        return bool(txp_ok or txd_ok)
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
@@ -511,10 +570,34 @@ class ChargePoint(cp):
 
         try:
             status = getattr(resp, "status", None)
-            return status in (
-                AvailabilityStatus.accepted,
-                AvailabilityStatus.scheduled,
-            )
+
+            pending_key = "availability_pending"
+            target_str = "Operative" if state else "Inoperative"
+            scope_str = "station" if conn == 0 else "connector"
+
+            metric_key = (conn, cstat.status_connector.value)
+            metric = self._metrics.get(metric_key)
+
+            if status == AvailabilityStatus.scheduled:
+                info = {
+                    "target": target_str,
+                    "scope": scope_str,
+                    "since": datetime.now(tz=UTC).isoformat(),
+                }
+                if metric is not None:
+                    metric.extra_attr[pending_key] = info
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return True
+
+            if status == AvailabilityStatus.accepted:
+                if metric is not None:
+                    metric.extra_attr.pop(pending_key, None)
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return True
+
+            _LOGGER.warning("Failed with response: %s", resp.status)
+            return False
+
         except Exception:
             _LOGGER.warning("Failed with response: %s", resp.status)
             await self.notify_ha(
@@ -538,29 +621,48 @@ class ChargePoint(cp):
             )
             return False
 
-    async def stop_transaction(self):
+    async def stop_transaction(self, connector_id: int | None = None):
         """Request remote stop of current transaction.
 
-        Leaves charger in finishing state until unplugged.
-        Use reset() to make the charger available again for remote start
+        If connector_id is provided, only stop the transaction running on that connector.
         """
-        if self.active_transaction_id == 0 and not any(self._active_tx.values()):
-            return True
-        tx_id = self.active_transaction_id or next(
-            (v for v in self._active_tx.values() if v), 0
-        )
+        # Resolve which transaction to stop
+        tx_id = 0
+        if connector_id is not None:
+            # Per-connector stop: do NOT fall back to other connectors
+            try:
+                tx_id = int(self._active_tx.get(int(connector_id), 0) or 0)
+            except Exception:
+                tx_id = 0
+
+            # For single-connector chargers, maintain compatibility with legacy global field
+            if tx_id == 0:
+                try:
+                    n = int(getattr(self, "num_connectors", 0) or 0)
+                except Exception:
+                    n = 0
+                if n == 1 and int(connector_id) in (0, 1):
+                    tx_id = int(self.active_transaction_id or 0)
+        else:
+            # Global stop (legacy behavior): stop the known active tx, or any active tx
+            tx_id = int(self.active_transaction_id or 0)
+            if tx_id == 0:
+                tx_id = next((int(v) for v in self._active_tx.values() if v), 0)
+
+        # Nothing to stop - succeed as no-op
         if tx_id == 0:
             return True
+
         req = call.RemoteStopTransaction(transaction_id=tx_id)
         resp = await self.call(req)
         if resp.status == RemoteStartStopStatus.accepted:
             return True
-        else:
-            _LOGGER.warning("Failed with response: %s", resp.status)
-            await self.notify_ha(
-                f"Warning: Stop transaction failed with response {resp.status}"
-            )
-            return False
+
+        _LOGGER.warning("Failed with response: %s", resp.status)
+        await self.notify_ha(
+            f"Warning: Stop transaction failed with response {resp.status}"
+        )
+        return False
 
     async def reset(self, typ: str = ResetType.hard):
         """Hard reset charger unless soft reset requested."""
@@ -745,259 +847,95 @@ class ChargePoint(cp):
 
     @on(Action.meter_values)
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
-        """Handle MeterValues (per connector).
+        """Request handler for MeterValues Calls (multi-connector aware)."""
 
-        - EAIR **without** transactionId always writes to connector 0,
-        even if it decreases relative to a previously mirrored value.
-        - Tx-bound EAIR (with transactionId) writes to the specific connector using a non-decreasing rule,
-        **except** when a new transaction begins on that connector — then lower values are allowed.
-        - For single-connector chargers, mirror tx-bound EAIR to connector 0 **only** until a true
-        main-meter (no txId) value is observed. After that, do not mirror.
-        - Session energy is computed **only** from tx-bound EAIR, never from main-meter readings.
-        """
-        transaction_id: int | None = kwargs.get(om.transaction_id.name, None)
-        tx_has_id: bool = transaction_id not in (None, 0)
+        transaction_id: int = kwargs.get(om.transaction_id.name, 0)
 
-        active_tx_for_conn: int | None = (
-            int(self._active_tx.get(connector_id, 0) or 0) or None
-        )
+        # Restore missing per-connector meter_start / active_transaction_id from HA if possible.
+        ms_key = (connector_id, csess.meter_start.value)
+        tx_key = (connector_id, csess.transaction_id.value)
 
-        # If missing meter_start or active_transaction_id try to restore from HA states. If HA
-        # does not have values either, generate new ones.
-        if self._metrics[(connector_id, csess.meter_start.value)].value is None:
-            restored = self.get_ha_metric(csess.meter_start.value, connector_id)
-            restored_f: float | None
-            if restored is not None:
-                try:
-                    restored_f = float(restored)
-                except (ValueError, TypeError):
-                    restored_f = None
+        if self._metrics[ms_key].value is None:
+            value = self.get_ha_metric(csess.meter_start.value, connector_id)
+            if value is None:
+                m = self._metrics.get((connector_id, DEFAULT_MEASURAND))
+                value = m.value if m is not None else None
             else:
-                # Fallback: if no txId and connector has a per-connector EAIR stored, use that
-                restored_f = None
-            if restored_f is not None:
-                self._metrics[
-                    (connector_id, csess.meter_start.value)
-                ].value = restored_f
-
-        if self._metrics[(connector_id, csess.transaction_id.value)].value is None:
-            restored_tx = self.get_ha_metric(csess.transaction_id.value, connector_id)
-            candidate: int | None
-            if restored_tx is not None:
                 try:
-                    candidate = int(restored_tx)
+                    value = float(value)
+                    _LOGGER.debug(
+                        "%s[%s] was None, restored value=%s from HA.",
+                        csess.meter_start.value,
+                        connector_id,
+                        value,
+                    )
                 except (ValueError, TypeError):
-                    candidate = None
+                    value = None
+            self._metrics[ms_key].value = value
+
+        if self._metrics[tx_key].value is None:
+            value = self.get_ha_metric(csess.transaction_id.value, connector_id)
+            if value is None:
+                value = kwargs.get(om.transaction_id.name)
             else:
-                candidate = int(transaction_id) if tx_has_id else None
+                try:
+                    value = int(value)
+                    _LOGGER.debug(
+                        "%s[%s] was None, restored value=%s from HA.",
+                        csess.transaction_id.value,
+                        connector_id,
+                        value,
+                    )
+                except (ValueError, TypeError):
+                    value = None
+            self._metrics[tx_key].value = value
+            # Track active tx per connector
+            self._active_tx[connector_id] = value
 
-            if candidate is not None and candidate != 0:
-                self._metrics[
-                    (connector_id, csess.transaction_id.value)
-                ].value = candidate
-                self._active_tx[connector_id] = candidate
-                active_tx_for_conn = candidate
+        active_tx = self._active_tx.get(connector_id, 0) or 0
 
-        # --- Detect a new transaction on this connector (for example ABB resets to 0 at Transaction.Begin) ---
-        new_tx_started = False
-        if tx_has_id and (
-            active_tx_for_conn is None or int(transaction_id) != int(active_tx_for_conn)
-        ):
-            # Register the new transaction and clear per-connector EAIR so that a lower starting
-            # value (e.g., 0.0) is accepted.
-            self._metrics[(connector_id, csess.transaction_id.value)].value = int(
-                transaction_id
+        transaction_matches: bool = False
+        # Match is also false if no transaction is in progress, i.e. active_tx==transaction_id==0
+        if transaction_id == active_tx and transaction_id != 0:
+            transaction_matches = True
+        elif transaction_id != 0 and transaction_id is not None:
+            _LOGGER.warning(
+                "Unknown transaction detected on conn %s with id=%i",
+                connector_id,
+                transaction_id,
             )
-            self._active_tx[connector_id] = int(transaction_id)
-            active_tx_for_conn = int(transaction_id)
-            new_tx_started = True
-            # Reset tx-bound EAIR and session baseline; main meter (connector 0) remains untouched.
-            self._metrics[(connector_id, DEFAULT_MEASURAND)].value = None
-            self._metrics[(connector_id, csess.meter_start.value)].value = None
-
-        if tx_has_id:
-            transaction_matches = transaction_id == active_tx_for_conn
-        else:
-            transaction_matches = active_tx_for_conn not in (None, 0)
 
         meter_values: list[list[MeasurandValue]] = []
         for bucket in meter_value:
             measurands: list[MeasurandValue] = []
             for sampled_value in bucket.get(om.sampled_value.name, []):
                 measurand = sampled_value.get(om.measurand.value, None)
-                v = sampled_value.get(om.value.value, None)
-                # where an empty string is supplied convert to 0
+                value = sampled_value.get(om.value.value, None)
+                # Where an empty string is supplied convert to 0
                 try:
-                    v = float(v)
+                    value = float(value)
                 except (ValueError, TypeError):
-                    v = 0.0
+                    value = 0.0
                 unit = sampled_value.get(om.unit.value, None)
                 phase = sampled_value.get(om.phase.value, None)
                 location = sampled_value.get(om.location.value, None)
                 context = sampled_value.get(om.context.value, None)
                 measurands.append(
-                    MeasurandValue(measurand, v, phase, unit, context, location)
+                    MeasurandValue(measurand, value, phase, unit, context, location)
                 )
             meter_values.append(measurands)
 
-        # --- Helper to rank contexts when multiple EAIR candidates exist in a bucket ---
-        def _ctx_priority(ctx: str | None) -> int:
-            if ctx == "Transaction.End":
-                return 3
-            if ctx == "Sample.Periodic":
-                return 2
-            if ctx == "Sample.Clock":
-                return 1
-            return 0
+        self.process_measurands(meter_values, transaction_matches, connector_id)
 
-        # --- Step 1: Apply EAIR ---
-        # target_cid = 0 (main meter) if no transactionId, else the connector itself
-        target_cid = 0 if not tx_has_id else connector_id
-
-        for bucket in meter_values:
-            best_pr, best_val_kwh, best_item = -1, None, None
-            for item in bucket:
-                measurand = item.measurand or DEFAULT_MEASURAND
-                if measurand != DEFAULT_MEASURAND:
-                    continue
-                # Ignore Transaction.Begin EAIR (often 0 right at start); ABB will be handled by new_tx_started
-                if item.context == "Transaction.Begin":
-                    continue
-                try:
-                    val_kwh = float(cp.get_energy_kwh(item))
-                except Exception:
-                    continue
-                if val_kwh < 0.0 or (val_kwh != val_kwh):
-                    continue
-                pr = _ctx_priority(item.context)
-                if (pr > best_pr) or (
-                    pr == best_pr and (best_val_kwh is None or val_kwh > best_val_kwh)
-                ):
-                    best_pr, best_val_kwh, best_item = pr, val_kwh, item
-
-            if best_item is None:
-                continue
-
-            if not tx_has_id and target_cid == 0:
-                # Authoritative main meter: always write (can decrease vs a mirrored value)
-                m = self._metrics[(0, DEFAULT_MEASURAND)]
-                m.value = best_val_kwh
-                m.unit = HA_ENERGY_UNIT
-                m.extra_attr["source"] = "main"
-                if best_item.context is not None:
-                    m.extra_attr[om.context.value] = best_item.context
-                if best_item.location is not None:
-                    m.extra_attr[om.location.value] = best_item.location
-            else:
-                # Tx-bound EAIR: write non-decreasing, unless a new transaction just began
-                m = self._metrics[(target_cid, DEFAULT_MEASURAND)]
-                prev = m.value
-                allow = new_tx_started or (prev is None or best_val_kwh >= float(prev))
-                if allow:
-                    m.value = best_val_kwh
-                    m.unit = HA_ENERGY_UNIT
-                    if best_item.context is not None:
-                        m.extra_attr[om.context.value] = best_item.context
-                    if best_item.location is not None:
-                        m.extra_attr[om.location.value] = best_item.location
-
-                # Mirror to connector 0 only for single-connector chargers, and only
-                # until we've observed an authoritative main meter.
-                try:
-                    n_connectors = int(getattr(self, "num_connectors", 1) or 1)
-                except Exception:
-                    n_connectors = 1
-                if n_connectors == 1:
-                    mm = self._metrics[(0, DEFAULT_MEASURAND)]
-                    main_seen = mm.extra_attr.get("source") == "main"
-                    if not main_seen:
-                        prev_main = mm.value
-                        allow_main = new_tx_started or (
-                            prev_main is None or best_val_kwh >= float(prev_main)
-                        )
-                        if allow_main:
-                            mm.value = best_val_kwh
-                            mm.unit = HA_ENERGY_UNIT
-                            mm.extra_attr["source"] = "mirrored_tx"
-                            if best_item.context is not None:
-                                mm.extra_attr[om.context.value] = best_item.context
-                            if best_item.location is not None:
-                                mm.extra_attr[om.location.value] = best_item.location
-
-        # --- Step 2: Process non-EAIR measurands via existing pipeline ---
-        mv_wo_eair: list[list[MeasurandValue]] = []
-        for bucket in meter_values:
-            filtered = [
-                it
-                for it in bucket
-                if (it.measurand or DEFAULT_MEASURAND) != DEFAULT_MEASURAND
-            ]
-            if filtered:
-                mv_wo_eair.append(filtered)
-        self.process_measurands(mv_wo_eair, transaction_matches, connector_id)
-
-        # --- Step 3: Update session metrics (time, energy) only for tx-bound EAIR ---
-        if tx_has_id and transaction_matches:
-            # Session time (minutes) — keep parity with previous behavior
-            tx_start = float(
-                self._metrics[(connector_id, csess.transaction_id.value)].value
-                or time.time()
-            )
+        if transaction_matches:
+            try:
+                tx_start_epoch = float(self._metrics[tx_key].value)
+            except (TypeError, ValueError):
+                tx_start_epoch = time.time()
             self._metrics[(connector_id, csess.session_time.value)].value = round(
-                (int(time.time()) - tx_start) / 60
+                (int(time.time()) - tx_start_epoch) / 60
             )
-            self._metrics[
-                (connector_id, csess.session_time.value)
-            ].unit = UnitOfTime.MINUTES
-
-            # Session energy from tx-bound EAIR only
-            eair_kwh_in_msg: float | None = None
-            best_ctx_prio = -1
-            for bucket in meter_values:
-                for item in bucket:
-                    measurand = item.measurand or DEFAULT_MEASURAND
-                    if measurand != DEFAULT_MEASURAND:
-                        continue
-                    if item.context == "Transaction.Begin":
-                        continue
-                    try:
-                        val_kwh = float(cp.get_energy_kwh(item))
-                    except Exception:
-                        continue
-                    if val_kwh < 0.0 or (val_kwh != val_kwh):
-                        continue
-                    pr = _ctx_priority(item.context)
-                    if (pr > best_ctx_prio) or (
-                        pr == best_ctx_prio
-                        and (eair_kwh_in_msg is None or val_kwh > eair_kwh_in_msg)
-                    ):
-                        best_ctx_prio = pr
-                        eair_kwh_in_msg = val_kwh
-
-            if eair_kwh_in_msg is not None:
-                raw_start = self._metrics[(connector_id, csess.meter_start.value)].value
-                try:
-                    meter_start_kwh = (
-                        float(raw_start) if raw_start is not None else None
-                    )
-                except Exception:
-                    meter_start_kwh = None
-
-                if meter_start_kwh is None:
-                    # Initialize at first tx-bound EAIR; ABB starts at 0 which is desired here
-                    self._metrics[
-                        (connector_id, csess.meter_start.value)
-                    ].value = eair_kwh_in_msg
-                    session_kwh = 0.0
-                else:
-                    session_kwh = max(0.0, eair_kwh_in_msg - meter_start_kwh)
-
-                self._metrics[
-                    (connector_id, csess.session_energy.value)
-                ].value = session_kwh
-                self._metrics[
-                    (connector_id, csess.session_energy.value)
-                ].unit = HA_ENERGY_UNIT
+            self._metrics[(connector_id, csess.session_time.value)].unit = "min"
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.MeterValues()
@@ -1135,7 +1073,9 @@ class ChargePoint(cp):
 
     @on(Action.stop_transaction)
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
-        """Stop the current transaction."""
+        """Stop the current transaction (multi-connector)."""
+
+        # Resolve connector from active tx map
         conn = next(
             (c for c, tx in self._active_tx.items() if tx == transaction_id), None
         )
@@ -1144,8 +1084,9 @@ class ChargePoint(cp):
                 "Stop transaction received for unknown transaction id=%i",
                 transaction_id,
             )
-            conn = 1
+            conn = 1  # conservative fallback
 
+        # Reset active transaction (global + per-connector)
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
 
@@ -1153,47 +1094,18 @@ class ChargePoint(cp):
             om.reason.name, None
         )
 
-        self._metrics[(conn, cstat.id_tag.value)].value = ""
-        self._metrics[(conn, csess.transaction_id.value)].value = 0
-
-        use_eair_from_tx = bool(self._charger_reports_session_energy)
-
-        if use_eair_from_tx:
-            sess_val = self._metrics[(conn, csess.session_energy.value)].value
-            if sess_val is None:
-                last_eair = self._metrics[(conn, DEFAULT_MEASURAND)].value
-                last_unit = self._metrics[(conn, DEFAULT_MEASURAND)].unit
-                try:
-                    if last_eair is not None:
-                        if last_unit == DEFAULT_ENERGY_UNIT:
-                            eair_kwh = float(last_eair) / 1000.0
-                        elif last_unit == HA_ENERGY_UNIT:
-                            eair_kwh = float(last_eair)
-                        else:
-                            eair_kwh = float(last_eair)
-                        self._metrics[
-                            (conn, csess.session_energy.value)
-                        ].value = eair_kwh
-                        self._metrics[
-                            (conn, csess.session_energy.value)
-                        ].unit = HA_ENERGY_UNIT
-                except Exception:
-                    pass
-        else:
+        ms_key = (conn, csess.meter_start.value)
+        if (
+            self._metrics[ms_key].value is not None
+            and not self._charger_reports_session_energy
+        ):
             try:
-                meter_stop_kwh = float(meter_stop) / 1000.0
-            except Exception:
-                meter_stop_kwh = 0.0
-            try:
-                meter_start_kwh = float(
-                    self._metrics[(conn, csess.meter_start.value)].value or 0.0
+                session_kwh = int(meter_stop) / 1000.0 - float(
+                    self._metrics[ms_key].value
                 )
             except Exception:
-                meter_start_kwh = 0.0
-
-            session_kwh = max(0.0, meter_stop_kwh - meter_start_kwh)
+                session_kwh = 0.0
             self._metrics[(conn, csess.session_energy.value)].value = session_kwh
-            self._metrics[(conn, csess.session_energy.value)].unit = HA_ENERGY_UNIT
 
         for meas in [
             Measurand.current_import.value,
@@ -1203,7 +1115,10 @@ class ChargePoint(cp):
             Measurand.power_active_export.value,
             Measurand.power_reactive_export.value,
         ]:
-            self._metrics[(conn, meas)].value = 0
+            key = (conn, meas)
+            if key in self._metrics:
+                self._metrics[key].value = 0
+
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
             id_tag_info={om.status.value: AuthorizationStatus.accepted.value}

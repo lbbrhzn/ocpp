@@ -23,7 +23,46 @@ The `Charge point identity` shown above with a default of `charger` is a little 
 
 Measurands (according to OCPP terminology) are actually metrics provided by the charger.  Each charger supports a subset of the available metrics and for each one supported, a sensor entity is available in HA.  Some of these sensor entities will give erroneous readings whilst others give no readings at all.  Sensor entities not supported by the charger will show as `Unknown` if you try to create a sensor entity for them.  Below is a table of the metrics I've found useful for the Wallbox Pulsar Plus.  Tables for other chargers will follow as contributions come in from owners of each supported charger.
 
-OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices.md).
+OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices).
+
+For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices.
+
+## Understanding status
+
+Your charger exposes a connector status sensor:
+* Single-connector: `sensor.<charger_id>_status_connector`
+* Multi-connector: `sensor.<charger_id>_connector_<connector_number>_status_connector`
+
+For OCPP 1.6, the sensor can show these values:
+
+* **Available** – No EV is connected; the connector is free.
+* **Preparing** – EV is connected and/or authenticated but charging hasn’t started yet (handshake, cable lock, internal checks).
+* **Charging** – Energy is being delivered.
+* **SuspendedEV** – The EV has paused energy transfer (e.g., target SoC reached, schedule, thermal limit).
+* **SuspendedEVSE** – The charger has paused energy transfer (e.g., power limit, smart charging profile, grid signal).
+* **Finishing** – Charging has stopped, but the session isn’t fully closed yet (typically waiting for the cable to be unplugged).
+* **Reserved** – The connector is reserved (via ReserveNow); only the intended user/ID may start. This is not supported by the OCPP integration yet.
+* **Unavailable** – Intentionally set out of service (e.g., ChangeAvailability(Inoperative)) or temporarily not usable. (Entities remain available in Home Assistant.)
+* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details.
+
+Note
+In OCPP 1.6, `connectorId = 0` (station level) only uses Available, Unavailable, or Faulted.<br>
+In OCPP 2.0.1, connector status is simplified to Available / Occupied / Reserved / Unavailable / Faulted; “Preparing/Finishing” are reflected in TransactionEvent rather than as connector statuses.
+
+If your integration shows extra attributes on the connector status sensor like availability_change or availability_pending, they indicate that a status change (e.g., after ChangeAvailability) has been accepted or scheduled and will take effect once current conditions allow (e.g., after an active session ends).
+
+## Changing availability
+
+* **Availability (charger-level) switch**<br>
+  Sets the entire charger to `Unavailable` (station-level). All idle connectors switch to `Unavailable` immediately. Any connector with an ongoing session is marked as scheduled and will switch to `Unavailable` after the session ends.
+
+* **Availability (per-connector) switches**<br>
+  Set a specific connector to `Unavailable`. If that connector currently has an ongoing session, the change is scheduled and will take effect once the session ends.
+
+* **Charge Control switch**<br>
+  Turning off ends the ongoing charging session (remote stop). The connector typically transitions to `Finishing` and then back to its normal idle state once the cable is unplugged. Turning the switch on again resets the session metrics; the charger returns to its previous state (this does not force a new session to start).
+
+
 
 ## Useful Entities for Wallbox Pulsar Plus
 

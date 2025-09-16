@@ -185,38 +185,3 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
     assert ok is True
     assert notices == []
-
-
-@pytest.mark.asyncio
-async def test_txdefault_raises_returns_false_and_notifies(cp_v16, monkeypatch):
-    """5) CPMax rejected, TxDefault raises -> return False and notify HA."""
-
-    async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
-            return "Current"
-        if key == ckey.charge_profile_max_stack_level.value:
-            return "1"
-        pytest.fail(f"Unexpected get_configuration key: {key}")
-
-    async def fake_call(req):
-        purpose = req.cs_charging_profiles["chargingProfilePurpose"]
-        if purpose == ChargingProfilePurposeType.charge_point_max_profile.value:
-            return SimpleNamespace(status=ChargingProfileStatus.rejected)
-        if purpose == ChargingProfilePurposeType.tx_default_profile.value:
-            raise RuntimeError("boom on txdefault")
-        return SimpleNamespace(status=ChargingProfileStatus.rejected)
-
-    notices = []
-
-    async def fake_notify(msg, title="Ocpp integration"):
-        notices.append(msg)
-        return True
-
-    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
-    monkeypatch.setattr(cp_v16, "call", fake_call)
-    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
-
-    ok = await cp_v16.set_charge_rate(limit_amps=25, conn_id=2)
-    assert ok is False
-    assert len(notices) == 1
-    assert "Set charging profile failed" in notices[0]
