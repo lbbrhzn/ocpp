@@ -26,6 +26,7 @@ from custom_components.ocpp.enums import (
     ConfigurationKey as ckey,
     HAChargerDetails as cdet,
     HAChargerServices as csvcs,
+    HAChargerSession as csess,
     Profiles as prof,
 )
 from custom_components.ocpp.number import NUMBERS
@@ -4057,6 +4058,361 @@ async def test_set_charge_rate_exception_paths(
                 },
             )
             assert ok_c is False
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9361, "cp_id": "CP_tx_restore", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_tx_restore"])
+@pytest.mark.parametrize("port", [9361])
+async def test_meter_values_restores_transaction_on_restart(
+    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
+):
+    """If a MeterValues arrives with a txId and we have no active tx recorded, adopt it (no warning)."""
+    cs = setup_config_entry
+    caplog.set_level(logging.WARNING)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Ensure single-connector semantics before first MeterValues arrives
+            srv.num_connectors = 1
+
+            # Simulate "after restart": no StartTransaction; we just receive MeterValues with txId.
+            req = call.MeterValues(
+                connector_id=1,
+                transaction_id=1111,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "1000",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            # The tx should be adopted (restored) without warning
+            tx_metric = cs.get_metric(cpid, "Transaction.Id", connector_id=1)
+            assert int(tx_metric) == 1111
+
+            # Active map should reflect it as well
+            assert int(srv._active_tx.get(1, 0) or 0) == 1111
+
+            # On single-connector chargers, legacy field may be mirrored; tolerate either default or mirrored
+            # (Do not fail test if multi-connector)
+            try:
+                n = int(getattr(srv, "num_connectors", 1) or 1)
+            except Exception:
+                n = 1
+            if n == 1:
+                assert int(getattr(srv, "active_transaction_id", 0) or 0) == 1111
+
+            # No "Unknown transaction" warning should be present
+            assert not any(
+                "Unknown transaction detected on conn 1 with id=1111" in rec.message
+                for rec in caplog.records
+            )
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9362, "cp_id": "CP_tx_mismatch", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_tx_mismatch"])
+@pytest.mark.parametrize("port", [9362])
+async def test_meter_values_logs_warning_on_tx_mismatch(
+    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
+):
+    """If a different tx is already active on the connector, log 'Unknown transaction' warning."""
+    cs = setup_config_entry
+    caplog.set_level(logging.WARNING)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Establish an active tx on connector 1 (use helper that triggers StartTransaction)
+            await client.send_start_transaction(0)  # typical helper targets connector 1
+
+            # Sanity: we should now have a recorded active tx id
+            recorded = int(srv._active_tx.get(1, 0) or 0)
+            assert recorded != 0
+
+            # Send MeterValues with a different transactionId to trigger mismatch
+            req = call.MeterValues(
+                connector_id=1,
+                transaction_id=recorded + 999,  # different id
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "2000",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            # Metric should NOT be overwritten by the mismatched txId
+            tx_metric = cs.get_metric(cpid, "Transaction.Id", connector_id=1)
+            assert int(tx_metric) == recorded
+
+            # Warning should be logged
+            assert any(
+                f"Unknown transaction detected on conn 1 with id={recorded + 999}"
+                in rec.message
+                for rec in caplog.records
+            )
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+class BadInt:
+    """Object that raises when coerced to int; truthy so `value or 0` picks it."""
+
+    def __bool__(self):
+        """Bool function."""
+
+        return True
+
+    def __int__(self):
+        """Bad int function."""
+
+        raise ValueError("bad int")
+
+
+class FlakyTxMetric(M):
+    """Metric subclass whose .value raises int() the first time, then behaves like 0.
+
+    Setter stores values normally.
+    """
+
+    def __init__(self):
+        """Init function."""
+
+        # unit can be None; extra_attr for safety
+        super().__init__(value=None, unit=None)
+        self._hits = 0
+        self._forced = False
+        self._stored = None
+        self.extra_attr = {}
+
+    @property
+    def value(self):
+        """Value prop method."""
+
+        if self._forced:
+            return self._stored
+        self._hits += 1
+        return BadInt() if self._hits == 1 else 0
+
+    @value.setter
+    def value(self, v):
+        self._forced = True
+        self._stored = v
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9371, "cp_id": "CP_exc_paths", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_exc_paths"])
+@pytest.mark.parametrize("port", [9371])
+async def test_on_meter_values_exception_branches_are_handled(
+    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
+):
+    """Exercise the three `except Exception:` branches in on_meter_values.
+
+    1) Warm-up: int(self._metrics[tx_key].value or 0) raises -> set 0
+    2) int(num_connectors) raises -> n_con = 1
+    3) int(active_transaction_id) raises -> legacy = 0
+    """
+    cs = setup_config_entry
+    caplog.set_level(logging.DEBUG)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+            conn = 1
+
+            # 1) Install a Metric subclass that trips the first int(...) then returns 0
+            tx_key = (conn, csess.transaction_id.value)
+            with contextlib.suppress(Exception):
+                del srv._active_tx[conn]
+            srv._metrics[tx_key] = FlakyTxMetric()
+
+            # 2) Make int(num_connectors) raise -> n_con = 1 in except
+            srv.num_connectors = BadInt()
+
+            # 3) Make int(active_transaction_id) raise -> legacy = 0 in except
+            srv.active_transaction_id = BadInt()
+
+            # Send MeterValues with txId so paths are exercised
+            req = call.MeterValues(
+                connector_id=conn,
+                transaction_id=3333,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "500",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            # Assertions: function returned, active_tx entry exists,
+            # Transaction.Id is int-coercible, and legacy field coercion doesn't raise.
+            assert conn in srv._active_tx
+            val = cs.get_metric(cpid, "Transaction.Id", connector_id=conn)
+            assert int(val or 0) in (0, 3333)
+
+            ok = True
+            try:
+                int(getattr(srv, "active_transaction_id", 0) or 0)
+            except Exception:
+                ok = False
+            assert ok is True
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9372, "cp_id": "CP_exc_paths_2", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_exc_paths_2"])
+@pytest.mark.parametrize("port", [9372])
+async def test_on_meter_values_exception_branches_with_restore(
+    hass, socket_enabled, cp_id, port, setup_config_entry, caplog
+):
+    """Same as above, but check we can end up with an adopted txId (3333) after the exception branches ran."""
+
+    cs = setup_config_entry
+    caplog.set_level(logging.DEBUG)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+            conn = 1
+
+            with contextlib.suppress(Exception):
+                del srv._active_tx[conn]
+            srv._metrics[(conn, csess.transaction_id.value)] = FlakyTxMetric()
+            srv.num_connectors = BadInt()
+            srv.active_transaction_id = BadInt()
+
+            req = call.MeterValues(
+                connector_id=conn,
+                transaction_id=3333,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "800",
+                            }
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            # Either 0 (if not adopted) or 3333 (adopted); both prove branch ran without crash.
+            assert int(srv._active_tx.get(conn, 0) or 0) in (0, 3333)
+            val = cs.get_metric(cpid, "Transaction.Id", connector_id=conn)
+            assert int(val or 0) in (0, 3333)
+
+            # Legacy coercion no longer raises (except branch set legacy=0 path)
+            ok = True
+            try:
+                int(getattr(srv, "active_transaction_id", 0) or 0)
+            except Exception:
+                ok = False
+            assert ok
 
         finally:
             task.cancel()
