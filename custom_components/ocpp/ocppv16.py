@@ -849,7 +849,7 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls (multi-connector aware)."""
 
-        transaction_id: int = kwargs.get(om.transaction_id.name, 0)
+        transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
 
         # Restore missing per-connector meter_start / active_transaction_id from HA if possible.
         ms_key = (connector_id, csess.meter_start.value)
@@ -876,7 +876,7 @@ class ChargePoint(cp):
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id.value, connector_id)
             if value is None:
-                value = kwargs.get(om.transaction_id.name)
+                value = transaction_id if transaction_id else None
             else:
                 try:
                     value = int(value)
@@ -892,17 +892,51 @@ class ChargePoint(cp):
             # Track active tx per connector
             self._active_tx[connector_id] = value
 
-        active_tx = self._active_tx.get(connector_id, 0) or 0
+        if connector_id not in self._active_tx:
+            try:
+                self._active_tx[connector_id] = int(self._metrics[tx_key].value or 0)
+            except Exception:
+                self._active_tx[connector_id] = 0
+
+        recorded_tx = int(self._metrics[tx_key].value or 0)
+        active_tx = int(self._active_tx.get(connector_id, 0) or 0)
+
+        # Self-heal after restart: adopt incoming txId if we have none recorded yet
+        if transaction_id and (recorded_tx == 0 and active_tx == 0):
+            self._metrics[tx_key].value = transaction_id
+            self._active_tx[connector_id] = transaction_id
+            active_tx = transaction_id
+            recorded_tx = transaction_id
+            _LOGGER.debug(
+                "Restored transactionId=%s on conn %s from MeterValues.",
+                transaction_id,
+                connector_id,
+            )
+
+        # Keep legacy field synced for single-connector chargers,
+        # even if self-heal did not run (e.g., values were already restored).
+        try:
+            n_con = int(getattr(self, "num_connectors", 1) or 1)
+        except Exception:
+            n_con = 1
+        if n_con == 1:
+            try:
+                legacy = int(getattr(self, "active_transaction_id", 0) or 0)
+            except Exception:
+                legacy = 0
+            if legacy != int(active_tx or 0):
+                self.active_transaction_id = int(active_tx or 0)
 
         transaction_matches: bool = False
         # Match is also false if no transaction is in progress, i.e. active_tx==transaction_id==0
         if transaction_id == active_tx and transaction_id != 0:
             transaction_matches = True
-        elif transaction_id != 0 and transaction_id is not None:
+        elif transaction_id != 0 and active_tx != 0 and transaction_id != active_tx:
             _LOGGER.warning(
-                "Unknown transaction detected on conn %s with id=%i",
+                "Unknown transaction detected on conn %s with id=%i (expected %s)",
                 connector_id,
                 transaction_id,
+                active_tx,
             )
 
         meter_values: list[list[MeasurandValue]] = []
