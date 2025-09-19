@@ -571,6 +571,18 @@ class ChargePoint(cp):
         try:
             status = getattr(resp, "status", None)
 
+            # Fallback: some single-connector chargers reject station-level (connectorId=0).
+            if status == AvailabilityStatus.rejected and conn == 0:
+                try:
+                    n = int(getattr(self, "num_connectors", 1) or 1)
+                except Exception:
+                    n = 1
+                if n == 1:
+                    _LOGGER.debug(
+                        "Station-level ChangeAvailability rejected; retrying on connector 1."
+                    )
+                    return await self.set_availability(state=state, connector_id=1)
+
             pending_key = "availability_pending"
             target_str = "Operative" if state else "Inoperative"
             scope_str = "station" if conn == 0 else "connector"
@@ -586,6 +598,7 @@ class ChargePoint(cp):
                 }
                 if metric is not None:
                     metric.extra_attr[pending_key] = info
+
                 self.hass.async_create_task(self.update(self.settings.cpid))
                 return True
 
