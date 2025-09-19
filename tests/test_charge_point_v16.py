@@ -27,6 +27,7 @@ from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
     HAChargerServices as csvcs,
     HAChargerSession as csess,
+    HAChargerStatuses as cstat,
     Profiles as prof,
 )
 from custom_components.ocpp.number import NUMBERS
@@ -4413,6 +4414,470 @@ async def test_on_meter_values_exception_branches_with_restore(
             except Exception:
                 ok = False
             assert ok
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9381, "cp_id": "CP_avail_reject_fallback", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_avail_reject_fallback"])
+@pytest.mark.parametrize("port", [9381])
+async def test_change_availability_conn0_rejected_falls_back_to_conn1(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test if ChangeAvailability(0, ...) is Rejected on a single-connector charger.
+
+    The implementation should retry with connectorId=1 and return True on Accepted.
+    """
+    cs = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            srv = cs.charge_points[cp_id]
+            # Ensure single-connector semantics so fallback path is eligible
+            srv.num_connectors = 1
+
+            calls = []
+
+            async def fake_call(req):
+                """Reject station-level request (conn=0), accept connector 1."""
+                calls.append(req)
+                if isinstance(req, call.ChangeAvailability):
+                    if getattr(req, "connector_id", None) == 0:
+                        return SimpleNamespace(status=AvailabilityStatus.rejected)
+                    if getattr(req, "connector_id", None) == 1:
+                        return SimpleNamespace(status=AvailabilityStatus.accepted)
+                # Default: don't break other calls
+                return SimpleNamespace()
+
+            # Intercept outgoing RPC calls
+            monkeypatch.setattr(srv, "call", fake_call)
+
+            # Act: try to set station Unavailable via connectorId=0
+            ok = await srv.set_availability(state=False, connector_id=0)
+            assert ok is True, "Fallback to connector 1 should make the call succeed"
+
+            # Verify call sequence: first on 0 (Rejected), then on 1 (Accepted)
+            conn_ids = [
+                getattr(c, "connector_id", None)
+                for c in calls
+                if isinstance(c, call.ChangeAvailability)
+            ]
+            assert conn_ids[:2] == [0, 1], f"Unexpected call order/targets: {conn_ids}"
+
+            # Optionally assert that no pending marker was set for this Accepted outcome
+            m = srv._metrics.get((1, cstat.status_connector.value))
+            if m is not None:
+                assert "availability_pending" not in getattr(m, "extra_attr", {})
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9391, "cp_id": "CP_pf_avg", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_pf_avg"])
+@pytest.mark.parametrize("port", [9391])
+async def test_process_phases_power_factor_averages_l123(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Power.Factor with phases L1/L2/L3 is averaged (not summed)."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # L1/L2/L3 values: 0.95, 0.97, 0.93 -> expected avg = 0.95
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.95",
+                                "phase": "L1",
+                            },
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.97",
+                                "phase": "L2",
+                            },
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.93",
+                                "phase": "L3",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Power.Factor", connector_id=1)
+            assert v == pytest.approx((0.95 + 0.97 + 0.93) / 3, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9392, "cp_id": "CP_pf_single", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_pf_single"])
+@pytest.mark.parametrize("port", [9392])
+async def test_process_phases_power_factor_single_phase_passthrough(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Power.Factor with only a single phase (e.g., L1-L2) is passed through."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Only one phase (line-to-line), so it should hit the single-pass branch.
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.88",
+                                "phase": "L1-L2",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Power.Factor", connector_id=1)
+            assert v == pytest.approx(0.88, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9393, "cp_id": "CP_power_sum_kW", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_power_sum_kW"])
+@pytest.mark.parametrize("port", [9393])
+async def test_process_phases_power_active_import_sum_and_convert_to_kw(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Power.Active.Import over phases is summed and unit W -> kW."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Three phase powers in W: 1200W + 800W + 0W -> 2000W -> 2.0 kW
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "1200",
+                                "phase": "L1",
+                            },
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "800",
+                                "phase": "L2",
+                            },
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "0",
+                                "phase": "L3",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Power.Active.Import", connector_id=1)
+            u = cs.get_unit(cpid, "Power.Active.Import", connector_id=1)
+            assert v == pytest.approx(2.0, rel=1e-6)  # 2000 W -> 2.0 kW
+            assert u == "kW"
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9394, "cp_id": "CP_energy_sum_kwh", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_energy_sum_kwh"])
+@pytest.mark.parametrize("port", [9394])
+async def test_process_phases_energy_sum_and_convert_to_kwh(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Energy.Active.Import.Register over phases is summed and unit Wh -> kWh."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Three phase energies in Wh: 1000 + 500 + 0 -> 1500 Wh -> 1.5 kWh
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "1000",
+                                "phase": "L1",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "500",
+                                "phase": "L2",
+                            },
+                            {
+                                "measurand": "Energy.Active.Import.Register",
+                                "context": "Sample.Periodic",
+                                "unit": "Wh",
+                                "value": "0",
+                                "phase": "L3",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+            u = cs.get_unit(cpid, "Energy.Active.Import.Register", connector_id=1)
+            assert v == pytest.approx(1.5, rel=1e-6)  # 1500 Wh -> 1.5 kWh
+            assert u == "kWh"
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9395, "cp_id": "CP_pf_avg_ltn", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_pf_avg_ltn"])
+@pytest.mark.parametrize("port", [9395])
+async def test_process_phases_power_factor_avg_line_to_neutral(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Power.Factor with L1-N/L2-N/L3-N must use average-of-nonzero (hits line 779)."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # Include a zero to ensure "average of non-zero" behavior
+            # Non-zero values: 0.96 and 0.90 -> expected avg = (0.96 + 0.90) / 2 = 0.93
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.96",
+                                "phase": "L1-N",
+                            },
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.00",
+                                "phase": "L2-N",
+                            },
+                            {
+                                "measurand": "Power.Factor",
+                                "context": "Sample.Periodic",
+                                "value": "0.90",
+                                "phase": "L3-N",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Power.Factor", connector_id=1)
+            assert v == pytest.approx((0.96 + 0.90) / 2.0, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9396, "cp_id": "CP_power_sum_ltn", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_power_sum_ltn"])
+@pytest.mark.parametrize("port", [9396])
+async def test_process_phases_power_active_import_sum_line_to_neutral_w_to_kw(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Power.Active.Import with L1-N/L2-N/L3-N is summed and W→kW (hits lines 793–794 and 806)."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # 900 W + 600 W + 500 W = 2000 W -> 2.0 kW expected
+            req = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "900",
+                                "phase": "L1-N",
+                            },
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "600",
+                                "phase": "L2-N",
+                            },
+                            {
+                                "measurand": "Power.Active.Import",
+                                "context": "Sample.Periodic",
+                                "unit": "W",
+                                "value": "500",
+                                "phase": "L3-N",
+                            },
+                        ],
+                    }
+                ],
+            )
+            await client.call(req)
+
+            v = cs.get_metric(cpid, "Power.Active.Import", connector_id=1)
+            u = cs.get_unit(cpid, "Power.Active.Import", connector_id=1)
+            assert v == pytest.approx(2.0, rel=1e-6)  # 2000 W -> 2.0 kW
+            assert u == "kW"
 
         finally:
             task.cancel()
