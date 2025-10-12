@@ -198,13 +198,22 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         await super().async_added_to_hass()
         if restored := await self.async_get_last_number_data():
             self._attr_native_value = restored.native_value
-        async_dispatcher_connect(
-            self._hass, DATA_UPDATED, self._schedule_immediate_update
-        )
 
-    @callback
-    def _schedule_immediate_update(self):
-        self.async_schedule_update_ha_state(True)
+        @callback
+        def _maybe_update(*args):
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_schedule_update_ha_state(True)
+
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
+        )
 
     @property
     def available(self) -> bool:
