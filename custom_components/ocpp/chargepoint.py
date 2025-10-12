@@ -833,7 +833,7 @@ class ChargePoint(cp):
                 meas = sv.measurand if sv.measurand is not None else DEFAULT_MEASURAND
                 if meas != DEFAULT_MEASURAND:
                     continue
-                ctx = sv.context
+                ctx = sv.context or ReadingContext.sample_periodic.value
                 # Always ignore Transaction.Begin for EAIR (prevents resets to 0)
                 if ctx == ReadingContext.transaction_begin.value:
                     continue
@@ -845,7 +845,7 @@ class ChargePoint(cp):
                                 sv.value,
                                 sv.phase,
                                 sv.unit,
-                                sv.context,
+                                ctx,
                                 sv.location,
                             )
                         )
@@ -876,7 +876,7 @@ class ChargePoint(cp):
                 unit = sampled_value.unit
                 phase = sampled_value.phase
                 location = sampled_value.location
-                context = sampled_value.context
+                context = sampled_value.context or ReadingContext.sample_periodic.value
 
                 # Backwards compatibility
                 if sampled_value.measurand is None:
@@ -934,10 +934,9 @@ class ChargePoint(cp):
                         self._metrics[(target_cid, measurand)].extra_attr[
                             om.location.value
                         ] = location
-                    if context is not None:
-                        self._metrics[(target_cid, measurand)].extra_attr[
-                            om.context.value
-                        ] = context
+                    self._metrics[(target_cid, measurand)].extra_attr[
+                        om.context.value
+                    ] = context
 
                     # Session handling, only for EAIR during a transaction (per-connector)
                     if is_transaction and is_eair:
