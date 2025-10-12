@@ -11,7 +11,9 @@ from homeassistant.components.button import (
     ButtonEntity,
     ButtonEntityDescription,
 )
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .api import CentralSystem
@@ -19,6 +21,7 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_NUM_CONNECTORS,
+    DATA_UPDATED,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
 )
@@ -175,3 +178,28 @@ class ChargePointButton(ButtonEntity):
             self.entity_description.press_action,
             connector_id=self._op_connector_id,
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity added to hass."""
+        await super().async_added_to_hass()
+
+        @callback
+        def _maybe_update(*args):
+            """Handle dispatcher updates."""
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_schedule_update_ha_state(True)
+
+        # Register dispatcher listener
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
+        )
+
+        # Ensure button is shown as available after reload
+        self.async_schedule_update_ha_state(True)

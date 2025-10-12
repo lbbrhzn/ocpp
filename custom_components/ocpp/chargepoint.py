@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
-from homeassistant.helpers import device_registry, entity_component, entity_registry
+from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
@@ -606,15 +606,15 @@ class ChargePoint(cp):
         """Update sensors values in HA (charger + connector child devices)."""
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
+
         identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
         root_dev = dr.async_get_device(identifiers)
         if root_dev is None:
             return
 
-        to_visit = [root_dev.id]
-        visited = set()
-        updated_entities = 0
-        found_children = 0
+        to_visit: list[str] = [root_dev.id]
+        visited: set[str] = set()
+        active_entities: set[str] = set()
 
         while to_visit:
             dev_id = to_visit.pop(0)
@@ -622,18 +622,19 @@ class ChargePoint(cp):
                 continue
             visited.add(dev_id)
 
+            # Collect enabled and currently loaded entities for this device
             for ent in entity_registry.async_entries_for_device(er, dev_id):
-                self.hass.async_create_task(
-                    entity_component.async_update_entity(self.hass, ent.entity_id)
-                )
-                updated_entities += 1
+                if getattr(ent, "disabled", False) or getattr(ent, "disabled_by", None):
+                    continue
+                if self.hass.states.get(ent.entity_id) is None:
+                    continue
+                active_entities.add(ent.entity_id)
 
             for dev in dr.devices.values():
                 if dev.via_device_id == dev_id and dev.id not in visited:
-                    found_children += 1
                     to_visit.append(dev.id)
 
-        async_dispatcher_send(self.hass, DATA_UPDATED)
+        async_dispatcher_send(self.hass, DATA_UPDATED, active_entities)
 
     def get_authorization_status(self, id_tag):
         """Get the authorization status for an id_tag."""
