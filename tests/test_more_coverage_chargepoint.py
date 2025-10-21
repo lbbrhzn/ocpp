@@ -414,3 +414,102 @@ async def test_process_measurands_defaults_and_session_energy_v2x(hass, monkeypa
     esess2 = srv._metrics[(1, "Energy.Session")]
     assert pytest.approx(eair2.value, rel=1e-6) == 12.445
     assert pytest.approx(esess2.value or 0.0, rel=1e-6) == 0.1
+
+
+@pytest.mark.timeout(5)
+async def test_session_and_lifetime_eair_distinction(hass):
+    """Ensure correct EAIR handling for session vs lifetime readings.
+
+    When the charger reports session energy directly in EAIR:
+    - an in-transaction EAIR reading (5000 Wh => 5.0 kWh) updates Energy.Session but NOT the lifetime EAIR metric,
+    - a separate non-transaction EAIR reading (123450 Wh => 123.45 kWh) updates the lifetime EAIR metric.
+
+    When the charger does NOT report session energy in EAIR:
+    - both an in-transaction EAIR reading and a non-transaction EAIR reading write the lifetime EAIR metric.
+    """
+
+    # ------ First scenario: charger reports session energy ------
+    # Minimal CP instance not bound to a real socket.
+    version = SimpleNamespace(value="1.6")
+    fake_hass = SimpleNamespace(
+        async_create_task=lambda c: asyncio.create_task(c),
+        helpers=SimpleNamespace(
+            entity_component=SimpleNamespace(async_update_entity=lambda eid: None)
+        ),
+    )
+    fake_entry = SimpleNamespace(entry_id="dummy")
+    fake_central = SimpleNamespace(
+        websocket_ping_interval=0,
+        websocket_ping_timeout=0,
+        websocket_ping_tries=0,
+    )
+    fake_settings = SimpleNamespace(cpid="cpid_dummy")
+    fake_conn = SimpleNamespace(state=State.CLOSED)
+
+    srv = BaseCP(
+        "cp_dummy",
+        fake_conn,
+        version,
+        fake_hass,
+        fake_entry,
+        fake_central,
+        fake_settings,
+    )
+    srv._ocpp_version = "1.6"
+
+    # Simulate charger that reports session energy directly (meter_start == 0).
+    srv._charger_reports_session_energy = True
+
+    # 1) In-transaction EAIR reading (5000 Wh -> 5.0 kWh).
+    tx_samples = [[MeasurandValue(None, 5000.0, None, None, None, None)]]
+    srv.process_measurands(tx_samples, is_transaction=True, connector_id=1)
+
+    # Session must be updated to 5.0 kWh, main EAIR must NOT be overwritten by this call.
+    sess = srv._metrics[(1, "Energy.Session")]
+    main_after_tx = srv._metrics[(1, "Energy.Active.Import.Register")].value
+    assert pytest.approx(sess.value, rel=1e-6) == 5.0
+    # main might be None or unchanged; ensure it was NOT set to 5.0 by the tx call
+    assert pytest.approx(main_after_tx, rel=1e-6) != 5.0
+
+    # 2) Non-transaction EAIR reading representing lifetime meter (123450 Wh -> 123.45 kWh).
+    life_samples = [[MeasurandValue(None, 123450.0, None, None, None, None)]]
+    srv.process_measurands(life_samples, is_transaction=False, connector_id=1)
+
+    # Now the lifetime EAIR metric must equal 123.45 kWh, and session must still be 5.0 kWh.
+    main = srv._metrics[(1, "Energy.Active.Import.Register")]
+    sess = srv._metrics[(1, "Energy.Session")]
+
+    assert pytest.approx(main.value, rel=1e-6) == 123.45
+    assert main.unit == "kWh"
+    assert pytest.approx(sess.value, rel=1e-6) == 5.0
+    assert sess.unit == "kWh"
+
+    # ------ Second scenario: charger does NOT report session energy ------
+    # New CP instance (clean metrics) to test the other branch.
+    srv2 = BaseCP(
+        "cp_dummy2",
+        fake_conn,
+        version,
+        fake_hass,
+        fake_entry,
+        fake_central,
+        fake_settings,
+    )
+    srv2._ocpp_version = "1.6"
+    srv2._charger_reports_session_energy = False
+
+    # 1) In-transaction EAIR reading (5000 Wh -> 5.0 kWh) should write lifetime EAIR metric.
+    tx_samples2 = [[MeasurandValue(None, 5000.0, None, None, None, None)]]
+    srv2.process_measurands(tx_samples2, is_transaction=True, connector_id=1)
+
+    main_after_tx2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
+    # Because charger does NOT report session energy, main should be written with 5.0 kWh.
+    assert pytest.approx(main_after_tx2, rel=1e-6) == 5.0
+
+    # 2) Non-transaction EAIR reading representing lifetime meter (123450 Wh -> 123.45 kWh).
+    life_samples2 = [[MeasurandValue(None, 123450.0, None, None, None, None)]]
+    srv2.process_measurands(life_samples2, is_transaction=False, connector_id=1)
+
+    main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
+    # Lifetime EAIR should be updated to 123.45 kWh.
+    assert pytest.approx(main_after_life2, rel=1e-6) == 123.45

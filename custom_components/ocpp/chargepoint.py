@@ -928,16 +928,32 @@ class ChargePoint(cp):
                     if is_eair and idx != best_eair_idx:
                         continue
 
-                    self._metrics[(target_cid, measurand)].value = value
-                    self._metrics[(target_cid, measurand)].unit = unit
+                    # Determine whether to skip writing EAIR to the main metric:
+                    # - Skip only if this is an EAIR reading,
+                    # - AND the charger reports session energy (meter_start == 0),
+                    # - AND the reading belongs to an active transaction.
+                    #
+                    # Reason: in this situation, the EAIR value represents **session energy** for the current transaction,
+                    # not the lifetime total meter. Writing it to the main metric would overwrite the true cumulative
+                    # energy with a session-only value. For all other cases (non-EAIR readings or non-transaction readings),
+                    # it is safe to write the metric normally.
+                    skip_eair = (
+                        is_eair
+                        and self._charger_reports_session_energy
+                        and is_transaction
+                    )
 
-                    if location is not None:
+                    if not skip_eair:
+                        # Normal write
+                        self._metrics[(target_cid, measurand)].value = value
+                        self._metrics[(target_cid, measurand)].unit = unit
+                        if location is not None:
+                            self._metrics[(target_cid, measurand)].extra_attr[
+                                om.location.value
+                            ] = location
                         self._metrics[(target_cid, measurand)].extra_attr[
-                            om.location.value
-                        ] = location
-                    self._metrics[(target_cid, measurand)].extra_attr[
-                        om.context.value
-                    ] = context
+                            om.context.value
+                        ] = context
 
                     # Session handling, only for EAIR during a transaction (per-connector)
                     if is_transaction and is_eair:
