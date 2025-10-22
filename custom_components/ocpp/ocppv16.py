@@ -863,10 +863,12 @@ class ChargePoint(cp):
         """Request handler for MeterValues Calls (multi-connector aware)."""
 
         transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
+        tx_has_id: bool = transaction_id not in (None, 0)
 
         # Restore missing per-connector meter_start / active_transaction_id from HA if possible.
         ms_key = (connector_id, csess.meter_start.value)
         tx_key = (connector_id, csess.transaction_id.value)
+        session_key = (connector_id, csess.session_time.value)
 
         if self._metrics[ms_key].value is None:
             value = self.get_ha_metric(csess.meter_start.value, connector_id)
@@ -974,15 +976,15 @@ class ChargePoint(cp):
 
         self.process_measurands(meter_values, transaction_matches, connector_id)
 
-        if transaction_matches:
+        if tx_has_id and transaction_matches:
             try:
                 tx_start_epoch = float(self._metrics[tx_key].value)
             except (TypeError, ValueError):
                 tx_start_epoch = time.time()
-            self._metrics[(connector_id, csess.session_time.value)].value = round(
-                (int(time.time()) - tx_start_epoch) / 60
+            self._metrics[session_key].value = round(
+                (time.time() - tx_start_epoch) / 60
             )
-            self._metrics[(connector_id, csess.session_time.value)].unit = "min"
+            self._metrics[session_key].unit = UnitOfTime.MINUTES
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.MeterValues()
