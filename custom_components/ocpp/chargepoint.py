@@ -1008,16 +1008,24 @@ class ChargePoint(cp):
         base = self.settings.cpid.lower()
         meas_slug = measurand.lower().replace(".", "_")
 
+        # Build list of possible sensor entity IDs.
+        # Include connector-specific ID if applicable, then the generic one as fallback.
         candidates: list[str] = []
         if connector_id and connector_id > 0:
             candidates.append(f"sensor.{base}_connector_{connector_id}_{meas_slug}")
-        else:
-            candidates.append(f"sensor.{base}_{meas_slug}")
+        candidates.append(f"sensor.{base}_{meas_slug}")
 
+        # Return the first valid state found among candidates.
         for entity_id in candidates:
-            st = self.hass.states.get(entity_id)
+            try:
+                st = self.hass.states.get(entity_id)
+            except Exception as e:
+                _LOGGER.debug("Error getting entity %s from HA: %s", entity_id, e)
+                st = None
+
             if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN, None):
                 return st.state
+
         return None
 
     async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
