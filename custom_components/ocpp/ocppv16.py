@@ -58,8 +58,7 @@ from .const import (
     DOMAIN,
 )
 
-_LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
+_LOGGER = logging.getLogger(__name__)
 
 
 class ChargePoint(cp):
@@ -259,12 +258,20 @@ class ChargePoint(cp):
 
     async def set_charge_rate(
         self,
-        limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_amps: float = None,
+        limit_watts: float = None,
         conn_id: int = 0,
         profile: dict | None = None,
-    ):
+    ):        
         """Set a charging profile with defined limit."""
+        if limit_amps is None and limit_watts is None:
+            limit_amps = 32
+            limit_watts = 7400
+        elif limit_amps is not None and limit_watts is None:
+            limit_watts = 230 * limit_amps
+        elif limit_watts is not None and limit_amps is None:
+            limit_amps = limit_watts / 230
+        
         if profile is not None:  # assumes advanced user and correct profile format
             req = call.SetChargingProfile(
                 connector_id=conn_id, cs_charging_profiles=profile

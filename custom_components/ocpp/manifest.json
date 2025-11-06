@@ -1,20 +1,20 @@
 {
-	"domain": "ocpp",
-	"name": "Open Charge Point Protocol (OCPP)",
-	"after_dependencies": [
-		"persistent_notification"
-	],
-	"codeowners": [
-		"@lbbrhzn",
-		"@drc38"
-	],
-	"config_flow": true,
-	"documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
-	"iot_class": "local_push",
-	"issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
-	"requirements": [
-		"ocpp>=2.0.0",
-		"websockets>=14.1"
-	],
-	"version": "0.8.0"
+    "after_dependencies": [
+        "persistent_notification"
+    ],
+    "codeowners": [
+        "@lbbrhzn",
+        "@drc38"
+    ],
+    "config_flow": true,
+    "documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
+    "domain": "ocpp",
+    "iot_class": "local_push",
+    "issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
+    "name": "Open Charge Point Protocol (OCPP)",
+    "requirements": [
+        "ocpp>=2.0.0",
+        "websockets>=14.1"
+    ],
+    "version": "v0.8.4"
 }

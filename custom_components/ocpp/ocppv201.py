@@ -58,8 +58,7 @@ from .const import (
     HA_ENERGY_UNIT,
 )
 
-_LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
+_LOGGER = logging.getLogger(__name__)
 
 
 class InventoryReport:
@@ -228,10 +227,12 @@ class ChargePoint(cp):
     async def set_charge_rate(
         self,
         limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_watts: int = 5021,
         conn_id: int = 0,
         profile: dict | None = None,
     ):
+        _LOGGER.debug("Setting V2.1 charging profile with limits device info %s A / %s W", limit_amps, limit_watts)
+        
         """Set a charging profile with defined limit."""
         req: call.SetChargingProfile
         if profile:
