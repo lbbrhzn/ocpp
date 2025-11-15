@@ -7,7 +7,7 @@ import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import UnitOfTime
+from homeassistant.const import UnitOfTime, STATE_UNAVAILABLE
 import voluptuous as vol
 from websockets.asyncio.server import ServerConnection
 
@@ -872,6 +872,13 @@ class ChargePoint(cp):
 
         if self._metrics[ms_key].value is None:
             value = self.get_ha_metric(csess.meter_start.value, connector_id)
+            if value and value == STATE_UNAVAILABLE:
+                _LOGGER.debug(
+                    "Charger %s is unavailable — skipping received MeterValues processing.",
+                    self.settings.cpid,
+                )
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return call_result.MeterValues()
             if value is None:
                 m = self._metrics.get((connector_id, DEFAULT_MEASURAND))
                 value = m.value if m is not None else None
@@ -890,6 +897,13 @@ class ChargePoint(cp):
 
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id.value, connector_id)
+            if value and value == STATE_UNAVAILABLE:
+                _LOGGER.debug(
+                    "Charger %s is unavailable — skipping received MeterValues processing.",
+                    self.settings.cpid,
+                )
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return call_result.MeterValues()
             if value is None:
                 value = transaction_id if transaction_id else None
             else:
