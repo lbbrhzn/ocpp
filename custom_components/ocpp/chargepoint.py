@@ -688,7 +688,9 @@ class ChargePoint(cp):
 
         def average_of_nonzero(values: list[float]) -> float:
             """Average only non-zero values; return 0.0 if all are zero or list is empty."""
-            nonzero = [v for v in values if v != 0.0]
+            # Treat values whose absolute magnitude is below EPS as zero to be tolerant of near‑zero noise.
+            EPS = 1e-2
+            nonzero = [v for v in values if abs(v) > EPS]
             return (sum(nonzero) / len(nonzero)) if nonzero else 0.0
 
         measurand_data: dict[str, dict[str, float]] = {}
