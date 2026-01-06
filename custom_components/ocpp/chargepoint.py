@@ -749,15 +749,29 @@ class ChargePoint(cp):
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0.0) for phase in line_to_neutral_phases]
                     )
+                    # add per phase voltages as metric_L1, metric_L2, metric_L3
+                    for phase in line_to_neutral_phases:
+                        phase_value = phase_info.get(phase, 0.0)
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].value = phase_value
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].unit = phase_info.get(om.unit.value)
                 elif not phase_info.keys().isdisjoint(line_to_line_phases):
                     # Line to line voltages are averaged and converted to line to neutral
                     metric_value = average_of_nonzero(
                         [phase_info.get(phase, 0.0) for phase in line_to_line_phases]
                     ) / sqrt(3)
+                    for phase in line_to_line_phases:
+                        phase_value = phase_info.get(phase, 0.0)
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].value = phase_value
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].unit = phase_info.get(om.unit.value)
                 elif not phase_info.keys().isdisjoint(line_phases_all):
                     # Workaround for chargers that don't follow engineering convention
                     # Assumes voltages are line to neutral
                     metric_value = _avg_l123(phase_info)
+                    for phase in line_phases_all:
+                        phase_value = phase_info.get(phase, 0.0)
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].value = phase_value
+                        self._metrics[(target_cid, f"{metric}.{phase.upper()}")].unit = phase_info.get(om.unit.value)
+
 
             else:
                 is_current = mname.lower().startswith("current")
@@ -765,6 +779,11 @@ class ChargePoint(cp):
                     # Current.* shown per phase -> avg of L1/L2/L3, ignore N
                     if not phase_info.keys().isdisjoint(phases_l123):
                         metric_value = _avg_l123(phase_info)
+                        # Write individual phase currents as metric_L1, metric_L2, metric_L3
+                        for phase in phases_l123:
+                            phase_value = phase_info.get(phase, 0.0)
+                            self._metrics[(target_cid, f"{metric}.{phase.upper()}")].value = phase_value
+                            self._metrics[(target_cid, f"{metric}.{phase.upper()}")].unit = phase_info.get(om.unit.value)
                     elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
                         # Workaround for some chargers that erroneously use line to neutral for current
                         metric_value = average_of_nonzero(
@@ -773,6 +792,10 @@ class ChargePoint(cp):
                                 for phase in line_to_neutral_phases
                             ]
                         )
+                        for phase in line_to_neutral_phases:
+                            phase_value = phase_info.get(phase, 0.0)
+                            self._metrics[(target_cid, f"{metric}.{phase.upper()}")].value = phase_value
+                            self._metrics[(target_cid, f"{metric}.{phase.upper()}")].unit = phase_info.get(om.unit.value)
 
                 # Special-case: Power.Factor must be averaged, never summed
                 elif metric == Measurand.power_factor.value:
