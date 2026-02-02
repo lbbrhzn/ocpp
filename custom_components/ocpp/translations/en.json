@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "OCPP Central System Configuration",
-                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+                "description": "If you need help with the configuration have a look [here]({docs_url})",
                 "data": {
                     "host": "Central system host address",
                     "port": "Central system port number",
