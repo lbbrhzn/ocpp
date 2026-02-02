@@ -132,7 +132,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_CS_DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=STEP_USER_CS_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
     async def async_step_integration_discovery(
@@ -184,7 +187,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_measurands()
 
         return self.async_show_form(
-            step_id="cp_user", data_schema=STEP_USER_CP_DATA_SCHEMA, errors=errors
+            step_id="cp_user",
+            data_schema=STEP_USER_CP_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
     async def async_step_measurands(self, user_input=None):
