@@ -79,11 +79,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
 
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_CPID, default=DEFAULT_CPID): vol.All(
-            str,
-            vol.Lower,
-            lambda v: v.replace(" ", "_"),
-        ),
+        vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
             CONF_MONITORED_VARIABLES_AUTOCONFIG,
