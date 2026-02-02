@@ -61,7 +61,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SSL, default=DEFAULT_SSL): bool,
         vol.Required(CONF_SSL_CERTFILE_PATH, default=DEFAULT_SSL_CERTFILE_PATH): str,
         vol.Required(CONF_SSL_KEYFILE_PATH, default=DEFAULT_SSL_KEYFILE_PATH): str,
-        vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
+        vol.Required(CONF_CSID, default=DEFAULT_CSID): vol.All(str, vol.Length(max=20)),
         vol.Required(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, default=DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         ): int,
