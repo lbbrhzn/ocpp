@@ -56,7 +56,6 @@ from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
-    DOMAIN,
     HA_ENERGY_UNIT,
 )
 
