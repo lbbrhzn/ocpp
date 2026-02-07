@@ -61,7 +61,6 @@ from .const import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 
 def _to_message_trigger(name: str) -> MessageTrigger | None:
