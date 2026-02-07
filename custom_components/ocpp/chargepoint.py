@@ -68,7 +68,6 @@ from .const import (
 
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 
 class Metric:
