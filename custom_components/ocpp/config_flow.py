@@ -81,7 +81,7 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CPID, default=DEFAULT_CPID): vol.All(
             str,
-            vol.Lower,
+            vol.Match(r"^[a-z0-9_$]+$", msg="Use only lower case, digits and _"),
         ),
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
