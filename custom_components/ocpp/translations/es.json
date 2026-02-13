@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Configuración OCPP",
-                "description": "Si necesitas ayuda con la configuración puedes hechar un vistazo en: https://github.com/lbbrhzn/ocpp",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url})",
                 "data": {
                     "host": "Dirección de host del sistema central",
                     "port": "Número de puerto del sistema central",
@@ -16,7 +16,7 @@
             },
             "cp_user": {
                 "title": "Configuración OCPP",
-                "description": "Si necesitas ayuda con la configuración puedes hechar un vistazo en: https://github.com/lbbrhzn/ocpp",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url}",
                 "data": {
                     "cpid": "Nombre del punto de carga",
                     "meter_interval": "Intervalo de mediciones (segundos)",
