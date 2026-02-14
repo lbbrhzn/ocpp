@@ -218,7 +218,12 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
     def available(self) -> bool:
         """Return if entity is available."""
         features = self.central_system.get_supported_features(self.cpid)
-        has_smart = bool(features & Profiles.SMART)
+        # In tests some code sets supported_features to a set of Profiles;
+        # accept both an IntFlag (Profiles) and a set of Profiles here.
+        if isinstance(features, set):
+            has_smart = Profiles.SMART in features
+        else:
+            has_smart = bool(features & Profiles.SMART)
         return bool(
             self.central_system.get_available(self.cpid, self._op_connector_id)
             and has_smart

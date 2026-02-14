@@ -1003,6 +1003,19 @@ class ChargePoint(cp):
     @property
     def supported_features(self) -> int:
         """Flag of Ocpp features that are supported."""
+        # Tests (and some external callers) may set supported features as a
+        # `set` of `Profiles` members. Normalize to an IntFlag value so
+        # callers can consistently perform bitwise operations or membership
+        # checks.
+        if isinstance(self._attr_supported_features, set):
+            flags = prof.NONE
+            for p in self._attr_supported_features:
+                try:
+                    flags |= p
+                except Exception:
+                    # ignore non-Profiles items
+                    continue
+            return flags
         return self._attr_supported_features
 
     def get_ha_metric(self, measurand: str, connector_id: int | None = None):
