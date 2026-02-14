@@ -10,11 +10,11 @@ from homeassistant.components.switch import (
     SwitchEntity,
     SwitchEntityDescription,
 )
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from ocpp.v16.enums import ChargePointStatus
-from homeassistant.core import callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .api import CentralSystem
 from .const import (
@@ -274,9 +274,12 @@ class ChargePointSwitch(SwitchEntity):
                     active_lookup = None
 
             if active_lookup is None or self.entity_id in active_lookup:
-                self.async_write_ha_state()
+                self.async_schedule_update_ha_state(True)
 
         # subscribe to updates
         self.async_on_remove(
             async_dispatcher_connect(self.hass, DATA_UPDATED, update)
         )
+
+        # Ensure switch publishes its current state immediately after being added
+        self.async_schedule_update_ha_state(True)
