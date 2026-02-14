@@ -1,4 +1,4 @@
-pycares==4.9 # new version causes an error in pytest
+pycares==4.9.0 # new version causes an error in pytest
 colorlog==6.10.1
 uv>=0.4
 ruff==0.14.7
