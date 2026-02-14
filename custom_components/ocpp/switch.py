@@ -277,9 +277,7 @@ class ChargePointSwitch(SwitchEntity):
                 self.async_schedule_update_ha_state(True)
 
         # subscribe to updates
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, DATA_UPDATED, update)
-        )
+        self.async_on_remove(async_dispatcher_connect(self.hass, DATA_UPDATED, update))
 
         # Ensure switch publishes its current state immediately after being added
         self.async_schedule_update_ha_state(True)
