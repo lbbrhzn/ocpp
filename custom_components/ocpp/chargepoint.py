@@ -375,6 +375,9 @@ class ChargePoint(cp):
                 except Exception as ex:
                     _LOGGER.debug("trigger_status_notification ignored: %s", ex)
 
+            # Ensure HA states are correct immediately after connection
+            self.hass.async_create_task(self.update(self.settings.cpid))
+
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 
