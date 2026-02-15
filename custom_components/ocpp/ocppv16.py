@@ -398,7 +398,7 @@ class ChargePoint(cp):
                 )
             return False
 
-        if prof.SMART not in self._attr_supported_features:
+        if not (int(self.supported_features or 0) & prof.SMART):
             _LOGGER.info("Smart charging is not supported by this charger")
             return False
 
@@ -704,7 +704,7 @@ class ChargePoint(cp):
         - firmware_url: http/https URL of the new firmware
         - wait_time: hours from now to wait before install
         """
-        features = int(self._attr_supported_features or 0)
+        features = int(self.supported_features or 0)
         if not (features & prof.FW):
             _LOGGER.warning("Charger does not support OCPP firmware updating")
             return False
@@ -734,7 +734,7 @@ class ChargePoint(cp):
 
     async def get_diagnostics(self, upload_url: str):
         """Upload diagnostic data to server from charger."""
-        features = int(self._attr_supported_features or 0)
+        features = int(self.supported_features or 0)
         if features & prof.FW:
             schema = vol.Schema(vol.Url())
             try:
