@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "OCPP-Konfiguration",
-                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier nach: https://github.com/lbbrhzn/ocpp",
+                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier [nach]({docs_url})",
                 "data": {
                     "host": "Host-Adresse des Zentralsystems",
                     "port": "Portnummer des Zentralsystems",
@@ -19,7 +19,7 @@
             },
             "cp_user": {
                 "title": "OCPP-Konfiguration",
-                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier nach: https://github.com/lbbrhzn/ocpp",
+                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier [nach]({docs_url})",
                 "data": {
                     "cpid": "Identität der Ladestation",
                     "max_current": "Maximaler Ladestrom",

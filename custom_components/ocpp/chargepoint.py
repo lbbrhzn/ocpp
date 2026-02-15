@@ -68,7 +68,6 @@ from .const import (
 
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
-logging.getLogger(DOMAIN).setLevel(logging.INFO)
 
 
 class Metric:
@@ -375,6 +374,9 @@ class ChargePoint(cp):
                     )
                 except Exception as ex:
                     _LOGGER.debug("trigger_status_notification ignored: %s", ex)
+
+            # Ensure HA states are correct immediately after connection
+            self.hass.async_create_task(self.update(self.settings.cpid))
 
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
@@ -1001,6 +1003,19 @@ class ChargePoint(cp):
     @property
     def supported_features(self) -> int:
         """Flag of Ocpp features that are supported."""
+        # Tests (and some external callers) may set supported features as a
+        # `set` of `Profiles` members. Normalize to an IntFlag value so
+        # callers can consistently perform bitwise operations or membership
+        # checks.
+        if isinstance(self._attr_supported_features, set):
+            flags = prof.NONE
+            for p in self._attr_supported_features:
+                try:
+                    flags |= p
+                except Exception:
+                    # ignore non-Profiles items
+                    continue
+            return flags
         return self._attr_supported_features
 
     def get_ha_metric(self, measurand: str, connector_id: int | None = None):
