@@ -105,7 +105,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
             ms = str(metric).strip()
             return OcppSensorDescription(
-                key=ms.lower(),
+                key=ms.lower().replace(".", "_"),
                 name=ms.replace(".", " "),
                 metric=ms,
                 entity_category=EntityCategory.DIAGNOSTIC if cat_diag else None,
