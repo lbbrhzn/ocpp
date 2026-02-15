@@ -398,7 +398,7 @@ class ChargePoint(cp):
                 )
             return False
 
-        if not (self.supported_features & prof.SMART):
+        if not (int(self.supported_features or 0) & prof.SMART):
             _LOGGER.info("Smart charging is not supported by this charger")
             return False
 
