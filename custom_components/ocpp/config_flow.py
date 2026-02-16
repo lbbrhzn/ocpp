@@ -7,6 +7,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     CONN_CLASS_LOCAL_PUSH,
 )
+from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
 from .const import (
@@ -79,10 +80,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
 
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_CPID, default=DEFAULT_CPID): vol.All(
-            str,
-            vol.Match(r"^[a-z0-9_$]+$", msg="Use only lower case, digits and _"),
-        ),
+        vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
             CONF_MONITORED_VARIABLES_AUTOCONFIG,
@@ -168,26 +166,34 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Don't allow duplicate cpids to be used
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
-
-            cp_data = {
-                **user_input,
-                CONF_NUM_CONNECTORS: self._detected_num_connectors,
-            }
-            cpids_list = self._data.get(CONF_CPIDS, []).copy()
-            cpids_list.append({self._cp_id: cp_data})
-            self._data = {**self._data, CONF_CPIDS: cpids_list}
-
-            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
-                    DEFAULT_MONITORED_VARIABLES
-                )
-                self.hass.config_entries.async_update_entry(
-                    self._entry, data=self._data
-                )
-                return self.async_abort(reason="Added/Updated charge point")
-
+            # Validate cpid format against entity id requirements (lowercase letters, digits and _)
+            schema = vol.Schema(
+                {vol.Required(CONF_CPID): cv.matches_regex(r"^[\da-z_]+$")}
+            )
+            try:
+                schema({CONF_CPID: user_input[CONF_CPID]})
+            except vol.Invalid:
+                errors["base"] = "invalid_cpid"
             else:
-                return await self.async_step_measurands()
+                cp_data = {
+                    **user_input,
+                    CONF_NUM_CONNECTORS: self._detected_num_connectors,
+                }
+                cpids_list = self._data.get(CONF_CPIDS, []).copy()
+                cpids_list.append({self._cp_id: cp_data})
+                self._data = {**self._data, CONF_CPIDS: cpids_list}
+
+                if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                    self._data[CONF_CPIDS][-1][self._cp_id][
+                        CONF_MONITORED_VARIABLES
+                    ] = DEFAULT_MONITORED_VARIABLES
+                    self.hass.config_entries.async_update_entry(
+                        self._entry, data=self._data
+                    )
+                    return self.async_abort(reason="Added/Updated charge point")
+
+                else:
+                    return await self.async_step_measurands()
 
         return self.async_show_form(
             step_id="cp_user",
