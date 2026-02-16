@@ -1,7 +1,7 @@
 pycares==4.9.0 # new version causes an error in pytest
 colorlog==6.10.1
 uv>=0.4
-ruff==0.14.7
+ruff==0.15.1
 ocpp==2.1.0
 websockets==16.0
 jsonschema==4.26.0
