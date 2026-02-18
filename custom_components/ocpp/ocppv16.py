@@ -259,7 +259,7 @@ class ChargePoint(cp):
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles.value])
         resp = await self.call(req)
         try:
-            feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+            feature_list = (resp.configuration_key[0][om.value.value]).replace(";", ",").split(",")
         except (IndexError, KeyError, TypeError):
             feature_list = [""]
         if feature_list[0] == "":
