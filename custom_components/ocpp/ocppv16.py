@@ -1045,6 +1045,12 @@ class ChargePoint(cp):
                 (connector_id, cstat.error_code_connector.value)
             ].value = error_code
 
+            # For single-connector chargers, also update charger-level status
+            # so that availability switch shows correct state
+            if self.num_connectors == 1 and connector_id == 1:
+                self._metrics[(0, cstat.status.value)].value = status
+                self._metrics[(0, cstat.error_code.value)].value = error_code
+
             if status in (
                 ChargePointStatus.suspended_ev.value,
                 ChargePointStatus.suspended_evse.value,
