@@ -14,6 +14,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.util import slugify
 from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
@@ -196,7 +197,7 @@ class ChargePointSwitch(SwitchEntity):
             object_id = f"{self.cpid}_connector_{self.connector_id}_{self.entity_description.key}"
         else:
             object_id = f"{self.cpid}_{self.entity_description.key}"
-        self.entity_id = f"{SWITCH_DOMAIN}.{object_id}"
+        self.entity_id = f"{SWITCH_DOMAIN}.{slugify(object_id)}"
 
     @property
     def available(self) -> bool:
