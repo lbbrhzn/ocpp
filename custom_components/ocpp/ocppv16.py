@@ -136,10 +136,35 @@ class ChargePoint(cp):
                 if k == "NumberOfConnectors" and v not in (None, ""):
                     try:
                         n = int(str(v).strip())
-                        if n > 0:
+                        # Validate connector count is reasonable (max 100 connectors)
+                        # Some chargers return garbage values like 1634030126
+                        if 1 <= n <= 100:
                             return n
+                        elif n > 100:
+                            _LOGGER.warning(
+                                "%s: Charger reported %d connectors, which exceeds "
+                                "maximum supported (100). Using configured value or "
+                                "defaulting to 1 connector. This may indicate a "
+                                "firmware issue with the charger.",
+                                self.id,
+                                n,
+                            )
                     except (ValueError, TypeError):
-                        pass
+                        _LOGGER.warning(
+                            "%s: Unable to parse NumberOfConnectors value: %s. "
+                            "Using configured value or defaulting to 1 connector.",
+                            self.id,
+                            v,
+                        )
+
+        # Fall back to configured value if available
+        if hasattr(self, "settings") and self.settings.num_connectors:
+            _LOGGER.info(
+                "%s: Using configured number of connectors: %d",
+                self.id,
+                self.settings.num_connectors,
+            )
+            return self.settings.num_connectors
 
         return 1
 
