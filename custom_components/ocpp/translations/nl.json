@@ -16,13 +16,16 @@
             },
             "cp_user": {
                 "title": "OCPP Configuratie",
-                "description": "Voor hulp bij configuratie [zie]({docs_url})",
+                "description": "Voor hulp bij configuratie [zie]({docs_url})\n\n**Aantal connectoren:** Voer 0 in voor automatische detectie of 1-100 om handmatig op te geven.",
                 "data": {
                     "cpid": "Charge point identifier",
+                    "num_connectors": "Aantal connectoren",
                     "max_current": "Maximale laadstroom",
                     "meter_interval": "Meetinterval (secondes)",
+                    "idle_interval": "Inactief meetinterval (secondes)",
                     "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Functieprofiel Smart Charging forceren"
+                    "force_smart_charging": "Functieprofiel Smart Charging forceren",
+                    "monitored_variables_autoconfig": "Automatische detectie van OCPP meetwaarden"
                 }
             },
             "measurands": {
@@ -56,7 +59,9 @@
         },
         "error": {
             "auth": "Verkeerde gebruikersnaam of wachtwoord.",
-            "measurand": "Onbekende meetgrootheid"
+            "measurand": "Onbekende meetgrootheid",
+            "invalid_cpid": "Ongeldige charge point identifier: gebruik alleen kleine letters, cijfers en _",
+            "invalid_num_connectors": "Aantal connectoren moet tussen 0 en 100 zijn (0 = automatisch, 1-100 = handmatig)"
         },
         "abort": {
             "single_instance_allowed": "Slechts een exemplaar toegestaan."

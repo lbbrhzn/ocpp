@@ -81,6 +81,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
+        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): int,
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
             CONF_MONITORED_VARIABLES_AUTOCONFIG,
@@ -175,25 +176,32 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             except vol.Invalid:
                 errors["base"] = "invalid_cpid"
             else:
-                cp_data = {
-                    **user_input,
-                    CONF_NUM_CONNECTORS: self._detected_num_connectors,
-                }
-                cpids_list = self._data.get(CONF_CPIDS, []).copy()
-                cpids_list.append({self._cp_id: cp_data})
-                self._data = {**self._data, CONF_CPIDS: cpids_list}
-
-                if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                    self._data[CONF_CPIDS][-1][self._cp_id][
-                        CONF_MONITORED_VARIABLES
-                    ] = DEFAULT_MONITORED_VARIABLES
-                    self.hass.config_entries.async_update_entry(
-                        self._entry, data=self._data
-                    )
-                    return self.async_abort(reason="Added/Updated charge point")
-
+                # Validate num_connectors is in valid range (0-100)
+                num_connectors = user_input.get(CONF_NUM_CONNECTORS, 0)
+                if num_connectors < 0 or num_connectors > 100:
+                    errors["base"] = "invalid_num_connectors"
                 else:
-                    return await self.async_step_measurands()
+                    # If num_connectors is 0 (auto mode), use detected value
+                    # Otherwise (1-100), use the manual value specified
+                    cp_data = {**user_input}
+                    if num_connectors == 0:
+                        cp_data[CONF_NUM_CONNECTORS] = self._detected_num_connectors
+                    
+                    cpids_list = self._data.get(CONF_CPIDS, []).copy()
+                    cpids_list.append({self._cp_id: cp_data})
+                    self._data = {**self._data, CONF_CPIDS: cpids_list}
+
+                    if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                        self._data[CONF_CPIDS][-1][self._cp_id][
+                            CONF_MONITORED_VARIABLES
+                        ] = DEFAULT_MONITORED_VARIABLES
+                        self.hass.config_entries.async_update_entry(
+                            self._entry, data=self._data
+                        )
+                        return self.async_abort(reason="Added/Updated charge point")
+
+                    else:
+                        return await self.async_step_measurands()
 
         return self.async_show_form(
             step_id="cp_user",

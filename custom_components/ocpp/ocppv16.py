@@ -104,6 +104,18 @@ class ChargePoint(cp):
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
+        # Check if manual mode is enabled (num_connectors > 0)
+        # If 0, use auto mode and query the charger
+        configured_connectors = getattr(self.settings, "num_connectors", 0)
+        if configured_connectors > 0:
+            _LOGGER.info(
+                "%s: Using manual connector count: %d connectors",
+                self.id,
+                configured_connectors,
+            )
+            return configured_connectors
+
+        # Auto mode (0) - query the charger
         resp = None
 
         try:

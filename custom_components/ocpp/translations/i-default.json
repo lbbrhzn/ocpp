@@ -19,9 +19,10 @@
             },
             "cp_user": {
                 "title": "OCPP Charger Configuration",
-                "description": "If you need help with the configuration have a look [here]({docs_url})",
+                "description": "If you need help with the configuration have a look [here]({docs_url})\n\n**Number of connectors:** Enter 0 to auto-detect from charger, or enter 1-100 to manually specify.",
                 "data": {
                     "cpid": "Charge point identity",
+                    "num_connectors": "Number of connectors",
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
@@ -62,7 +63,8 @@
         "error": {
             "auth": "Username/Password is wrong.",
             "no_measurands_selected": "No measurand selected: please select at least one",
-            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _"
+            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _",
+            "invalid_num_connectors": "Number of connectors must be between 0 and 100 (0 = auto detect, 1-100 = manual)"
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed",
