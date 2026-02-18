@@ -71,7 +71,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         per_connector=False,
     ),
     OcppSwitchDescription(
-        key="connnector_availability",
+        key="connector_availability",
         name="Connector Availability",
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
@@ -128,7 +128,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         for desc in SWITCHES:
             if desc.per_connector:
                 # Only create Connector Availability switches for multi-connector chargers
-                if desc.key == "connnector_availability" and num_connectors <= 1:
+                if desc.key == "connector_availability" and num_connectors <= 1:
                     continue
                 for conn_id in range(1, num_connectors + 1):
                     entities.append(
