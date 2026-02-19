@@ -186,7 +186,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                     cp_data = {**user_input}
                     if num_connectors == 0:
                         cp_data[CONF_NUM_CONNECTORS] = self._detected_num_connectors
-                    
+
                     cpids_list = self._data.get(CONF_CPIDS, []).copy()
                     cpids_list.append({self._cp_id: cp_data})
                     self._data = {**self._data, CONF_CPIDS: cpids_list}

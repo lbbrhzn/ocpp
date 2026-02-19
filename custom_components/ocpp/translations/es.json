@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Configuración OCPP",
-                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url})",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url})\n\n",
                 "data": {
                     "host": "Dirección de host del sistema central",
                     "port": "Número de puerto del sistema central",

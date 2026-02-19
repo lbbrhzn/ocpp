@@ -1,6 +1,7 @@
 """Test switch entities for single and multi-connector chargers."""
 
 import asyncio
+import copy
 import pytest
 import websockets
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -23,8 +24,8 @@ async def test_switch_entities_single_connector(hass, socket_enabled):
     cp_id = "CP_1_switch_sc"
     cpid = "test_cpid_switch_sc"
 
-    data = MOCK_CONFIG_DATA.copy()
-    cp_data = MOCK_CONFIG_CP_APPEND.copy()
+    data = copy.deepcopy(MOCK_CONFIG_DATA)
+    cp_data = copy.deepcopy(MOCK_CONFIG_CP_APPEND)
     cp_data[CONF_CPID] = cpid
     # Single connector (default, no CONF_NUM_CONNECTORS set)
     data[CONF_CPIDS].append({cp_id: cp_data})
@@ -47,7 +48,11 @@ async def test_switch_entities_single_connector(hass, socket_enabled):
         subprotocols=["ocpp1.6"],
     ) as ws:
         # Give HA a tick to register entities
-        await asyncio.sleep(0.5)
+        for _ in range(5):
+            entity = hass.states.get("switch.test_cms_switch_sc")
+            if entity:
+                break
+            await asyncio.sleep(0.5)
 
         # For single-connector charger, check expected switches exist
         for switch_desc in SWITCHES:
@@ -71,9 +76,7 @@ async def test_switch_entities_single_connector(hass, socket_enabled):
                 # Non-per-connector switches (availability)
                 entity_id = f"switch.{cpid}_{switch_desc.key}"
                 entity = hass.states.get(entity_id)
-                assert (
-                    entity is not None
-                ), f"missing switch: {entity_id}"
+                assert entity is not None, f"missing switch: {entity_id}"
 
         await ws.close()
 
@@ -86,8 +89,8 @@ async def test_switch_entities_multi_connector(hass, socket_enabled):
     cp_id = "CP_1_switch_mc"
     cpid = "test_cpid_switch_mc"
 
-    data = MOCK_CONFIG_DATA.copy()
-    cp_data = MOCK_CONFIG_CP_APPEND.copy()
+    data = copy.deepcopy(MOCK_CONFIG_DATA)
+    cp_data = copy.deepcopy(MOCK_CONFIG_CP_APPEND)
     cp_data[CONF_CPID] = cpid
     cp_data[CONF_NUM_CONNECTORS] = 2  # Multi-connector
     data[CONF_CPIDS].append({cp_id: cp_data})
@@ -110,7 +113,11 @@ async def test_switch_entities_multi_connector(hass, socket_enabled):
         subprotocols=["ocpp1.6"],
     ) as ws:
         # Give HA a tick to register entities
-        await asyncio.sleep(0.5)
+        for _ in range(5):
+            entity = hass.states.get("switch.test_cms_switch_mc")
+            if entity:
+                break
+            await asyncio.sleep(0.5)
 
         # For multi-connector charger, check expected switches exist
         for switch_desc in SWITCHES:
@@ -119,14 +126,18 @@ async def test_switch_entities_multi_connector(hass, socket_enabled):
                 for conn_id in range(1, 3):  # 2 connectors
                     if switch_desc.key == "connector_availability":
                         # This switch SHOULD exist for multi-connector charger
-                        entity_id = f"switch.{cpid}_connector_{conn_id}_{switch_desc.key}"
+                        entity_id = (
+                            f"switch.{cpid}_connector_{conn_id}_{switch_desc.key}"
+                        )
                         entity = hass.states.get(entity_id)
                         assert (
                             entity is not None
                         ), f"missing connector_availability switch for connector {conn_id}: {entity_id}"
                     else:
                         # charge_control per connector
-                        entity_id = f"switch.{cpid}_connector_{conn_id}_{switch_desc.key}"
+                        entity_id = (
+                            f"switch.{cpid}_connector_{conn_id}_{switch_desc.key}"
+                        )
                         entity = hass.states.get(entity_id)
                         assert (
                             entity is not None
@@ -135,9 +146,7 @@ async def test_switch_entities_multi_connector(hass, socket_enabled):
                 # Non-per-connector switches (availability) - charger-level only
                 entity_id = f"switch.{cpid}_{switch_desc.key}"
                 entity = hass.states.get(entity_id)
-                assert (
-                    entity is not None
-                ), f"missing charger-level switch: {entity_id}"
+                assert entity is not None, f"missing charger-level switch: {entity_id}"
 
         # Verify no switch exists for non-existent connector 3
         entity_id = f"switch.{cpid}_connector_3_charge_control"
