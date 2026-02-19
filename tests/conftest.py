@@ -1,10 +1,20 @@
 """Global fixtures for ocpp integration."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import patch
-
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 import pytest
 import websockets
+
+from custom_components.ocpp.api import CentralSystem
+from custom_components.ocpp.const import CONF_CPIDS, CONF_PORT, DOMAIN as OCPP_DOMAIN
+from tests.const import MOCK_CONFIG_CP_APPEND, MOCK_CONFIG_DATA
+from .charge_point_test import (
+    create_configuration,
+    remove_configuration,
+)
+from homeassistant.core import State
 
 pytest_plugins = "pytest_homeassistant_custom_component"
 
@@ -37,11 +47,16 @@ def bypass_get_data_fixture():
     """Skip calls to get data from API."""
     future = asyncio.Future()
     future.set_result(websockets.asyncio.server.Server)
+    # Return a HomeAssistant State object instead of a plain string. Some HA
+    # helpers expect a State instance (with attributes) during restore/cleanup.
     with (
         patch("websockets.asyncio.server.serve", return_value=future),
         patch("websockets.asyncio.server.Server.close"),
         patch("websockets.asyncio.server.Server.wait_closed"),
-        patch("homeassistant.core.StateMachine.get", return_value="test_cp_id"),
+        patch(
+            "homeassistant.core.StateMachine.get",
+            return_value=State("sensor.test_cp_id", "test_cp_id"),
+        ),
     ):
         yield
 
@@ -56,3 +71,26 @@ def error_get_data_fixture():
     #    side_effect=Exception,
     # ):
     yield
+
+
+@pytest.fixture
+async def setup_config_entry(hass, request) -> AsyncGenerator[CentralSystem, None]:
+    """Setup/teardown mock config entry and central system."""
+    # Create a mock entry so we don't have to go through config flow
+    # Both version and minor need to match config flow so as not to trigger migration flow
+    config_data = MOCK_CONFIG_DATA.copy()
+    config_data[CONF_CPIDS].append(
+        {request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()}
+    )
+    config_data[CONF_PORT] = request.param["port"]
+    config_entry = MockConfigEntry(
+        domain=OCPP_DOMAIN,
+        data=config_data,
+        entry_id=request.param["cms"],
+        title=request.param["cms"],
+        version=2,
+        minor_version=0,
+    )
+    yield await create_configuration(hass, config_entry)
+    # tear down
+    await remove_configuration(hass, config_entry)

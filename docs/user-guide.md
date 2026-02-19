@@ -15,7 +15,7 @@ The 'baggage' referred to above, is every single repository available through HA
 
 ![Central System Configuration](https://user-images.githubusercontent.com/8673442/129494762-08052152-f057-4563-93b5-5aae810dfbfc.png)
 
-The `Central system identity` shown above with a default of `central` can be anything you like.  Whatever is entered in that field will be used as a device identifier in Home Assistant (HA), so it's probably best to avoid spaces and punctuation symbols, but otherwise, enter anything you like.
+The `Central system identity` shown above with a default of `central` can be anything you like up to a **maximum** of **20 characters**.  Whatever is entered in that field will be used as a device identifier in Home Assistant (HA), so it's probably best to avoid spaces and punctuation symbols, but otherwise, enter anything you like.
 
 The `Charge point identity` shown above with a default of `charger` is a little different.  Whatever you enter in that field will determine the prefix of all Charger entities added to Home Assistant (HA).  My recommendation is that it's best left at the default of charger.  If you put anything else in that field, it will be used as the prefix for all Charger entities added to HA during installation, however, new entities subsequently added in later version releases sometimes revert to the default prefix, regardless of what was entered during installation.  So you end up with a mixture of different prefixes which can be avoided simply by leaving `Charge point identity` set to the default of `charger`.
 
@@ -23,7 +23,46 @@ The `Charge point identity` shown above with a default of `charger` is a little 
 
 Measurands (according to OCPP terminology) are actually metrics provided by the charger.  Each charger supports a subset of the available metrics and for each one supported, a sensor entity is available in HA.  Some of these sensor entities will give erroneous readings whilst others give no readings at all.  Sensor entities not supported by the charger will show as `Unknown` if you try to create a sensor entity for them.  Below is a table of the metrics I've found useful for the Wallbox Pulsar Plus.  Tables for other chargers will follow as contributions come in from owners of each supported charger.
 
-OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices.md).
+OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices).
+
+For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices.
+
+## Understanding status
+
+Your charger exposes a connector status sensor:
+* Single-connector: `sensor.<charger_id>_status_connector`
+* Multi-connector: `sensor.<charger_id>_connector_<connector_number>_status_connector`
+
+For OCPP 1.6, the sensor can show these values:
+
+* **Available** – No EV is connected; the connector is free.
+* **Preparing** – EV is connected and/or authenticated but charging hasn’t started yet (handshake, cable lock, internal checks).
+* **Charging** – Energy is being delivered.
+* **SuspendedEV** – The EV has paused energy transfer (e.g., target SoC reached, schedule, thermal limit).
+* **SuspendedEVSE** – The charger has paused energy transfer (e.g., power limit, smart charging profile, grid signal).
+* **Finishing** – Charging has stopped, but the session isn’t fully closed yet (typically waiting for the cable to be unplugged).
+* **Reserved** – The connector is reserved (via ReserveNow); only the intended user/ID may start. This is not supported by the OCPP integration yet.
+* **Unavailable** – Intentionally set out of service (e.g., ChangeAvailability(Inoperative)) or temporarily not usable. (Entities remain available in Home Assistant.)
+* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details.
+
+Note
+In OCPP 1.6, `connectorId = 0` (station level) only uses Available, Unavailable, or Faulted.<br>
+In OCPP 2.0.1, connector status is simplified to Available / Occupied / Reserved / Unavailable / Faulted; “Preparing/Finishing” are reflected in TransactionEvent rather than as connector statuses.
+
+If your integration shows extra attributes on the connector status sensor like availability_change or availability_pending, they indicate that a status change (e.g., after ChangeAvailability) has been accepted or scheduled and will take effect once current conditions allow (e.g., after an active session ends).
+
+## Changing availability
+
+* **Availability (charger-level) switch**<br>
+  Sets the entire charger to `Unavailable` (station-level). All idle connectors switch to `Unavailable` immediately. Any connector with an ongoing session is marked as scheduled and will switch to `Unavailable` after the session ends.
+
+* **Availability (per-connector) switches**<br>
+  Set a specific connector to `Unavailable`. If that connector currently has an ongoing session, the change is scheduled and will take effect once the session ends.
+
+* **Charge Control switch**<br>
+  Turning off ends the ongoing charging session (remote stop). The connector typically transitions to `Finishing` and then back to its normal idle state once the cable is unplugged. Turning the switch on again resets the session metrics; the charger returns to its previous state (this does not force a new session to start).
+
+
 
 ## Useful Entities for Wallbox Pulsar Plus
 
@@ -124,7 +163,35 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Maximum Current` (sets maximum charging current available)
 * `Reset`
 
-### OCPP Compatibility Issues
+## Useful Entities for Rolec EVO
+
+### Metrics
+
+* `Current Import`
+* `Current Offered` (may be limited by the settings on the charger itself, check the EVO app)
+* `Energy Session` (charge for present/last session - kWh)
+* `Power Active Import` (active charging power - kW)
+* `Temperature` (internal temperature - degrees C)
+* `Time Session` (duration of active/last charging session)
+* `Voltage` (seems to report a little higher than expected)
+
+There are several other metrics too, I'm not sure what they mean, and also `Export` variants of some of the `Import` entities, but they seem to always be zero for me.
+
+### Diagnostics
+
+* `Status Connector` (Available, Preparing, Charging, etc)
+
+There are many other diagnostic entities about the features, ids, model, firmware etc, not sure if they'd be much practical use.
+
+### Controls
+
+* `Availability` (turning off switches the halo from flashing blue to constant red)
+* `Charge Control`
+* `Maximum Current` (if `Current Offered` doesn't reach this when charging, raise the current to the max in the EVO app itself, connect via Bluetooth)
+* `Reset` (reboot the charger)
+* `Unlock` (I think this will unlock the charging cable, if permanent lock is enabled from the app)
+
+## OCPP Compatibility Issues
 
 ### ABB Terra AC
 
@@ -132,7 +199,7 @@ ABB Terra AC firmware 1.8.21 and earlier versions fail to respond correctly when
 
 ### Grizzl-E
 
-Grizzl-E firmware has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
+Grizzl-E firmware 5.x has a few OCPP-compliance defects, including responding to certain OCPP server messages with invalid JSON. Firmware 3.x.x on chargers such as the Mini Connect and Ultimate does not seem to have these issues. Symptoms of this problem include repeated reboots of the charger. By editing the OCPP server source code, one can avoid these problematic messages and obtain useful charger behaviour. ChargeLabs (the company working on the Grizzl-E firmware) expects to release version 6 of the firmware in early 2023, which may fix these problems.
 
 The workaround consists of:
 - checking the *Skip OCPP schema validation* checkbox during OCPP server configuration

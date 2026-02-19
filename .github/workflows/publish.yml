@@ -16,10 +16,10 @@ jobs:
       contents: write
     steps:
       - name: 📥 Checkout the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 🛠️ Set up Python
-        uses: actions/setup-python@v5.4.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.x"
 
@@ -32,7 +32,7 @@ jobs:
           python3 ${{ github.workspace }}/manage/update_manifest.py --version ${{ steps.version.outputs.version }}
 
       - name: 📤 Upload zip to action
-        uses: actions/upload-artifact@v4.6.1
+        uses: actions/upload-artifact@v6.0.0
         if: ${{ github.event_name == 'push' }}
         with:
           name: ocpp

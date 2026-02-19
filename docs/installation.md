@@ -62,10 +62,11 @@ If you do not use HTTPS for your Home Assistant instance:
 - If you have configured _Secure connection_ in previous step, you should use 'wss://'
 - Some chargers require the url to be specified as an IP address, i.e. '192.168.178.1:9000'
 - You may need to reboot your charger before the changes become effective.
+- If your charger has multiple connectors, wait until the charger device has populated its data (e.g., the Connectors sensor). Then reload the integration. A separate device will be created for each connector, and you’ll find all connector-specific entities there.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495720-2ed9f0d6-b736-409a-8e14-fbd447dea078.png)
 
-## Start Charging 
+## Start Charging
 - Use the charge control switch to start the charging process.
 
 ![image](https://user-images.githubusercontent.com/8673442/129495891-91f40bf9-f48e-4ced-b303-bf0fb77898f3.png)

@@ -7,7 +7,11 @@ from homeassistant import config_entries, data_entry_flow
 from homeassistant.data_entry_flow import InvalidData
 import pytest
 
-from custom_components.ocpp.const import DOMAIN
+from custom_components.ocpp.const import (
+    CONF_NUM_CONNECTORS,
+    DEFAULT_NUM_CONNECTORS,
+    DOMAIN,
+)
 
 from .const import (
     MOCK_CONFIG_CS,
@@ -105,7 +109,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
         result_disc["flow_id"], user_input=cp_input
     )
 
-    measurand_input = {value: True for value in DEFAULT_MONITORED_VARIABLES.split(",")}
+    measurand_input = dict.fromkeys(DEFAULT_MONITORED_VARIABLES.split(","), True)
     result_meas = await hass.config_entries.flow.async_configure(
         result_cp["flow_id"], user_input=measurand_input
     )
@@ -116,6 +120,10 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = (
         False
     )
+    flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_NUM_CONNECTORS] = (
+        DEFAULT_NUM_CONNECTORS
+    )
+
     assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
     assert entry.data == flow_output

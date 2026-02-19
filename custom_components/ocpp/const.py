@@ -25,6 +25,7 @@ CONF_MODE = ha.CONF_MODE
 CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
 CONF_MONITORED_VARIABLES_AUTOCONFIG = "monitored_variables_autoconfig"
 CONF_NAME = ha.CONF_NAME
+CONF_NUM_CONNECTORS = "num_connectors"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
@@ -45,14 +46,15 @@ DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_CURRENT = 32
+DEFAULT_NUM_CONNECTORS = 1
 DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
 DEFAULT_FORCE_SMART_CHARGING = False
 DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
-DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1"]
-OCPP_2_0 = "ocpp2.0"
+DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+OCPP_2_0 = "ocpp2"
 DEFAULT_METER_INTERVAL = 60
 DEFAULT_IDLE_INTERVAL = 900
 DEFAULT_WEBSOCKET_CLOSE_TIMEOUT = 10
@@ -151,6 +153,7 @@ class ChargerSystemSettings:
     skip_schema_validation: bool
     force_smart_charging: bool
     connection: int | None = None  # number of this connection in central server
+    num_connectors: int = DEFAULT_NUM_CONNECTORS
 
 
 @dataclass

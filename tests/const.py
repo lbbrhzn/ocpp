@@ -11,6 +11,7 @@ from custom_components.ocpp.const import (
     CONF_METER_INTERVAL,
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
+    CONF_NUM_CONNECTORS,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -115,6 +116,30 @@ MOCK_CONFIG_DATA_1 = {
                 CONF_METER_INTERVAL: 60,
                 CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
                 CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
+                CONF_NUM_CONNECTORS: 2,
+                CONF_SKIP_SCHEMA_VALIDATION: True,
+                CONF_FORCE_SMART_CHARGING: True,
+            }
+        },
+    ],
+}
+
+# different port with skip schema validation enabled, auto config false
+# and multiple connector support
+MOCK_CONFIG_DATA_1_MC = {
+    **MOCK_CONFIG_DATA,
+    CONF_CSID: "test_csid_1_mc",
+    CONF_PORT: 9001,
+    CONF_CPIDS: [
+        {
+            "CP_1_mc": {
+                CONF_CPID: "test_cpid_9001",
+                CONF_IDLE_INTERVAL: 900,
+                CONF_MAX_CURRENT: 32,
+                CONF_METER_INTERVAL: 60,
+                CONF_MONITORED_VARIABLES: DEFAULT_MONITORED_VARIABLES,
+                CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
+                CONF_NUM_CONNECTORS: 2,
                 CONF_SKIP_SCHEMA_VALIDATION: True,
                 CONF_FORCE_SMART_CHARGING: True,
             }

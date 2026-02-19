@@ -1,0 +1,57 @@
+FROM mcr.microsoft.com/vscode/devcontainers/base:debian
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN \
+    apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        # Additional library needed by some tests and accordingly by VScode Tests Discovery
+        bluez \
+        ffmpeg \
+        libudev-dev \
+        libavformat-dev \
+        libavcodec-dev \
+        libavdevice-dev \
+        libavutil-dev \
+        libswscale-dev \
+        libswresample-dev \
+        libavfilter-dev \
+        libpcap-dev \
+        libturbojpeg0 \
+        libyaml-dev \
+        libxml2 \
+        git \
+        cmake \
+        autoconf \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add go2rtc binary
+COPY --from=ghcr.io/alexxit/go2rtc:latest /usr/local/bin/go2rtc /bin/go2rtc
+
+WORKDIR /usr/src
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+USER vscode
+
+ENV VIRTUAL_ENV="/home/vscode/.local/ha-venv"
+RUN uv python install \
+    && uv venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Setup hass-release
+RUN git clone --depth 1 https://github.com/home-assistant/hass-release ~/hass-release \
+    && uv pip install -e ~/hass-release/
+
+# Install Python dependencies from requirements
+COPY requirements.txt ./
+RUN uv pip install --prerelease=allow -r requirements.txt
+
+# Claude Code native install
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+WORKDIR /workspaces
+
+# Set the default shell to bash instead of sh
+ENV SHELL=/bin/bash

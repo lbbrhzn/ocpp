@@ -10,5 +10,12 @@
   ],
   "files.associations": {
     "*.yaml": "home-assistant"
-  }
+  },
+  "python.testing.pytestArgs": [
+    "tests",
+    "--cov=custom_components",
+    "--cov-report=term-missing",
+    "--cov-report=xml:coverage.xml",
+    "--timeout=30"
+  ],
 }
