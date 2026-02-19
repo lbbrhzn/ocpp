@@ -1040,6 +1040,8 @@ class ChargePoint(cp):
 
             if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN, None):
                 return st.state
+            if st and st.state == STATE_UNAVAILABLE:
+                return STATE_UNAVAILABLE
 
         return None
 
