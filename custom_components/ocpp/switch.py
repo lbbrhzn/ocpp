@@ -120,7 +120,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
             if desc.per_connector:
                 # Only create Connector Availability switches for multi-connector chargers
                 if (
-                    desc.key == SWITCHES["connector_availability"].key
+                    desc.key == "connector_availability"
                     and num_connectors <= 1
                 ):
                     continue

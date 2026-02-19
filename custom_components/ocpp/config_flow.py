@@ -81,7 +81,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
-        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): int,
+        vol.Required(CONF_NUM_CONNECTORS, default=DEFAULT_NUM_CONNECTORS): vol.All(int, vol.Range(min=0, max=100)),
         vol.Required(CONF_MAX_CURRENT, default=DEFAULT_MAX_CURRENT): int,
         vol.Required(
             CONF_MONITORED_VARIABLES_AUTOCONFIG,
