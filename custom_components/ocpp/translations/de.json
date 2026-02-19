@@ -19,9 +19,10 @@
             },
             "cp_user": {
                 "title": "OCPP-Konfiguration",
-                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier [nach]({docs_url})",
+                "description": "Wenn du Hilfe bei der Konfiguration benötigst, schaue hier [nach]({docs_url})\n\n**Anzahl der Anschlüsse:** Gib 0 ein für automatische Erkennung oder 1-100 für manuelle Angabe.",
                 "data": {
                     "cpid": "Identität der Ladestation",
+                    "num_connectors": "Anzahl der Anschlüsse",
                     "max_current": "Maximaler Ladestrom",
                     "meter_interval": "Abtastintervall Laden (Sekunden)",
                     "idle_interval": "Abtastintervall Leerlauf (Sekunden)",
@@ -61,7 +62,9 @@
         },
         "error": {
             "auth": "Benutzername/Passwort ist falsch.",
-            "measurand": "Unbekannter Messwert"
+            "measurand": "Unbekannter Messwert",
+            "invalid_cpid": "Ungültiger Name der Ladestation: verwende nur Kleinbuchstaben, Zahlen und _",
+            "invalid_num_connectors": "Anzahl der Anschlüsse muss zwischen 0 und 100 sein (0 = automatisch, 1-100 = manuell)"
         },
         "abort": {
             "single_instance_allowed": "Es ist nur eine Instanz erlaubt."

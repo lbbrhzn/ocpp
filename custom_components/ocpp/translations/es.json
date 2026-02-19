@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Configuración OCPP",
-                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url})",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url})\n\n",
                 "data": {
                     "host": "Dirección de host del sistema central",
                     "port": "Número de puerto del sistema central",
@@ -16,13 +16,16 @@
             },
             "cp_user": {
                 "title": "Configuración OCPP",
-                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url}",
+                "description": "Si necesitas ayuda con la configuración puedes hechar un [vistazo en]({docs_url}\n\n**Número de conectores:** Ingrese 0 para detección automática o 1-100 para especificar manualmente.",
                 "data": {
                     "cpid": "Nombre del punto de carga",
+                    "num_connectors": "Número de conectores",
+                    "max_current": "Corriente máxima de carga",
                     "meter_interval": "Intervalo de mediciones (segundos)",
                     "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
                     "skip_schema_validation": "Omitir validación esquema OCPP",
-                    "force_smart_charging": "Forzar perfil de función Smart Charging"
+                    "force_smart_charging": "Forzar perfil de función Smart Charging",
+                    "monitored_variables_autoconfig": "Detección automática de mediciones OCPP"
                 }
             },
             "measurands": {
@@ -56,7 +59,9 @@
         },
         "error": {
             "auth": "Usuario/contraseña incorrecto.",
-            "measurand": "Medida desconocida"
+            "measurand": "Medida desconocida",
+            "invalid_cpid": "Nombre del punto de carga no válido: use solo letras minúsculas, dígitos y _",
+            "invalid_num_connectors": "El número de conectores debe estar entre 0 y 100 (0 = automático, 1-100 = manual)"
         },
         "abort": {
             "single_instance_allowed": "Sólo se permite una única instancia."

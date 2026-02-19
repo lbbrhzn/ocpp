@@ -1,7 +1,6 @@
 {
     "name": "Home Assistant Dev",
-    "context": "..",
-    "dockerFile": "../Dockerfile.dev",
+    "image": "mcr.microsoft.com/devcontainers/python:3.13",
     "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && scripts/setup",
     "postStartCommand": "scripts/bootstrap",
     "containerEnv": {

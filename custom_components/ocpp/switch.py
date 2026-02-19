@@ -72,7 +72,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         per_connector=False,
     ),
     OcppSwitchDescription(
-        key="connnector_availability",
+        key="connector_availability",
         name="Connector Availability",
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
@@ -103,18 +103,9 @@ async def async_setup_entry(hass, entry, async_add_devices):
         cp_settings = list(charger.values())[0]
         cpid = cp_settings[CONF_CPID]
 
-        num_connectors = 1
-        for item in entry.data.get(CONF_CPIDS, []):
-            for _, cfg in item.items():
-                if cfg.get(CONF_CPID) == cpid:
-                    num_connectors = int(
-                        cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
-                    )
-                    break
-            else:
-                continue
-            break
-        flatten_single = num_connectors == 1
+        num_connectors = int(
+            cp_settings.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
+        )
 
         if num_connectors > 1:
             for desc in SWITCHES:
@@ -129,7 +120,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
         for desc in SWITCHES:
             if desc.per_connector:
                 # Only create Connector Availability switches for multi-connector chargers
-                if desc.key == "connnector_availability" and num_connectors <= 1:
+                if (
+                    desc.key == "connector_availability"
+                    and num_connectors <= 1
+                ):
                     continue
                 for conn_id in range(1, num_connectors + 1):
                     entities.append(
@@ -138,7 +132,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                             cpid,
                             desc,
                             connector_id=conn_id,
-                            flatten_single=flatten_single,
+                            flatten_single=False,
                         )
                     )
             else:
