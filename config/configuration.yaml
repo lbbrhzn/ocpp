@@ -47,6 +47,7 @@ frontend:
 #scene: !include scenes.yaml
 
 ocpp:
+  remote_id_tag: "TESTRFIDTAG123456789"
   default_authorization_status: 'Invalid'
   authorization_list:
     - id_tag: 'pulsar'
