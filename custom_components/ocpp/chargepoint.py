@@ -720,17 +720,17 @@ class ChargePoint(cp):
                 self._metrics[(target_cid, measurand)].extra_attr[om.context.value] = (
                     context
                 )
-            
+
             # The architecture changed (v0.9.x -> v0.10.x).
             # Now the integration creates distinct entities for each phase (e.g., Voltage.L1-N,Voltage.L2-N,Voltage.L3-N) instead of attributes.
             # We must route the data directly to those specific metric buckets, applying unit conversions.
             phase_metric = f"{measurand}.{phase}"
-            
+
             # Only update the bucket if the integration actually created it during setup
             if (target_cid, phase_metric) in self._metrics:
                 phase_val = float(value) if value is not None else 0.0
                 phase_unit = unit
-                
+
                 # Apply standard conversions (matching the main metric logic)
                 if phase_unit == DEFAULT_POWER_UNIT:
                     phase_val = phase_val / 1000.0
@@ -738,7 +738,6 @@ class ChargePoint(cp):
                 elif phase_unit == DEFAULT_ENERGY_UNIT:
                     phase_val = phase_val / 1000.0
                     phase_unit = HA_ENERGY_UNIT
-                    
                 self._metrics[(target_cid, phase_metric)].value = phase_val
                 self._metrics[(target_cid, phase_metric)].unit = phase_unit
                 if context is not None:
@@ -930,9 +929,11 @@ class ChargePoint(cp):
                 # --- CLEAN ROUTING ARCHITECTURE ---
                 is_eair = (measurand == DEFAULT_MEASURAND)
 
-                # 1. If it has any phase tag, send a copy to the Phase Processor (feeding sensor.energy_l1)
+                # 1. If it has any phase tag, send a copy to the Phase Processor
                 if phase is not None:
-                    unprocessed.append(sampled_value)
+                    # Mirror the Transaction.Begin exclusion used by best_eair_idx selection
+                    if not (is_eair and context == ReadingContext.transaction_begin.value):
+                        unprocessed.append(sampled_value)
 
                 # 2. Decide if this packet should ALSO drive the main Session Engine.
                 #    It qualifies if it's explicitly generic (None), OR if it's the primary L1 energy meter.
@@ -1024,9 +1025,6 @@ class ChargePoint(cp):
                                 self._metrics[
                                     (target_cid, csess.session_energy.value)
                                 ].unit = unit
-                else:
-                    unprocessed.append(sampled_value)
-
             try:
                 self.process_phases(unprocessed, connector_id)
             except TypeError:
