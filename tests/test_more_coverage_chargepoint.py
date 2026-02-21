@@ -9,7 +9,14 @@ import websockets
 from websockets.protocol import State
 
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
-
+from unittest.mock import MagicMock
+from custom_components.ocpp.enums import (
+    HA_POWER_UNIT,
+    HA_ENERGY_UNIT,
+    Phase,
+    ReadingContext,
+)
+from ocpp.v16.enums import Measurand
 
 # Reuse the client helpers & fixtures from your main v16 test module.
 from .test_charge_point_v16 import wait_ready, ChargePoint
@@ -513,3 +520,88 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+
+@pytest.mark.timeout(5)
+async def test_process_phases_routing_and_conversion():
+    """Test that process_phases routes to specific phase metrics and converts W/Wh."""
+    cp = MagicMock(spec=BaseCP)
+    
+    class MockMetric:
+        def __init__(self):
+            self.value = None
+            self.unit = None
+            self.extra_attr = {}
+
+    cp._metrics = {
+        (1, "Voltage.L1-N"): MockMetric(),
+        (1, "Power.Active.Import.L1"): MockMetric(),
+        (1, f"{Measurand.energy_active_import_register.value}.L1"): MockMetric(),
+    }
+
+    # Order matches: measurand, value, phase, unit, context, location
+    payload = [
+        MeasurandValue("Voltage", "240", Phase.l1_n.value, "V", None, None),
+        MeasurandValue("Power.Active.Import", "7000", Phase.l1.value, "W", None, None),
+        MeasurandValue(Measurand.energy_active_import_register.value, "15000", Phase.l1.value, "Wh", None, None),
+    ]
+
+    BaseCP.process_phases(cp, payload, connector_id=1)
+
+    assert cp._metrics[(1, "Voltage.L1-N")].value == 240.0
+    assert cp._metrics[(1, "Voltage.L1-N")].unit == "V"
+
+    assert cp._metrics[(1, "Power.Active.Import.L1")].value == 7.0
+    assert cp._metrics[(1, "Power.Active.Import.L1")].unit == HA_POWER_UNIT
+
+    assert cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].value == 15.0
+    assert cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].unit == HA_ENERGY_UNIT
+
+
+@pytest.mark.timeout(5)
+async def test_process_measurands_session_routing_and_leak_prevention():
+    """Test phased EAIR feeds the session tracker and blocks Transaction.Begin leaks."""
+    cp = MagicMock(spec=BaseCP)
+    cp._metrics = MagicMock()
+    cp.process_phases = MagicMock()
+    cp._charger_reports_session_energy = False
+
+    # Scenario A: Transaction.Begin Odometer Reset (Should be blocked)
+    # Order matches: measurand, value, phase, unit, context, location
+    bucket_begin = [
+        MeasurandValue(
+            Measurand.energy_active_import_register.value,
+            "0",
+            Phase.l1.value,
+            "Wh",
+            ReadingContext.transaction_begin.value,
+            None
+        )
+    ]
+    
+    BaseCP.process_measurands(cp, [bucket_begin], is_transaction=True, connector_id=1)
+    
+    # Assert process_phases was called with an EMPTY list (packet was blocked)
+    called_args = cp.process_phases.call_args[0][0]
+    assert len(called_args) == 0, "Transaction.Begin leaked into process_phases!"
+
+    # Scenario B: Normal Periodic L1 Energy Reading (Should pass)
+    cp.process_phases.reset_mock()
+    bucket_periodic = [
+        MeasurandValue(
+            Measurand.energy_active_import_register.value,
+            "15000",
+            Phase.l1.value,
+            "Wh",
+            ReadingContext.sample_periodic.value,
+            None
+        )
+    ]
+
+    BaseCP.process_measurands(cp, [bucket_periodic], is_transaction=True, connector_id=1)
+    
+    # Assert it WAS passed to process_phases
+    called_args = cp.process_phases.call_args[0][0]
+    assert len(called_args) == 1
+    assert called_args[0].value == "15000"
+    
