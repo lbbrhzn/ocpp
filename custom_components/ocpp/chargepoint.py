@@ -741,7 +741,9 @@ class ChargePoint(cp):
                 self._metrics[(target_cid, phase_metric)].value = phase_val
                 self._metrics[(target_cid, phase_metric)].unit = phase_unit
                 if context is not None:
-                    self._metrics[(target_cid, phase_metric)].extra_attr[om.context.value] = context
+                    self._metrics[(target_cid, phase_metric)].extra_attr[
+                        om.context.value
+                    ] = context
 
         line_phases_all = [
             Phase.l1.value,
@@ -927,17 +929,21 @@ class ChargePoint(cp):
                     self._charger_reports_session_energy = True
 
                 # --- CLEAN ROUTING ARCHITECTURE ---
-                is_eair = (measurand == DEFAULT_MEASURAND)
+                is_eair = measurand == DEFAULT_MEASURAND
 
                 # 1. If it has any phase tag, send a copy to the Phase Processor
                 if phase is not None:
                     # Mirror the Transaction.Begin exclusion used by best_eair_idx selection
-                    if not (is_eair and context == ReadingContext.transaction_begin.value):
+                    if not (
+                        is_eair and context == ReadingContext.transaction_begin.value
+                    ):
                         unprocessed.append(sampled_value)
 
                 # 2. Decide if this packet should ALSO drive the main Session Engine.
                 #    It qualifies if it's explicitly generic (None), OR if it's the primary L1 energy meter.
-                is_main_tracker = (phase is None) or (is_eair and phase in ["L1", "L1-N"])
+                is_main_tracker = (phase is None) or (
+                    is_eair and phase in ["L1", "L1-N"]
+                )
 
                 if is_main_tracker:
                     # Determine if this is a single-connector charger (only if explicitly known)

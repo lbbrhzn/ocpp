@@ -539,7 +539,14 @@ async def test_process_phases_routing_and_conversion():
     payload = [
         MeasurandValue("Voltage", 240.0, Phase.l1_n.value, "V", None, None),
         MeasurandValue("Power.Active.Import", 7000.0, Phase.l1.value, "W", None, None),
-        MeasurandValue(Measurand.energy_active_import_register.value, 15000.0, Phase.l1.value, "Wh", None, None),
+        MeasurandValue(
+            Measurand.energy_active_import_register.value,
+            15000.0,
+            Phase.l1.value,
+            "Wh",
+            None,
+            None,
+        ),
     ]
 
     BaseCP.process_phases(cp, payload, connector_id=1)
@@ -550,8 +557,14 @@ async def test_process_phases_routing_and_conversion():
     assert cp._metrics[(1, "Power.Active.Import.L1")].value == 7.0
     assert cp._metrics[(1, "Power.Active.Import.L1")].unit == "kW"
 
-    assert cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].value == 15.0
-    assert cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].unit == "kWh"
+    assert (
+        cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].value
+        == 15.0
+    )
+    assert (
+        cp._metrics[(1, f"{Measurand.energy_active_import_register.value}.L1")].unit
+        == "kWh"
+    )
 
 @pytest.mark.timeout(5)
 async def test_process_measurands_session_routing_and_leak_prevention():
@@ -569,7 +582,7 @@ async def test_process_measurands_session_routing_and_leak_prevention():
             Phase.l1.value,
             "Wh",
             ReadingContext.transaction_begin.value,
-            None
+            None,
         )
     ]
 
@@ -588,11 +601,14 @@ async def test_process_measurands_session_routing_and_leak_prevention():
             Phase.l1.value,
             "Wh",
             ReadingContext.sample_periodic.value,
-            None
+            None,
         )
     ]
 
-    BaseCP.process_measurands(cp, [bucket_periodic], is_transaction=True, connector_id=1)
+    BaseCP.process_measurands(
+        cp, [bucket_periodic], is_transaction=True, connector_id=1
+    )
+
 
     # Assert it WAS passed to process_phases
     called_args = cp.process_phases.call_args[0][0]
