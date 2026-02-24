@@ -566,6 +566,7 @@ async def test_process_phases_routing_and_conversion():
         == "kWh"
     )
 
+
 @pytest.mark.timeout(5)
 async def test_process_measurands_session_routing_and_leak_prevention():
     """Test phased EAIR feeds the session tracker and blocks Transaction.Begin leaks."""
@@ -608,7 +609,6 @@ async def test_process_measurands_session_routing_and_leak_prevention():
     BaseCP.process_measurands(
         cp, [bucket_periodic], is_transaction=True, connector_id=1
     )
-
 
     # Assert it WAS passed to process_phases
     called_args = cp.process_phases.call_args[0][0]
