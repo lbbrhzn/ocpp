@@ -614,3 +614,52 @@ async def test_process_measurands_session_routing_and_leak_prevention():
     called_args = cp.process_phases.call_args[0][0]
     assert len(called_args) == 1
     assert called_args[0].value == 15000.0
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_clean_measurands_logic():
+    """Test that get_supported_measurands strips illegal phases and drops garbage."""
+    from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
+    from custom_components.ocpp.const import DEFAULT_MEASURAND
+    from unittest.mock import MagicMock, AsyncMock
+
+    # 1. Setup Mock v1.6 ChargePoint
+    cp = MagicMock(spec=CPv16)
+    cp.id = "test_charger"
+    cp.settings = MagicMock()
+    # Force the non-autodetect path to keep the test fast and isolated
+    cp.settings.monitored_variables = ""
+    cp.settings.monitored_variables_autoconfig = False 
+    cp.configure = AsyncMock()
+
+    # Scenario A: Real-world messy data from a broken firmware charger
+    dirty_string = (
+        "Voltage.L1-N, Voltage.N, Temperature, Current.Offered.L1, "
+        "Current.Import.L1, Power.Active.Import.L1, "
+        "Energy.Active.Import.Register.L1, GarbageText.L2, "
+        "Current.Export.L2, Current.Export.L3"
+    )
+    cp.get_configuration = AsyncMock(return_value=dirty_string)
+
+    result_a = await CPv16.get_supported_measurands(cp)
+
+    result_set = set(result_a.split(","))
+    assert result_set == {
+        "Voltage", "Temperature", "Current.Offered", 
+        "Current.Import", "Power.Active.Import", 
+        "Energy.Active.Import.Register", "Current.Export"
+    }
+    assert "GarbageText" not in result_set
+
+    # Scenario B: Complete garbage (Should fall back to DEFAULT_MEASURAND)
+    cp.get_configuration = AsyncMock(return_value="TotalGarbage.L1, Random.String.N")
+    result_b = await CPv16.get_supported_measurands(cp)
+
+    assert result_b == DEFAULT_MEASURAND
+
+    # Scenario C: Empty string / None
+    cp.get_configuration = AsyncMock(return_value="")
+    result_c = await CPv16.get_supported_measurands(cp)
+
+    assert result_c == ""
+
+

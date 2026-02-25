@@ -767,6 +767,13 @@ class ChargePoint(cp):
             metric_value: float | None = None
             mname = str(metric)
 
+            # If the charger sends the "N" phase completely on its own, it will trick the math 
+            # into calculating 0.0 and overwriting the real voltage. We must abort!
+            active_phases = set(phase_info.keys()) - {"unit"}
+            if active_phases == {"N"}:
+                continue
+            # --------------------------
+
             if metric in [Measurand.voltage.value]:
                 if not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Line to neutral voltages are averaged
