@@ -12,8 +12,7 @@ from websockets.protocol import State
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
 from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
 from custom_components.ocpp.const import DEFAULT_MEASURAND
-from custom_components.ocpp.enums import Phase, ReadingContext
-from ocpp.v16.enums import Measurand
+from ocpp.v16.enums import Measurand, Phase, ReadingContext
 from unittest.mock import MagicMock, AsyncMock
 
 
