@@ -523,8 +523,7 @@ async def test_session_and_lifetime_eair_distinction(hass):
 @pytest.mark.asyncio
 async def test_process_phases_neutral_shield():
     """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
-    from custom_components.ocpp.chargepoint import ChargePoint as BaseCP
-    from custom_components.ocpp.api import MeasurandValue
+    from custom_components.ocpp.chargepoint import MeasurandValue, ChargePoint as BaseCP
     from ocpp.v16.enums import Measurand, Phase
     from unittest.mock import MagicMock
 
