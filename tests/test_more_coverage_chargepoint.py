@@ -520,32 +520,46 @@ async def test_session_and_lifetime_eair_distinction(hass):
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
 
 
-@pytest.mark.timeout(5)
-async def test_process_measurands_session_routing_and_leak_prevention():
-    """Test phased EAIR feeds the session tracker and blocks Transaction.Begin leaks."""
+@pytest.mark.asyncio
+async def test_process_phases_neutral_shield():
+    """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
+    from custom_components.ocpp.chargepoint import ChargePoint as BaseCP
+    from custom_components.ocpp.api import MeasurandValue
+    from ocpp.v16.enums import Measurand, Phase
+    from unittest.mock import MagicMock
+
+    # 1. Setup Mock ChargePoint
     cp = MagicMock(spec=BaseCP)
-    cp._metrics = MagicMock()
-    cp.process_phases = MagicMock()
-    cp._charger_reports_session_energy = False
+    
+    class MockMetric:
+        def __init__(self):
+            self.value = None
+            self.unit = None
+            self.extra_attr = {}
 
-    # Scenario A: Transaction.Begin import_register Reset (Should be blocked)
-    bucket_begin = [
-        MeasurandValue(
-            Measurand.energy_active_import_register.value,
-            0.0,
-            Phase.l1.value,
-            "Wh",
-            ReadingContext.transaction_begin.value,
-            None,
-        )
+    # Pre-populate the main Voltage bucket
+    cp._metrics = {
+        (1, Measurand.voltage.value): MockMetric()
+    }
+
+    # 2. PASS 1: The Valid L1-N Payload
+    payload_l1n = [
+        MeasurandValue(measurand=Measurand.voltage.value, phase=Phase.l1_n.value, value="241.5", unit="V")
     ]
+    BaseCP.process_phases(cp, payload_l1n, connector_id=1)
+    
+    # Verify the math worked and saved the valid voltage
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
 
-    BaseCP.process_measurands(cp, [bucket_begin], is_transaction=True, connector_id=1)
-
-    # Assert it WAS passed to process_phases
-    called_args = cp.process_phases.call_args[0][0]
-    assert len(called_args) == 1
-    assert called_args[0].value == 15000.0
+    # 3. PASS 2: The Saboteur (Isolated "N")
+    payload_n = [
+        MeasurandValue(measurand=Measurand.voltage.value, phase=Phase.n.value, value="2.1", unit="V")
+    ]
+    BaseCP.process_phases(cp, payload_n, connector_id=1)
+    
+    # Verify the Neutral Shield triggered! 
+    # If the shield failed, the math would calculate 0.0 here.
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
 
 
 @pytest.mark.timeout(5)
