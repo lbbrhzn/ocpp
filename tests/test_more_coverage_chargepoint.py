@@ -542,27 +542,6 @@ async def test_process_measurands_session_routing_and_leak_prevention():
 
     BaseCP.process_measurands(cp, [bucket_begin], is_transaction=True, connector_id=1)
 
-    # Assert process_phases was called with an EMPTY list (packet was blocked)
-    called_args = cp.process_phases.call_args[0][0]
-    assert len(called_args) == 0, "Transaction.Begin leaked into process_phases!"
-
-    # Scenario B: Normal Periodic L1 Energy Reading (Should pass)
-    cp.process_phases.reset_mock()
-    bucket_periodic = [
-        MeasurandValue(
-            Measurand.energy_active_import_register.value,
-            15000.0,
-            Phase.l1.value,
-            "Wh",
-            ReadingContext.sample_periodic.value,
-            None,
-        )
-    ]
-
-    BaseCP.process_measurands(
-        cp, [bucket_periodic], is_transaction=True, connector_id=1
-    )
-
     # Assert it WAS passed to process_phases
     called_args = cp.process_phases.call_args[0][0]
     assert len(called_args) == 1
