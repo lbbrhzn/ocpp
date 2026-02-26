@@ -8,9 +8,12 @@ import pytest
 import websockets
 from websockets.protocol import State
 
+
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
 from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
 from custom_components.ocpp.const import DEFAULT_MEASURAND
+from custom_components.ocpp.enums import Phase, ReadingContext
+from ocpp.v16.enums import Measurand
 from unittest.mock import MagicMock, AsyncMock
 
 
@@ -517,6 +520,7 @@ async def test_session_and_lifetime_eair_distinction(hass):
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
 
+
 @pytest.mark.timeout(5)
 async def test_process_measurands_session_routing_and_leak_prevention():
     """Test phased EAIR feeds the session tracker and blocks Transaction.Begin leaks."""
@@ -565,12 +569,10 @@ async def test_process_measurands_session_routing_and_leak_prevention():
     assert len(called_args) == 1
     assert called_args[0].value == 15000.0
 
+
 @pytest.mark.timeout(5)
 async def test_ocppv16_clean_measurands_logic():
     """Test that get_supported_measurands strips illegal phases and drops garbage."""
-    from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
-    from custom_components.ocpp.const import DEFAULT_MEASURAND
-    from unittest.mock import MagicMock, AsyncMock
 
     # 1. Setup Mock v1.6 ChargePoint
     cp = MagicMock(spec=CPv16)
@@ -578,7 +580,7 @@ async def test_ocppv16_clean_measurands_logic():
     cp.settings = MagicMock()
     # Force the non-autodetect path to keep the test fast and isolated
     cp.settings.monitored_variables = ""
-    cp.settings.monitored_variables_autoconfig = False 
+    cp.settings.monitored_variables_autoconfig = False
     cp.configure = AsyncMock()
 
     # Scenario A: Real-world messy data from a broken firmware charger
@@ -594,9 +596,13 @@ async def test_ocppv16_clean_measurands_logic():
 
     result_set = set(result_a.split(","))
     assert result_set == {
-        "Voltage", "Temperature", "Current.Offered", 
-        "Current.Import", "Power.Active.Import", 
-        "Energy.Active.Import.Register", "Current.Export"
+        "Voltage",
+        "Temperature",
+        "Current.Offered",
+        "Current.Import",
+        "Power.Active.Import",
+        "Energy.Active.Import.Register",
+        "Current.Export",
     }
     assert "GarbageText" not in result_set
 
@@ -611,4 +617,3 @@ async def test_ocppv16_clean_measurands_logic():
     result_c = await CPv16.get_supported_measurands(cp)
 
     assert result_c == ""
-
