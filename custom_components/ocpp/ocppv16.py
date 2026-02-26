@@ -57,6 +57,7 @@ from .const import (
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
     HA_ENERGY_UNIT,
+    MEASURANDS,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -149,6 +150,55 @@ class ChargePoint(cp):
 
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
+        
+        # --- Helper to Clean Bad Measurands ---
+        def _clean_measurands(csv_string: str) -> str:
+            """Strips illegal phase tags and any other suffix added to the list."""
+            if not csv_string:
+                return ""
+
+            raw_measurands = csv_string.split(",")
+            cleaned = set()
+            dropped = set()
+
+            phase_suffixes = [
+                ".L1-N", ".L2-N", ".L3-N", 
+                ".L1-L2", ".L2-L3", ".L3-L1", 
+                ".L1", ".L2", ".L3", ".N"
+            ]
+
+            for raw_item in raw_measurands:
+                item = raw_item.strip()
+                if not item:
+                    continue
+
+                original_item = item
+                for suffix in phase_suffixes:
+                    if item.endswith(suffix):
+                        item = item[:-len(suffix)]
+                        break
+
+                if item in MEASURANDS:
+                    cleaned.add(item)
+                else:
+                    dropped.add(original_item)
+
+            if dropped:
+                _LOGGER.debug(
+                    "Charger '%s' reported unsupported/invalid measurands which were dropped: %s",
+                    self.id, ", ".join(dropped)
+                )
+
+            if not cleaned:
+                _LOGGER.debug(
+                    "Charger '%s' returned no valid measurands; falling back to just energy_active_import_register.", 
+                    self.id
+                )
+                return DEFAULT_MEASURAND
+
+            return ",".join(cleaned)
+        # ---------------------------
+
         all_measurands = self.settings.monitored_variables or ""
         autodetect_measurands = bool(self.settings.monitored_variables_autoconfig)
         key = ckey.meter_values_sampled_data.value
@@ -159,84 +209,53 @@ class ChargePoint(cp):
         effective_csv: str = ""
 
         if autodetect_measurands:
-            # One-shot CSV attempt
             if desired_csv:
-                _LOGGER.debug(
-                    "'%s' attempting CSV set for measurands: %s", self.id, desired_csv
-                )
+                _LOGGER.debug("'%s' attempting CSV set for measurands: %s", self.id, desired_csv)
                 try:
-                    resp = await self.call(
-                        call.ChangeConfiguration(key=key, value=desired_csv)
-                    )
+                    resp = await self.call(call.ChangeConfiguration(key=key, value=desired_csv))
                     if getattr(resp, "status", None) in cfg_ok:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV accepted with status=%s",
-                            self.id,
-                            resp.status,
-                        )
+                        _LOGGER.debug("'%s' measurands CSV accepted with status=%s", self.id, resp.status)
                         effective_csv = desired_csv
                     else:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration",
-                            self.id,
-                            getattr(resp, "status", None),
-                        )
+                        _LOGGER.debug("'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration", self.id, getattr(resp, "status", None))
                 except Exception as ex:
-                    _LOGGER.debug(
-                        "get_supported_measurands CSV set raised for '%s': %s",
-                        self.id,
-                        ex,
-                    )
+                    _LOGGER.debug("get_supported_measurands CSV set raised for '%s': %s", self.id, ex)
 
-            # Always read back what the charger actually has
+            # Read from charger and CLEAN IT
             chgr_csv = await self.get_configuration(key)
+            chgr_csv = _clean_measurands(chgr_csv)
 
             if not effective_csv:
-                _LOGGER.debug(
-                    "'%s' measurands not configurable by integration", self.id
-                )
+                _LOGGER.debug("'%s' measurands not configurable by integration", self.id)
                 _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
                 return chgr_csv or ""
 
-            _LOGGER.debug(
-                "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
-            )
+            _LOGGER.debug("Returning accepted measurands for '%s': '%s'", self.id, effective_csv)
             await self.configure(key, effective_csv)
             return effective_csv
 
         # Non-autodetect path:
         if desired_csv:
             try:
-                resp = await self.call(
-                    call.ChangeConfiguration(key=key, value=desired_csv)
-                )
-                _LOGGER.debug(
-                    "'%s' measurands set manually to %s", self.id, desired_csv
-                )
+                resp = await self.call(call.ChangeConfiguration(key=key, value=desired_csv))
+                _LOGGER.debug("'%s' measurands set manually to %s", self.id, desired_csv)
                 if getattr(resp, "status", None) in cfg_ok:
                     effective_csv = desired_csv
                 else:
-                    _LOGGER.debug(
-                        "'%s' manual measurands set not accepted (status=%s); using charger's value",
-                        self.id,
-                        getattr(resp, "status", None),
-                    )
+                    _LOGGER.debug("'%s' manual measurands set not accepted (status=%s); using charger's value", self.id, getattr(resp, "status", None))
                     effective_csv = await self.get_configuration(key)
             except Exception as ex:
-                _LOGGER.debug(
-                    "Manual measurands set failed for '%s': %s; using charger's value",
-                    self.id,
-                    ex,
-                )
+                _LOGGER.debug("Manual measurands set failed for '%s': %s; using charger's value", self.id, ex)
                 effective_csv = await self.get_configuration(key)
         else:
             effective_csv = await self.get_configuration(key)
 
+        # CLEAN whatever resulted from the manual path
+        effective_csv = _clean_measurands(effective_csv)
+
         if effective_csv:
             _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, effective_csv)
-            # Only configure if we successfully set our desired CSV
-            if desired_csv and effective_csv == desired_csv:
-                await self.configure(key, effective_csv)
+            await self.configure(key, effective_csv)
         else:
             _LOGGER.debug("'%s' measurands not configurable by integration", self.id)
 

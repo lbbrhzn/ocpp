@@ -9,6 +9,9 @@ import websockets
 from websockets.protocol import State
 
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
+from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
+from custom_components.ocpp.const import DEFAULT_MEASURAND
+from unittest.mock import MagicMock, AsyncMock
 
 
 # Reuse the client helpers & fixtures from your main v16 test module.
@@ -513,3 +516,99 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+@pytest.mark.timeout(5)
+async def test_process_measurands_session_routing_and_leak_prevention():
+    """Test phased EAIR feeds the session tracker and blocks Transaction.Begin leaks."""
+    cp = MagicMock(spec=BaseCP)
+    cp._metrics = MagicMock()
+    cp.process_phases = MagicMock()
+    cp._charger_reports_session_energy = False
+
+    # Scenario A: Transaction.Begin import_register Reset (Should be blocked)
+    bucket_begin = [
+        MeasurandValue(
+            Measurand.energy_active_import_register.value,
+            0.0,
+            Phase.l1.value,
+            "Wh",
+            ReadingContext.transaction_begin.value,
+            None,
+        )
+    ]
+
+    BaseCP.process_measurands(cp, [bucket_begin], is_transaction=True, connector_id=1)
+
+    # Assert process_phases was called with an EMPTY list (packet was blocked)
+    called_args = cp.process_phases.call_args[0][0]
+    assert len(called_args) == 0, "Transaction.Begin leaked into process_phases!"
+
+    # Scenario B: Normal Periodic L1 Energy Reading (Should pass)
+    cp.process_phases.reset_mock()
+    bucket_periodic = [
+        MeasurandValue(
+            Measurand.energy_active_import_register.value,
+            15000.0,
+            Phase.l1.value,
+            "Wh",
+            ReadingContext.sample_periodic.value,
+            None,
+        )
+    ]
+
+    BaseCP.process_measurands(
+        cp, [bucket_periodic], is_transaction=True, connector_id=1
+    )
+
+    # Assert it WAS passed to process_phases
+    called_args = cp.process_phases.call_args[0][0]
+    assert len(called_args) == 1
+    assert called_args[0].value == 15000.0
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_clean_measurands_logic():
+    """Test that get_supported_measurands strips illegal phases and drops garbage."""
+    from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
+    from custom_components.ocpp.const import DEFAULT_MEASURAND
+    from unittest.mock import MagicMock, AsyncMock
+
+    # 1. Setup Mock v1.6 ChargePoint
+    cp = MagicMock(spec=CPv16)
+    cp.id = "test_charger"
+    cp.settings = MagicMock()
+    # Force the non-autodetect path to keep the test fast and isolated
+    cp.settings.monitored_variables = ""
+    cp.settings.monitored_variables_autoconfig = False 
+    cp.configure = AsyncMock()
+
+    # Scenario A: Real-world messy data from a broken firmware charger
+    dirty_string = (
+        "Voltage.L1-N, Voltage.N, Temperature, Current.Offered.L1, "
+        "Current.Import.L1, Power.Active.Import.L1, "
+        "Energy.Active.Import.Register.L1, GarbageText.L2, "
+        "Current.Export.L2, Current.Export.L3"
+    )
+    cp.get_configuration = AsyncMock(return_value=dirty_string)
+
+    result_a = await CPv16.get_supported_measurands(cp)
+
+    result_set = set(result_a.split(","))
+    assert result_set == {
+        "Voltage", "Temperature", "Current.Offered", 
+        "Current.Import", "Power.Active.Import", 
+        "Energy.Active.Import.Register", "Current.Export"
+    }
+    assert "GarbageText" not in result_set
+
+    # Scenario B: Complete garbage (Should fall back to DEFAULT_MEASURAND)
+    cp.get_configuration = AsyncMock(return_value="TotalGarbage.L1, Random.String.N")
+    result_b = await CPv16.get_supported_measurands(cp)
+
+    assert result_b == DEFAULT_MEASURAND
+
+    # Scenario C: Empty string / None
+    cp.get_configuration = AsyncMock(return_value="")
+    result_c = await CPv16.get_supported_measurands(cp)
+
+    assert result_c == ""
+
