@@ -586,9 +586,9 @@ async def test_ocppv16_clean_measurands_logic():
     # Scenario A: Real-world messy data from a broken firmware charger
     dirty_string = (
         "Voltage.L1-N, Voltage.N, Temperature, Current.Offered.L1, "
-        "Current.Import.L1, Power.Active.Import.L1, "
+        "Current.Import.L1, Power.Active.Import.L1, , "
         "Energy.Active.Import.Register.L1, GarbageText.L2, "
-        "Current.Export.L2, Current.Export.L3"
+        "Current.Export.L2, Current.Export.L3, "
     )
     cp.get_configuration = AsyncMock(return_value=dirty_string)
 
