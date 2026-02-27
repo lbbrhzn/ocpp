@@ -12,7 +12,7 @@ from websockets.protocol import State
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
 from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
 from custom_components.ocpp.const import DEFAULT_MEASURAND
-from ocpp.v16.enums import Measurand, Phase, ReadingContext
+from ocpp.v16.enums import Measurand, Phase
 from unittest.mock import MagicMock, AsyncMock
 
 
@@ -523,13 +523,12 @@ async def test_session_and_lifetime_eair_distinction(hass):
 @pytest.mark.asyncio
 async def test_process_phases_neutral_shield():
     """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
-    from custom_components.ocpp.chargepoint import MeasurandValue, ChargePoint as BaseCP
-    from ocpp.v16.enums import Measurand, Phase
+    from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
     from unittest.mock import MagicMock
 
     # 1. Setup Mock ChargePoint
     cp = MagicMock(spec=BaseCP)
-    
+
     class MockMetric:
         def __init__(self):
             self.value = None
@@ -537,27 +536,37 @@ async def test_process_phases_neutral_shield():
             self.extra_attr = {}
 
     # Pre-populate the main Voltage bucket
-    cp._metrics = {
-        (1, Measurand.voltage.value): MockMetric()
-    }
+    cp._metrics = {(1, Measurand.voltage.value): MockMetric()}
 
-    # 2. PASS 1: The Valid L1-N Payload
+    # 2. PASS 1: The Valid L1-N Payload (Positional format: measurand, value, phase, unit, context, location)
     payload_l1n = [
-        MeasurandValue(measurand=Measurand.voltage.value, phase=Phase.l1_n.value, value="241.5", unit="V")
+        MeasurandValue(
+            Measurand.voltage.value,
+            241.5,
+            Phase.l1_n.value,
+            "V",
+            None,
+            None,
+        )
     ]
     BaseCP.process_phases(cp, payload_l1n, connector_id=1)
-    
-    # Verify the math worked and saved the valid voltage
+
     assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
 
-    # 3. PASS 2: The Saboteur (Isolated "N")
+    # 3. PASS 2: The Isolated "N" Payload (The Saboteur)
     payload_n = [
-        MeasurandValue(measurand=Measurand.voltage.value, phase=Phase.n.value, value="2.1", unit="V")
+        MeasurandValue(
+            Measurand.voltage.value,
+            2.1,
+            Phase.n.value,
+            "V",
+            None,
+            None,
+        )
     ]
     BaseCP.process_phases(cp, payload_n, connector_id=1)
-    
-    # Verify the Neutral Shield triggered! 
-    # If the shield failed, the math would calculate 0.0 here.
+
+    # Shield should protect the 241.5 value!
     assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
 
 
