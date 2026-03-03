@@ -924,12 +924,12 @@ class ChargePoint(cp):
                             # connector_id == 0 or missing → map based on topology
                             target_cid = 1 if single else 0
                     else:
-                        # For single-connector chargers, remap connector 0 to connector 1
-                        # to match process_phases behavior and ensure consistent metric storage.
-                        # This prevents measurands sent on connectorId=0 (e.g., clock-aligned data)
-                        # from being stored in a different slot than periodic data on connectorId=1.
-                        if single and (connector_id is None or connector_id == 0):
-                            target_cid = 1
+                        # Remap connector_id=None/0 consistently, matching process_phases behavior.
+                        # Single-connector → slot 1; multi-connector → slot 0 (charger-wide).
+                        # Without this, connector_id=None would pass through as a dict key and
+                        # break _ConnectorAwareMetrics.__getitem__ on multi-connector chargers.
+                        if connector_id is None or connector_id == 0:
+                            target_cid = 1 if single else 0
                         else:
                             target_cid = connector_id
 
