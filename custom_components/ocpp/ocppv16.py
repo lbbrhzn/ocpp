@@ -1086,6 +1086,9 @@ class ChargePoint(cp):
             self._active_tx[connector_id] = tx_id
             self.active_transaction_id = tx_id
             self._metrics[(connector_id, cstat.id_tag.value)].value = id_tag
+            # StartTransaction is not always preceded by Authorize (local auth).
+            # Ensure charger-level id_tag (connector 0) is also updated.
+            self._metrics[0][cstat.id_tag.value].value = id_tag
             self._metrics[(connector_id, cstat.stop_reason.value)].value = ""
             self._metrics[(connector_id, csess.transaction_id.value)].value = tx_id
             try:
@@ -1138,6 +1141,7 @@ class ChargePoint(cp):
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
         self._metrics[(conn, cstat.id_tag.value)].value = ""
+        self._metrics[0][cstat.id_tag.value].value = ""
         self._metrics[(conn, csess.transaction_id.value)].value = 0
         self._metrics[(conn, cstat.stop_reason.value)].value = kwargs.get(
             om.reason.name, None
