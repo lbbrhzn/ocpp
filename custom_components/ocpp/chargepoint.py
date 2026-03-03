@@ -924,7 +924,14 @@ class ChargePoint(cp):
                             # connector_id == 0 or missing → map based on topology
                             target_cid = 1 if single else 0
                     else:
-                        target_cid = connector_id
+                        # Remap connector_id=None/0 consistently, matching process_phases behavior.
+                        # Single-connector → slot 1; multi-connector → slot 0 (charger-wide).
+                        # Without this, connector_id=None would pass through as a dict key and
+                        # break _ConnectorAwareMetrics.__getitem__ on multi-connector chargers.
+                        if connector_id is None or connector_id == 0:
+                            target_cid = 1 if single else 0
+                        else:
+                            target_cid = connector_id
 
                     # For EAIR: process only the best candidate in this bucket, skip others (incl. Transaction.Begin)
                     if is_eair and idx != best_eair_idx:
