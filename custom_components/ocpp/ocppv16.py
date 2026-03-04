@@ -1141,7 +1141,21 @@ class ChargePoint(cp):
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
         self._metrics[(conn, cstat.id_tag.value)].value = ""
-        self._metrics[0][cstat.id_tag.value].value = ""
+        # Only clear station-level id_tag if no other connector still has an active
+        # transaction.  Otherwise, keep connector 0 aligned to a remaining active
+        # connector's id_tag so the charger-level sensor stays accurate.
+        remaining_active = [
+            cid
+            for cid, tx in self._active_tx.items()
+            if cid != conn and int(tx or 0) > 0
+        ]
+        if not remaining_active:
+            self._metrics[0][cstat.id_tag.value].value = ""
+        else:
+            keep_cid = remaining_active[0]
+            self._metrics[0][cstat.id_tag.value].value = (
+                self._metrics[(keep_cid, cstat.id_tag.value)].value or ""
+            )
         self._metrics[(conn, csess.transaction_id.value)].value = 0
         self._metrics[(conn, cstat.stop_reason.value)].value = kwargs.get(
             om.reason.name, None
