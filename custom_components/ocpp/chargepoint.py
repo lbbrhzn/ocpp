@@ -334,6 +334,7 @@ class ChargePoint(cp):
 
             accepted_measurands: str = await self.get_supported_measurands()
             updated_entry = {**self.entry.data}
+            entry_changed = False
             for i in range(len(updated_entry[CONF_CPIDS])):
                 if self.id in updated_entry[CONF_CPIDS][i]:
                     s = updated_entry[CONF_CPIDS][i][self.id]
@@ -342,9 +343,14 @@ class ChargePoint(cp):
                     ) != int(self.num_connectors):
                         s[CONF_MONITORED_VARIABLES] = accepted_measurands
                         s[CONF_NUM_CONNECTORS] = int(self.num_connectors)
+                        entry_changed = True
                     break
-            # if an entry differs this will unload/reload and stop/restart the central system/websocket
-            self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
+            # Only reload the integration when charger-reported settings actually change.
+            if entry_changed:
+                # if an entry differs this will unload/reload and stop/restart the central system/websocket
+                self.hass.config_entries.async_update_entry(
+                    self.entry, data=updated_entry
+                )
 
             await self.set_standard_configuration()
 

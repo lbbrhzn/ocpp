@@ -21,6 +21,8 @@ from custom_components.ocpp.const import (
     DOMAIN,
     CentralSystemSettings,
     ChargerSystemSettings,
+    CONF_MONITORED_VARIABLES,
+    CONF_NUM_CONNECTORS,
     DEFAULT_ENERGY_UNIT,
     DEFAULT_POWER_UNIT,
     HA_ENERGY_UNIT,
@@ -193,6 +195,72 @@ async def test_async_update_device_info_updates_metrics_and_registry(hass):
     assert dev.manufacturer == "Acme"
     assert dev.model == "Model X"
     assert dev.sw_version == "1.2.3"
+
+
+@pytest.mark.asyncio
+async def test_post_connect_skips_entry_reload_when_values_unchanged(hass, monkeypatch):
+    """Test post_connect avoids config entry reload when charger data is unchanged."""
+    entry_data = _mk_entry_data()
+    entry_data["cpids"] = [
+        {
+            "CP_A": {
+                "cpid": "test_cpid",
+                CONF_MONITORED_VARIABLES: "Voltage",
+                CONF_NUM_CONNECTORS: 1,
+            }
+        }
+    ]
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data, entry_id="e-post-connect")
+    entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    central = CentralSystemSettings(**entry.data)
+    charger = ChargerSystemSettings(
+        cpid="test_cpid",
+        max_current=32.0,
+        idle_interval=60,
+        meter_interval=60,
+        monitored_variables="Voltage",
+        monitored_variables_autoconfig=False,
+        skip_schema_validation=False,
+        force_smart_charging=False,
+    )
+    conn = SimpleNamespace(state=State.CLOSED, close=lambda: asyncio.sleep(0))
+    cp = ChargePoint("CP_A", conn, OcppVersion.V201, hass, entry, central, charger)
+
+    async def fake_get_number_of_connectors():
+        return 1
+
+    async def fake_get_heartbeat_interval():
+        return 300
+
+    async def fake_get_supported_measurands():
+        return "Voltage"
+
+    async def fake_set_standard_configuration():
+        return None
+
+    monkeypatch.setattr(cp, "get_number_of_connectors", fake_get_number_of_connectors)
+    monkeypatch.setattr(cp, "get_heartbeat_interval", fake_get_heartbeat_interval)
+    monkeypatch.setattr(cp, "get_supported_measurands", fake_get_supported_measurands)
+    monkeypatch.setattr(
+        cp, "set_standard_configuration", fake_set_standard_configuration
+    )
+
+    update_calls = []
+
+    def fake_async_update_entry(*args, **kwargs):
+        update_calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        hass.config_entries, "async_update_entry", fake_async_update_entry
+    )
+
+    await cp.post_connect()
+    await hass.async_block_till_done()
+
+    assert cp.post_connect_success is True
+    assert update_calls == []
 
 
 def test_get_ha_metric_prefers_exact_entity(hass):

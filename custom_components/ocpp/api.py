@@ -94,6 +94,40 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
 
+def _format_socket_address(address) -> str:
+    """Format transport addresses for structured logging."""
+    if isinstance(address, tuple):
+        return ":".join(str(part) for part in address)
+    if address in (None, ""):
+        return "unknown"
+    return str(address)
+
+
+class OcppServerConnection(ServerConnection):
+    """Server connection with handshake diagnostics."""
+
+    async def handshake(self, *args, **kwargs):
+        """Log peer details when the opening handshake fails."""
+        try:
+            return await super().handshake(*args, **kwargs)
+        except Exception as err:
+            secure = bool(
+                getattr(self, "transport", None)
+                and self.transport.get_extra_info("sslcontext")
+            )
+            _LOGGER.warning(
+                (
+                    "WebSocket opening handshake failed: "
+                    "peer=%s local=%s secure=%s error=%s"
+                ),
+                _format_socket_address(getattr(self, "remote_address", None)),
+                _format_socket_address(getattr(self, "local_address", None)),
+                secure,
+                err,
+            )
+            raise
+
+
 class CentralSystem:
     """Server for handling OCPP connections."""
 
@@ -186,6 +220,7 @@ class CentralSystem:
             self.settings.port,
             select_subprotocol=self.select_subprotocol,
             subprotocols=self.subprotocols,
+            create_connection=OcppServerConnection,
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
             ping_timeout=None,
             close_timeout=self.settings.websocket_close_timeout,
@@ -226,14 +261,28 @@ class CentralSystem:
 
     async def on_connect(self, websocket: ServerConnection):
         """Request handler executed for every new OCPP connection."""
+        peer = _format_socket_address(getattr(websocket, "remote_address", None))
+        local = _format_socket_address(getattr(websocket, "local_address", None))
         if websocket.subprotocol is not None:
-            _LOGGER.info("Websocket Subprotocol matched: %s", websocket.subprotocol)
+            _LOGGER.warning(
+                "Websocket Subprotocol matched: %s peer=%s local=%s",
+                websocket.subprotocol,
+                peer,
+                local,
+            )
         else:
-            _LOGGER.info(
-                "Websocket Subprotocol not provided by charger: default to ocpp1.6"
+            _LOGGER.warning(
+                (
+                    "Websocket Subprotocol not provided by charger: "
+                    "default to ocpp1.6 peer=%s local=%s"
+                ),
+                peer,
+                local,
             )
 
-        _LOGGER.info(f"Charger websocket path={websocket.request.path}")
+        _LOGGER.warning(
+            "Charger websocket path=%s peer=%s", websocket.request.path, peer
+        )
         cp_id = websocket.request.path.strip("/")
         cp_id = cp_id[cp_id.rfind("/") + 1 :]
         if cp_id not in self.charge_points:
