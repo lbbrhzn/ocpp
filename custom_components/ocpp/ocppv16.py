@@ -152,12 +152,22 @@ class ChargePoint(cp):
         """Get comma-separated list of measurands supported by the charger."""
 
         def _filter_measurands(raw_csv: str) -> str:
-            """Keep only compliant measurands found as substrings in the charger's string."""
-            if not raw_csv:
+            """Keep only compliant measurands found as tokens in the charger's string."""
+            if not raw_csv or raw_csv.strip() == "Unknown":
                 return ""
 
-            # Find any official measurand that exists as a substring in the raw data
-            matched = [m for m in MEASURANDS if m in raw_csv]
+            matched = []
+            for token in raw_csv.split(","):
+                token = token.strip()
+                if not token:
+                    continue
+
+                for m in MEASURANDS:
+                    # Token-aware match: Exact match OR prefix match with a dot (e.g. "Voltage.L1")
+                    if token == m or token.startswith(f"{m}."):
+                        if m not in matched:
+                            matched.append(m)
+                        break  # Match found for this token, move to the next one
 
             if not matched:
                 _LOGGER.debug(
@@ -165,7 +175,6 @@ class ChargePoint(cp):
                     self.id,
                 )
                 return DEFAULT_MEASURAND
-
             return ",".join(matched)
 
         all_measurands = self.settings.monitored_variables or ""
