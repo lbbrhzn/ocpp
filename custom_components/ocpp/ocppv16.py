@@ -151,63 +151,22 @@ class ChargePoint(cp):
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
 
-        # --- Helper to Clean Bad Measurands ---
-        def _clean_measurands(csv_string: str) -> str:
-            """Strip illegal phase tags and any other suffix added to the list."""
-            if not csv_string:
+        def _filter_measurands(raw_csv: str) -> str:
+            """Keep only compliant measurands found as substrings in the charger's string."""
+            if not raw_csv:
                 return ""
 
-            raw_measurands = csv_string.split(",")
-            cleaned = []
-            dropped = set()
+            # Find any official measurand that exists as a substring in the raw data
+            matched = [m for m in MEASURANDS if m in raw_csv]
 
-            phase_suffixes = [
-                ".L1-N",
-                ".L2-N",
-                ".L3-N",
-                ".L1-L2",
-                ".L2-L3",
-                ".L3-L1",
-                ".L1",
-                ".L2",
-                ".L3",
-                ".N",
-            ]
-
-            for raw_item in raw_measurands:
-                item = raw_item.strip()
-                if not item:
-                    continue
-
-                original_item = item
-                for suffix in phase_suffixes:
-                    if item.endswith(suffix):
-                        item = item[: -len(suffix)]
-                        break
-
-                if item in MEASURANDS:
-                    if item not in cleaned:
-                        cleaned.append(item)
-                else:
-                    dropped.add(original_item)
-
-            if dropped:
-                _LOGGER.debug(
-                    "Charger '%s' reported unsupported/invalid measurands which were dropped: %s",
-                    self.id,
-                    ", ".join(dropped),
-                )
-
-            if not cleaned:
+            if not matched:
                 _LOGGER.debug(
                     "Charger '%s' returned no valid measurands; falling back to just energy_active_import_register.",
                     self.id,
                 )
                 return DEFAULT_MEASURAND
 
-            return ",".join(cleaned)
-
-        # ---------------------------
+            return ",".join(matched)
 
         all_measurands = self.settings.monitored_variables or ""
         autodetect_measurands = bool(self.settings.monitored_variables_autoconfig)
@@ -247,16 +206,16 @@ class ChargePoint(cp):
                         ex,
                     )
 
-            # Read from charger and CLEAN IT
+            # Read from charger and filter it using lenient logic
             chgr_csv = await self.get_configuration(key)
-            chgr_csv = _clean_measurands(chgr_csv)
+            chgr_csv = _filter_measurands(chgr_csv)
 
             if not effective_csv:
                 _LOGGER.debug(
                     "'%s' measurands not configurable by integration", self.id
                 )
                 _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
-                return chgr_csv or ""
+                return chgr_csv
 
             _LOGGER.debug(
                 "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
@@ -292,8 +251,8 @@ class ChargePoint(cp):
         else:
             effective_csv = await self.get_configuration(key)
 
-        # CLEAN whatever resulted from the manual path
-        effective_csv = _clean_measurands(effective_csv)
+        # Filter whatever resulted from the manual path
+        effective_csv = _filter_measurands(effective_csv)
 
         if effective_csv:
             _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, effective_csv)
@@ -301,7 +260,7 @@ class ChargePoint(cp):
         else:
             _LOGGER.debug("'%s' measurands not configurable by integration", self.id)
 
-        return effective_csv or ""
+        return effective_csv
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
