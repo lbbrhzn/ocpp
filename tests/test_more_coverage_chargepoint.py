@@ -9,7 +9,7 @@ import websockets
 from websockets.protocol import State
 
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
-
+from ocpp.v16.enums import Measurand, Phase
 
 # Reuse the client helpers & fixtures from your main v16 test module.
 from .test_charge_point_v16 import wait_ready, ChargePoint
