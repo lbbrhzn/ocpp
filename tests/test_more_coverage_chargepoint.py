@@ -13,7 +13,7 @@ from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandV
 from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
 from custom_components.ocpp.const import DEFAULT_MEASURAND
 from unittest.mock import MagicMock, AsyncMock
-
+from ocpp.v16.enums import Measurand, Phase
 
 # Reuse the client helpers & fixtures from your main v16 test module.
 from .test_charge_point_v16 import wait_ready, ChargePoint
@@ -517,6 +517,56 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+
+@pytest.mark.asyncio
+async def test_process_phases_neutral_shield():
+    """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
+    from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
+    from unittest.mock import MagicMock
+
+    # 1. Setup Mock ChargePoint
+    cp = MagicMock(spec=BaseCP)
+
+    class MockMetric:
+        def __init__(self):
+            self.value = None
+            self.unit = None
+            self.extra_attr = {}
+
+    # Pre-populate the main Voltage bucket
+    cp._metrics = {(1, Measurand.voltage.value): MockMetric()}
+
+    # 2. PASS 1: The Valid L1-N Payload (Positional format: measurand, value, phase, unit, context, location)
+    payload_l1n = [
+        MeasurandValue(
+            Measurand.voltage.value,
+            241.5,
+            Phase.l1_n.value,
+            "V",
+            None,
+            None,
+        )
+    ]
+    BaseCP.process_phases(cp, payload_l1n, connector_id=1)
+
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
+
+    # 3. PASS 2: The Isolated "N" Payload (The Saboteur)
+    payload_n = [
+        MeasurandValue(
+            Measurand.voltage.value,
+            2.1,
+            Phase.n.value,
+            "V",
+            None,
+            None,
+        )
+    ]
+    BaseCP.process_phases(cp, payload_n, connector_id=1)
+
+    # Shield should protect the 241.5 value!
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
 
 
 @pytest.mark.timeout(5)
