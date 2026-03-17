@@ -362,3 +362,32 @@ def test_process_phases_calculates_session_energy(hass):
     assert (
         session_energy == 5.0
     ), "Session energy should be exactly 5.0 (105.0 - 100.0)."
+
+
+def test_process_phases_initializes_session_energy_baseline(hass):
+    """Test that process_phases initializes the session energy baseline if meter_start is missing."""
+    cp = _mk_cp(hass)
+    target_cid = 1
+
+    # 1. Simulate an active charging session BUT meter_start is None
+    cp._metrics[(target_cid, csess.meter_start.value)].value = None
+    cp._metrics[(target_cid, csess.transaction_id.value)].value = 999
+
+    # Pre-populate session energy
+    cp._metrics[(target_cid, csess.session_energy.value)].value = None
+
+    # 2. Create the "unprocessed" payload from the charger (105.0 kWh on L1)
+    bucket = [
+        _mv("Energy.Active.Import.Register", 105.0, phase="L1", unit=HA_ENERGY_UNIT)
+    ]
+
+    # 3. Run the modified function
+    cp.process_phases(bucket, connector_id=target_cid)
+
+    # 4. Assert the baseline was initialized perfectly
+    meter_start = cp._metrics[(target_cid, csess.meter_start.value)].value
+    session_energy = cp._metrics[(target_cid, csess.session_energy.value)].value
+
+    assert meter_start == 105.0, "Meter start should be initialized to the first L1 reading."
+    assert session_energy == 0.0, "Session energy should be exactly 0.0 at initialization."
+
