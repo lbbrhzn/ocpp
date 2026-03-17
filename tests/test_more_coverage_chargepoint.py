@@ -8,7 +8,11 @@ import pytest
 import websockets
 from websockets.protocol import State
 
+
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
+from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
+from custom_components.ocpp.const import DEFAULT_MEASURAND
+from unittest.mock import MagicMock, AsyncMock
 from ocpp.v16.enums import Measurand, Phase
 
 # Reuse the client helpers & fixtures from your main v16 test module.
@@ -563,3 +567,52 @@ async def test_process_phases_neutral_shield():
 
     # Shield should protect the 241.5 value!
     assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
+
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_clean_measurands_logic():
+    """Test that get_supported_measurands strips illegal phases and drops garbage."""
+
+    # 1. Setup Mock v1.6 ChargePoint
+    cp = MagicMock(spec=CPv16)
+    cp.id = "test_charger"
+    cp.settings = MagicMock()
+    # Force the non-autodetect path to keep the test fast and isolated
+    cp.settings.monitored_variables = ""
+    cp.settings.monitored_variables_autoconfig = False
+    cp.configure = AsyncMock()
+
+    # Scenario A: Real-world messy data from a broken firmware charger
+    dirty_string = (
+        "Voltage.L1-N, Voltage.N, Temperature, Current.Offered.L1, "
+        "Current.Import.L1, Power.Active.Import.L1, , "
+        "Energy.Active.Import.Register.L1, GarbageText.L2, "
+        "Current.Export.L2, Current.Export.L3, "
+    )
+    cp.get_configuration = AsyncMock(return_value=dirty_string)
+
+    result_a = await CPv16.get_supported_measurands(cp)
+
+    result_set = set(result_a.split(","))
+    assert result_set == {
+        "Voltage",
+        "Temperature",
+        "Current.Offered",
+        "Current.Import",
+        "Power.Active.Import",
+        "Energy.Active.Import.Register",
+        "Current.Export",
+    }
+    assert "GarbageText" not in result_set
+
+    # Scenario B: Complete garbage (Should fall back to DEFAULT_MEASURAND)
+    cp.get_configuration = AsyncMock(return_value="TotalGarbage.L1, Random.String.N")
+    result_b = await CPv16.get_supported_measurands(cp)
+
+    assert result_b == DEFAULT_MEASURAND
+
+    # Scenario C: Empty string / None
+    cp.get_configuration = AsyncMock(return_value="")
+    result_c = await CPv16.get_supported_measurands(cp)
+
+    assert result_c == ""
