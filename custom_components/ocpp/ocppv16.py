@@ -153,29 +153,31 @@ class ChargePoint(cp):
 
         def _filter_measurands(raw_csv: str) -> str:
             """Keep only compliant measurands found as tokens in the charger's string."""
+            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
+            if not raw_csv or raw_csv.strip() == "Unknown":
+                return ""
+
             matched = []
+            for token in raw_csv.split(","):
+                token = token.strip()
+                if not token:
+                    continue
 
-            # Only attempt to parse if we have a string that isn't "Unknown"
-            if raw_csv and raw_csv.strip() != "Unknown":
-                for token in raw_csv.split(","):
-                    token = token.strip()
-                    if not token:
-                        continue
+                for m in MEASURANDS:
+                    # Token-aware match: Exact match OR prefix match with a dot (e.g. "Voltage.L1")
+                    if token == m or token.startswith(f"{m}."):
+                        if m not in matched:
+                            matched.append(m)
+                        break  # Match found for this token, move to the next one
 
-                    for m in MEASURANDS:
-                        # Token-aware match: Exact match OR prefix match with a dot (e.g. "Voltage.L1")
-                        if token == m or token.startswith(f"{m}."):
-                            if m not in matched:
-                                matched.append(m)
-                            break  # Match found for this token, move to the next one
-
-            # Fallback check (empty, Unknown, or total garbage)
             if not matched:
                 _LOGGER.debug(
-                    "Charger '%s' returned no valid measurands; falling back to just energy_active_import_register.",
+                    "Charger '%s' returned no valid measurands; falling back to %s.",
                     self.id,
+                    DEFAULT_MEASURAND,
                 )
                 return DEFAULT_MEASURAND
+
             return ",".join(matched)
 
         all_measurands = self.settings.monitored_variables or ""
