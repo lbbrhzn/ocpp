@@ -328,3 +328,37 @@ async def test_handle_call_wraps_notimplementederror_and_sends(hass):
         await cp._handle_call(DummyMsg())
 
     assert sent.get("payload") == "ERR_JSON"
+
+
+def test_process_phases_calculates_session_energy(hass):
+    """Test that process_phases derives real-time session energy for phase-tagged registers."""
+    cp = _mk_cp(hass)
+    target_cid = 1
+
+    # 1. Simulate an active charging session
+    # The car plugged in when the meter was at 100.0 kWh
+    cp._metrics[(target_cid, csess.meter_start.value)].value = 100.0
+    cp._metrics[(target_cid, csess.meter_start.value)].unit = HA_ENERGY_UNIT
+    # The transaction is currently active
+    cp._metrics[(target_cid, csess.transaction_id.value)].value = 999
+
+    # Pre-populate the session energy metric so it exists
+    cp._metrics[(target_cid, csess.session_energy.value)].value = 0.0
+    cp._metrics[(target_cid, csess.session_energy.value)].unit = HA_ENERGY_UNIT
+
+    # 2. Create the "unprocessed" payload from the charger (105.0 kWh on L1)
+    bucket = [
+        _mv("Energy.Active.Import.Register", 105.0, phase="L1", unit=HA_ENERGY_UNIT)
+    ]
+
+    # 3. Run the modified function
+    cp.process_phases(bucket, connector_id=target_cid)
+
+    # 4. Assert that the math worked perfectly
+    main_register = cp._metrics[(target_cid, "Energy.Active.Import.Register")].value
+    session_energy = cp._metrics[(target_cid, csess.session_energy.value)].value
+
+    assert main_register == 105.0, "Main register should update to the new L1 value."
+    assert session_energy == 5.0, (
+        "Session energy should be exactly 5.0 (105.0 - 100.0)."
+    )
