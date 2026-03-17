@@ -57,6 +57,7 @@ from .const import (
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
     HA_ENERGY_UNIT,
+    MEASURANDS,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -149,6 +150,36 @@ class ChargePoint(cp):
 
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
+
+        def _filter_measurands(raw_csv: str) -> str:
+            """Keep only compliant measurands found as tokens in the charger's string."""
+            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
+            if not raw_csv or raw_csv.strip().lower() == "unknown":
+                return ""
+
+            matched = []
+            for token in raw_csv.split(","):
+                token = token.strip()
+                if not token:
+                    continue
+
+                for m in MEASURANDS:
+                    # Token-aware match: Exact match OR prefix match with a dot (e.g. "Voltage.L1")
+                    if token == m or token.startswith(f"{m}."):
+                        if m not in matched:
+                            matched.append(m)
+                        break  # Match found for this token, move to the next one
+
+            if not matched:
+                _LOGGER.debug(
+                    "Charger '%s' returned no valid measurands; falling back to %s.",
+                    self.id,
+                    DEFAULT_MEASURAND,
+                )
+                return DEFAULT_MEASURAND
+
+            return ",".join(matched)
+
         all_measurands = self.settings.monitored_variables or ""
         autodetect_measurands = bool(self.settings.monitored_variables_autoconfig)
         key = ckey.meter_values_sampled_data.value
@@ -159,7 +190,6 @@ class ChargePoint(cp):
         effective_csv: str = ""
 
         if autodetect_measurands:
-            # One-shot CSV attempt
             if desired_csv:
                 _LOGGER.debug(
                     "'%s' attempting CSV set for measurands: %s", self.id, desired_csv
@@ -188,15 +218,16 @@ class ChargePoint(cp):
                         ex,
                     )
 
-            # Always read back what the charger actually has
+            # Read from charger and filter it using lenient logic
             chgr_csv = await self.get_configuration(key)
+            chgr_csv = _filter_measurands(chgr_csv)
 
             if not effective_csv:
                 _LOGGER.debug(
                     "'%s' measurands not configurable by integration", self.id
                 )
                 _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
-                return chgr_csv or ""
+                return chgr_csv
 
             _LOGGER.debug(
                 "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
@@ -232,15 +263,16 @@ class ChargePoint(cp):
         else:
             effective_csv = await self.get_configuration(key)
 
+        # Filter whatever resulted from the manual path
+        effective_csv = _filter_measurands(effective_csv)
+
         if effective_csv:
             _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, effective_csv)
-            # Only configure if we successfully set our desired CSV
-            if desired_csv and effective_csv == desired_csv:
-                await self.configure(key, effective_csv)
+            await self.configure(key, effective_csv)
         else:
             _LOGGER.debug("'%s' measurands not configurable by integration", self.id)
 
-        return effective_csv or ""
+        return effective_csv
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
