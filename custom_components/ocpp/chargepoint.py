@@ -810,10 +810,10 @@ class ChargePoint(cp):
                 metric_unit = phase_info.get(om.unit.value)
 
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[(target_cid, metric)].value = metric_value / 1000
+                    self._metrics[(target_cid, metric)].value = round(metric_value / 1000, 3)
                     self._metrics[(target_cid, metric)].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[(target_cid, metric)].value = metric_value / 1000
+                    self._metrics[(target_cid, metric)].value = round(metric_value / 1000, 3)
                     self._metrics[(target_cid, metric)].unit = HA_ENERGY_UNIT
                 else:
                     self._metrics[(target_cid, metric)].value = metric_value
@@ -821,10 +821,15 @@ class ChargePoint(cp):
 
     @staticmethod
     def get_energy_kwh(measurand_value: MeasurandValue) -> float:
-        """Convert energy value from charger to kWh."""
+        """Convert energy value from charger to kWh.
+
+        Rounds to 3 decimal places (1 Wh precision) to avoid floating-point
+        artefacts that would violate the ``total_increasing`` state-class
+        contract in Home Assistant (e.g. 0.066 → 0.0659999999998035).
+        """
         if (measurand_value.unit == "Wh") or (measurand_value.unit is None):
-            return measurand_value.value / 1000
-        return measurand_value.value
+            return round(measurand_value.value / 1000, 3)
+        return round(measurand_value.value, 3)
 
     def process_measurands(
         self,
@@ -904,7 +909,7 @@ class ChargePoint(cp):
                     unit = HA_ENERGY_UNIT
 
                 if unit == DEFAULT_POWER_UNIT:
-                    value = value / 1000
+                    value = round(value / 1000, 3)
                     unit = HA_POWER_UNIT
 
                 if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
