@@ -810,14 +810,47 @@ class ChargePoint(cp):
                 metric_unit = phase_info.get(om.unit.value)
 
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[(target_cid, metric)].value = metric_value / 1000
-                    self._metrics[(target_cid, metric)].unit = HA_POWER_UNIT
+                    final_value = metric_value / 1000
+                    final_unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[(target_cid, metric)].value = metric_value / 1000
-                    self._metrics[(target_cid, metric)].unit = HA_ENERGY_UNIT
+                    final_value = metric_value / 1000
+                    final_unit = HA_ENERGY_UNIT
                 else:
-                    self._metrics[(target_cid, metric)].value = metric_value
-                    self._metrics[(target_cid, metric)].unit = metric_unit
+                    final_value = metric_value
+                    final_unit = metric_unit
+
+                self._metrics[(target_cid, metric)].value = final_value
+                self._metrics[(target_cid, metric)].unit = final_unit
+
+                # Amend session energy based on incoming Energy.Active.Import.Register values if the charger does not report session energy directly.
+                if metric == DEFAULT_MEASURAND and not getattr(
+                    self, "_charger_reports_session_energy", False
+                ):
+                    # Verify we are in an active transaction
+                    tx_metric = self._metrics.get(
+                        (target_cid, csess.transaction_id.value)
+                    )
+
+                    if tx_metric and tx_metric.value:
+                        # Get meter start and session energy metrics
+                        ms_metric = self._metrics.get((target_cid, csess.meter_start))
+                        se_metric = self._metrics.get(
+                            (target_cid, csess.session_energy.value)
+                        )
+
+                        if ms_metric and se_metric:
+                            # Initialize baseline if missing
+                            if ms_metric.value is None:
+                                ms_metric.value = final_value
+                                ms_metric.unit = final_unit
+                                se_metric.value = 0.0
+                                se_metric.unit = final_unit
+                            # Session Energy Math: Current Total - Start Total
+                            elif ms_metric.unit == final_unit:
+                                se_metric.value = (
+                                    round(1000 * (final_value - ms_metric.value)) / 1000
+                                )
+                                se_metric.unit = final_unit
 
     @staticmethod
     def get_energy_kwh(measurand_value: MeasurandValue) -> float:
