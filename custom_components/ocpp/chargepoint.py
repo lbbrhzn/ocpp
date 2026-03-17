@@ -833,7 +833,7 @@ class ChargePoint(cp):
 
                     if tx_metric and tx_metric.value:
                         # Get meter start and session energy metrics
-                        ms_metric = self._metrics.get((target_cid, csess.meter_start))
+                        ms_metric = self._metrics.get((target_cid, csess.meter_start.value))
                         se_metric = self._metrics.get(
                             (target_cid, csess.session_energy.value)
                         )
