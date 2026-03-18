@@ -896,6 +896,10 @@ class ChargePoint(cp):
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
 
+                # Normalize lazy single-phase chargers that tag Energy.Active.Import.Register with L1
+                if measurand == DEFAULT_MEASURAND and phase == Phase.l1.value:
+                    phase = None
+
                 # Normalize units
                 if unit == DEFAULT_ENERGY_UNIT:
                     value = ChargePoint.get_energy_kwh(
