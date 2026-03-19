@@ -1046,7 +1046,15 @@ class ChargePoint(cp):
                                     (target_cid, csess.session_energy.value)
                                 ].unit = unit
                 else:
-                    unprocessed.append(sampled_value)
+                    normalized_value = MeasurandValue(
+                        measurand=measurand,
+                        value=value,
+                        phase=phase,
+                        unit=unit,
+                        context=context,
+                        location=location,
+                    )
+                    unprocessed.append(normalized_value)
 
             try:
                 self.process_phases(unprocessed, connector_id)
