@@ -732,9 +732,9 @@ class ChargePoint(cp):
         line_to_line_phases = [Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value]
 
         def _avg_l123(phase_info: dict) -> float:
-            return average_of_nonzero([
-                phase_info.get(phase, 0.0) for phase in phases_l123
-            ])
+            return average_of_nonzero(
+                [phase_info.get(phase, 0.0) for phase in phases_l123]
+            )
 
         def _sum_l123(phase_info: dict) -> float:
             return sum(phase_info.get(phase, 0.0) for phase in phases_l123)
@@ -753,14 +753,14 @@ class ChargePoint(cp):
             if metric in [Measurand.voltage.value]:
                 if not phase_info.keys().isdisjoint(line_to_neutral_phases):
                     # Line to neutral voltages are averaged
-                    metric_value = average_of_nonzero([
-                        phase_info.get(phase, 0.0) for phase in line_to_neutral_phases
-                    ])
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0.0) for phase in line_to_neutral_phases]
+                    )
                 elif not phase_info.keys().isdisjoint(line_to_line_phases):
                     # Line to line voltages are averaged and converted to line to neutral
-                    metric_value = average_of_nonzero([
-                        phase_info.get(phase, 0.0) for phase in line_to_line_phases
-                    ]) / sqrt(3)
+                    metric_value = average_of_nonzero(
+                        [phase_info.get(phase, 0.0) for phase in line_to_line_phases]
+                    ) / sqrt(3)
                 elif not phase_info.keys().isdisjoint(line_phases_all):
                     # Workaround for chargers that don't follow engineering convention
                     # Assumes voltages are line to neutral
@@ -774,19 +774,21 @@ class ChargePoint(cp):
                         metric_value = _avg_l123(phase_info)
                     elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
                         # Workaround for some chargers that erroneously use line to neutral for current
-                        metric_value = average_of_nonzero([
-                            phase_info.get(phase, 0.0)
-                            for phase in line_to_neutral_phases
-                        ])
+                        metric_value = average_of_nonzero(
+                            [
+                                phase_info.get(phase, 0.0)
+                                for phase in line_to_neutral_phases
+                            ]
+                        )
 
                 # Special-case: Power.Factor must be averaged, never summed
                 elif metric == Measurand.power_factor.value:
                     if not phase_info.keys().isdisjoint(phases_l123):
                         metric_value = _avg_l123(phase_info)
                     elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
-                        metric_value = average_of_nonzero([
-                            phase_info.get(p, 0.0) for p in line_to_neutral_phases
-                        ])
+                        metric_value = average_of_nonzero(
+                            [phase_info.get(p, 0.0) for p in line_to_neutral_phases]
+                        )
                     # If only a single phase value exists, just pass it through
                     else:
                         metric_value = next(
@@ -825,21 +827,27 @@ class ChargePoint(cp):
                     self, "_charger_reports_session_energy", False
                 ):
                     # Verify we are in an active transaction
-                    tx_metric = self._metrics.get((
-                        target_cid,
-                        csess.transaction_id.value,
-                    ))
+                    tx_metric = self._metrics.get(
+                        (
+                            target_cid,
+                            csess.transaction_id.value,
+                        )
+                    )
 
                     if tx_metric and tx_metric.value:
                         # Get meter start and session energy metrics
-                        ms_metric = self._metrics.get((
-                            target_cid,
-                            csess.meter_start.value,
-                        ))
-                        se_metric = self._metrics.get((
-                            target_cid,
-                            csess.session_energy.value,
-                        ))
+                        ms_metric = self._metrics.get(
+                            (
+                                target_cid,
+                                csess.meter_start.value,
+                            )
+                        )
+                        se_metric = self._metrics.get(
+                            (
+                                target_cid,
+                                csess.session_energy.value,
+                            )
+                        )
 
                         if ms_metric and se_metric:
                             # Initialize baseline if missing
