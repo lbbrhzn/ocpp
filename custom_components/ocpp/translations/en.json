@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "OCPP Central System Configuration",
-                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+                "description": "If you need help with the configuration have a look [here]({docs_url})",
                 "data": {
                     "host": "Central system host address",
                     "port": "Central system port number",
@@ -19,7 +19,7 @@
             },
             "cp_user": {
                 "title": "OCPP Charger Configuration",
-                "description": "If you need help with the configuration have a look here: https://github.com/lbbrhzn/ocpp",
+                "description": "If you need help with the configuration have a look [here]({docs_url})",
                 "data": {
                     "cpid": "Charge point identity",
                     "max_current": "Maximum charging current",
@@ -61,7 +61,8 @@
         },
         "error": {
             "auth": "Username/Password is wrong.",
-            "no_measurands_selected": "No measurand selected: please select at least one"
+            "no_measurands_selected": "No measurand selected: please select at least one",
+            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _"
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed",

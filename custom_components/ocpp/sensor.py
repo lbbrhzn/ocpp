@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.util import slugify
 
 from .api import CentralSystem
 from .const import (
@@ -105,7 +106,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
         def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
             ms = str(metric).strip()
             return OcppSensorDescription(
-                key=ms.lower(),
+                key=ms.lower().replace(".", "_"),
                 name=ms.replace(".", " "),
                 metric=ms,
                 entity_category=EntityCategory.DIAGNOSTIC if cat_diag else None,
@@ -224,7 +225,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             object_id = f"{self.cpid}_connector_{self.connector_id}_{self.entity_description.key}"
         else:
             object_id = f"{self.cpid}_{self.entity_description.key}"
-        self.entity_id = f"{SENSOR_DOMAIN}.{object_id}"
+        self.entity_id = f"{SENSOR_DOMAIN}.{slugify(object_id)}"
         self._attr_icon = ICON
         self._attr_native_unit_of_measurement = None
 

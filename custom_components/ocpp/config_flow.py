@@ -7,6 +7,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     CONN_CLASS_LOCAL_PUSH,
 )
+from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
 from .const import (
@@ -61,7 +62,7 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SSL, default=DEFAULT_SSL): bool,
         vol.Required(CONF_SSL_CERTFILE_PATH, default=DEFAULT_SSL_CERTFILE_PATH): str,
         vol.Required(CONF_SSL_KEYFILE_PATH, default=DEFAULT_SSL_KEYFILE_PATH): str,
-        vol.Required(CONF_CSID, default=DEFAULT_CSID): str,
+        vol.Required(CONF_CSID, default=DEFAULT_CSID): vol.All(str, vol.Length(max=20)),
         vol.Required(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, default=DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         ): int,
@@ -132,7 +133,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=self._data[CONF_CSID], data=self._data)
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_CS_DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=STEP_USER_CS_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
     async def async_step_integration_discovery(
@@ -162,29 +166,40 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Don't allow duplicate cpids to be used
             self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
-
-            cp_data = {
-                **user_input,
-                CONF_NUM_CONNECTORS: self._detected_num_connectors,
-            }
-            cpids_list = self._data.get(CONF_CPIDS, []).copy()
-            cpids_list.append({self._cp_id: cp_data})
-            self._data = {**self._data, CONF_CPIDS: cpids_list}
-
-            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
-                    DEFAULT_MONITORED_VARIABLES
-                )
-                self.hass.config_entries.async_update_entry(
-                    self._entry, data=self._data
-                )
-                return self.async_abort(reason="Added/Updated charge point")
-
+            # Validate cpid format against entity id requirements (lowercase letters, digits and _)
+            schema = vol.Schema(
+                {vol.Required(CONF_CPID): cv.matches_regex(r"^[\da-z_]+$")}
+            )
+            try:
+                schema({CONF_CPID: user_input[CONF_CPID]})
+            except vol.Invalid:
+                errors["base"] = "invalid_cpid"
             else:
-                return await self.async_step_measurands()
+                cp_data = {
+                    **user_input,
+                    CONF_NUM_CONNECTORS: self._detected_num_connectors,
+                }
+                cpids_list = self._data.get(CONF_CPIDS, []).copy()
+                cpids_list.append({self._cp_id: cp_data})
+                self._data = {**self._data, CONF_CPIDS: cpids_list}
+
+                if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                    self._data[CONF_CPIDS][-1][self._cp_id][
+                        CONF_MONITORED_VARIABLES
+                    ] = DEFAULT_MONITORED_VARIABLES
+                    self.hass.config_entries.async_update_entry(
+                        self._entry, data=self._data
+                    )
+                    return self.async_abort(reason="Added/Updated charge point")
+
+                else:
+                    return await self.async_step_measurands()
 
         return self.async_show_form(
-            step_id="cp_user", data_schema=STEP_USER_CP_DATA_SCHEMA, errors=errors
+            step_id="cp_user",
+            data_schema=STEP_USER_CP_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
     async def async_step_measurands(self, user_input=None):

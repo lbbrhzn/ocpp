@@ -10,8 +10,11 @@ from homeassistant.components.switch import (
     SwitchEntity,
     SwitchEntityDescription,
 )
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.util import slugify
 from ocpp.v16.enums import ChargePointStatus
 
 from .api import CentralSystem
@@ -20,6 +23,7 @@ from .const import (
     CONF_CPIDS,
     CONF_NUM_CONNECTORS,
     DEFAULT_NUM_CONNECTORS,
+    DATA_UPDATED,
     DOMAIN,
     ICON,
 )
@@ -193,7 +197,7 @@ class ChargePointSwitch(SwitchEntity):
             object_id = f"{self.cpid}_connector_{self.connector_id}_{self.entity_description.key}"
         else:
             object_id = f"{self.cpid}_{self.entity_description.key}"
-        self.entity_id = f"{SWITCH_DOMAIN}.{object_id}"
+        self.entity_id = f"{SWITCH_DOMAIN}.{slugify(object_id)}"
 
     @property
     def available(self) -> bool:
@@ -202,6 +206,11 @@ class ChargePointSwitch(SwitchEntity):
             self.connector_id if self.entity_description.per_connector else None
         )
         return bool(self.central_system.get_available(self.cpid, target_conn))
+
+    @property
+    def should_poll(self) -> bool:
+        """Don't poll - updates will be pushed."""
+        return False
 
     @property
     def is_on(self) -> bool:
@@ -250,3 +259,26 @@ class ChargePointSwitch(SwitchEntity):
                 self.cpid, self.entity_description.off_action, connector_id=target_conn
             )
         self._state = not resp
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+
+        @callback
+        def update(*args):
+            """Pass through real-time updates to state."""
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_schedule_update_ha_state(True)
+
+        # subscribe to updates
+        self.async_on_remove(async_dispatcher_connect(self.hass, DATA_UPDATED, update))
+
+        # Ensure switch publishes its current state immediately after being added
+        self.async_schedule_update_ha_state(True)

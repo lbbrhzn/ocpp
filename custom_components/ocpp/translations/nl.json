@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "OCPP Configuratie",
-                "description": "Voor hulp bij configuratie zie: https://github.com/lbbrhzn/ocpp",
+                "description": "Voor hulp bij configuratie [zie]({docs_url})",
                 "data": {
                     "host": "Host",
                     "port": "Poort",
@@ -16,7 +16,7 @@
             },
             "cp_user": {
                 "title": "OCPP Configuratie",
-                "description": "Voor hulp bij configuratie zie: https://github.com/lbbrhzn/ocpp",
+                "description": "Voor hulp bij configuratie [zie]({docs_url})",
                 "data": {
                     "cpid": "Charge point identifier",
                     "max_current": "Maximale laadstroom",

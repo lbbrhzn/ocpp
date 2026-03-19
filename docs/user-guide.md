@@ -15,7 +15,7 @@ The 'baggage' referred to above, is every single repository available through HA
 
 ![Central System Configuration](https://user-images.githubusercontent.com/8673442/129494762-08052152-f057-4563-93b5-5aae810dfbfc.png)
 
-The `Central system identity` shown above with a default of `central` can be anything you like.  Whatever is entered in that field will be used as a device identifier in Home Assistant (HA), so it's probably best to avoid spaces and punctuation symbols, but otherwise, enter anything you like.
+The `Central system identity` shown above with a default of `central` can be anything you like up to a **maximum** of **20 characters**.  Whatever is entered in that field will be used as a device identifier in Home Assistant (HA), so it's probably best to avoid spaces and punctuation symbols, but otherwise, enter anything you like.
 
 The `Charge point identity` shown above with a default of `charger` is a little different.  Whatever you enter in that field will determine the prefix of all Charger entities added to Home Assistant (HA).  My recommendation is that it's best left at the default of charger.  If you put anything else in that field, it will be used as the prefix for all Charger entities added to HA during installation, however, new entities subsequently added in later version releases sometimes revert to the default prefix, regardless of what was entered during installation.  So you end up with a mixture of different prefixes which can be avoided simply by leaving `Charge point identity` set to the default of `charger`.
 

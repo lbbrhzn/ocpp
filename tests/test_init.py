@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import CentralSystem
-from custom_components.ocpp.const import DOMAIN
+from custom_components.ocpp.const import DOMAIN, CONF_CPID
 
 from .const import (
     MOCK_CONFIG_DATA,
@@ -106,9 +106,16 @@ async def test_migration_entry(
         entry_id="test_migration",
         title="test_migration",
         version=1,
+        minor_version=1,
     )
     config_entry.add_to_hass(hass)
     await hass.async_block_till_done()
+
+    # Ensure cp id is present in state machine to trigger migration flow. This simulates the condition where a user has a sensor entity in HA with the cp_id as the state value, which is used to identify the entry to migrate. If this value is not present, the migration flow will not be triggered and the test will fail.
+    hass.states.async_set(
+        f"sensor.{MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID].lower()}_id",
+        MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID],
+    )
 
     # Set up the entry and assert that the values set during setup are where we expect
     # them to be. Because we have patched the ocppDataUpdateCoordinator.async_get_data
