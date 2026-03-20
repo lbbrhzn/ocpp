@@ -237,6 +237,31 @@ def test_process_phases_voltage_and_current_branches(hass):
     p_kw = cp._metrics[(2, "Power.Active.Import")].value
     assert p_kw == (1000 + 2000 + 3000) / 1000  # -> 6 kW
     assert cp._metrics[(2, "Power.Active.Import")].unit == HA_POWER_UNIT
+    # Energy.Active.Import.Register in Wh should become kWh when aggregated
+    bucket3 = [
+        _mv(
+            "Energy.Active.Import.Register",
+            1000.0,
+            phase="L1",
+            unit=DEFAULT_ENERGY_UNIT,
+        ),
+        _mv(
+            "Energy.Active.Import.Register",
+            2000.0,
+            phase="L2",
+            unit=DEFAULT_ENERGY_UNIT,
+        ),
+        _mv(
+            "Energy.Active.Import.Register",
+            3000.0,
+            phase="L3",
+            unit=DEFAULT_ENERGY_UNIT,
+        ),
+    ]
+    cp.process_phases(bucket3, connector_id=3)
+    e_kwh = cp._metrics[(3, "Energy.Active.Import.Register")].value
+    assert e_kwh == (1000 + 2000 + 3000) / 1000  # -> 6.0 kWh
+    assert cp._metrics[(3, "Energy.Active.Import.Register")].unit == HA_ENERGY_UNIT
 
 
 def test_get_energy_kwh_and_session_derive(hass):
