@@ -513,3 +513,41 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+
+@pytest.mark.timeout(5)
+async def test_process_measurands_non_eair_phase_none(hass):
+    """Non-EAIR measurand with phase=None uses the original connector_id."""
+    version = SimpleNamespace(value="1.6")
+    fake_hass = SimpleNamespace(
+        async_create_task=lambda c: asyncio.create_task(c),
+        helpers=SimpleNamespace(
+            entity_component=SimpleNamespace(async_update_entity=lambda eid: None)
+        ),
+    )
+    fake_entry = SimpleNamespace(entry_id="dummy")
+    fake_central = SimpleNamespace(
+        websocket_ping_interval=0,
+        websocket_ping_timeout=0,
+        websocket_ping_tries=0,
+    )
+    fake_settings = SimpleNamespace(cpid="cpid_dummy")
+    fake_conn = SimpleNamespace(state=State.CLOSED)
+
+    srv = BaseCP(
+        "cp_non_eair",
+        fake_conn,
+        version,
+        fake_hass,
+        fake_entry,
+        fake_central,
+        fake_settings,
+    )
+
+    # Send a non-EAIR measurand (Current.Offered) with phase=None and connector_id=1.
+    samples = [[MeasurandValue("Current.Offered", 32.0, None, "A", None, None)]]
+    srv.process_measurands(samples, is_transaction=False, connector_id=1)
+
+    metric = srv._metrics[(1, "Current.Offered")]
+    assert metric.value == 32.0
+    assert metric.unit == "A"
