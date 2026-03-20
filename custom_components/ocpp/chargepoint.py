@@ -810,10 +810,14 @@ class ChargePoint(cp):
                 metric_unit = phase_info.get(om.unit.value)
 
                 if metric_unit == DEFAULT_POWER_UNIT:
-                    self._metrics[(target_cid, metric)].value = round(metric_value / 1000, 3)
+                    self._metrics[(target_cid, metric)].value = round(
+                        metric_value / 1000, 3
+                    )
                     self._metrics[(target_cid, metric)].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
-                    self._metrics[(target_cid, metric)].value = round(metric_value / 1000, 3)
+                    self._metrics[(target_cid, metric)].value = round(
+                        metric_value / 1000, 3
+                    )
                     self._metrics[(target_cid, metric)].unit = HA_ENERGY_UNIT
                 else:
                     self._metrics[(target_cid, metric)].value = metric_value
