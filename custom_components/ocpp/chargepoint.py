@@ -67,6 +67,7 @@ from .const import (
 )
 
 TIME_MINUTES = UnitOfTime.MINUTES
+KILO_UNIT_PRECISION = 3  # decimal places when converting W→kW or Wh→kWh (1 Wh resolution)
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
@@ -811,12 +812,12 @@ class ChargePoint(cp):
 
                 if metric_unit == DEFAULT_POWER_UNIT:
                     self._metrics[(target_cid, metric)].value = round(
-                        metric_value / 1000, 3
+                        metric_value / 1000, KILO_UNIT_PRECISION
                     )
                     self._metrics[(target_cid, metric)].unit = HA_POWER_UNIT
                 elif metric_unit == DEFAULT_ENERGY_UNIT:
                     self._metrics[(target_cid, metric)].value = round(
-                        metric_value / 1000, 3
+                        metric_value / 1000, KILO_UNIT_PRECISION
                     )
                     self._metrics[(target_cid, metric)].unit = HA_ENERGY_UNIT
                 else:
@@ -832,8 +833,8 @@ class ChargePoint(cp):
         contract in Home Assistant (e.g. 0.066 → 0.0659999999998035).
         """
         if (measurand_value.unit == "Wh") or (measurand_value.unit is None):
-            return round(measurand_value.value / 1000, 3)
-        return round(measurand_value.value, 3)
+            return round(measurand_value.value / 1000, KILO_UNIT_PRECISION)
+        return round(measurand_value.value, KILO_UNIT_PRECISION)
 
     def process_measurands(
         self,
@@ -913,7 +914,7 @@ class ChargePoint(cp):
                     unit = HA_ENERGY_UNIT
 
                 if unit == DEFAULT_POWER_UNIT:
-                    value = round(value / 1000, 3)
+                    value = round(value / 1000, KILO_UNIT_PRECISION)
                     unit = HA_POWER_UNIT
 
                 if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
