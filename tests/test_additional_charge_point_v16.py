@@ -1162,3 +1162,50 @@ async def test_stop_transaction_misc_paths(
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9334, "cp_id": "CP_cov_stop_tx_multi", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_cov_stop_tx_multi"])
+@pytest.mark.parametrize("port", [9334])
+async def test_stop_transaction_multi_connector_keeps_station_id_tag(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Stop tx on one connector while another is active keeps station-level id_tag."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+
+            # Simulate two running transactions on connectors 1 and 2
+            srv._active_tx[1] = 100
+            srv._active_tx[2] = 200
+            srv.active_transaction_id = 200
+            srv._metrics[(1, "Id.Tag")].value = "user_A"
+            srv._metrics[(2, "Id.Tag")].value = "user_B"
+            srv._metrics[0]["Id.Tag"].value = "user_B"
+
+            # Stop transaction on connector 2 — connector 1 still active
+            result = srv.on_stop_transaction(
+                meter_stop=0, timestamp=None, transaction_id=200
+            )
+            assert result is not None
+            # Station-level id_tag should reflect the still-active connector 1
+            assert srv._metrics[0]["Id.Tag"].value == "user_A"
+            # Connector 2 id_tag should be cleared
+            assert srv._metrics[(2, "Id.Tag")].value == ""
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
