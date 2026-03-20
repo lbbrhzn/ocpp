@@ -359,9 +359,9 @@ def test_process_phases_calculates_session_energy(hass):
     session_energy = cp._metrics[(target_cid, csess.session_energy.value)].value
 
     assert main_register == 105.0, "Main register should update to the new L1 value."
-    assert session_energy == 5.0, (
-        "Session energy should be exactly 5.0 (105.0 - 100.0)."
-    )
+    assert (
+        session_energy == 5.0
+    ), "Session energy should be exactly 5.0 (105.0 - 100.0)."
 
 
 def test_process_phases_initializes_session_energy_baseline(hass):
@@ -388,9 +388,9 @@ def test_process_phases_initializes_session_energy_baseline(hass):
     meter_start = cp._metrics[(target_cid, csess.meter_start.value)].value
     session_energy = cp._metrics[(target_cid, csess.session_energy.value)].value
 
-    assert meter_start == 105.0, (
-        "Meter start should be initialized to the first L1 reading."
-    )
-    assert session_energy == 0.0, (
-        "Session energy should be exactly 0.0 at initialization."
-    )
+    assert (
+        meter_start == 105.0
+    ), "Meter start should be initialized to the first L1 reading."
+    assert (
+        session_energy == 0.0
+    ), "Session energy should be exactly 0.0 at initialization."
