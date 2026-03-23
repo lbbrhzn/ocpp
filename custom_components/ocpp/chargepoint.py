@@ -450,7 +450,7 @@ class ChargePoint(cp):
         """Request vendor specific data transfer from charger."""
         pass
 
-    async def get_configuration(self, key: str = "") -> str | None:
+    async def get_configuration(self, key: str = "") -> str | dict | None:
         """Get Configuration of charger for supported keys else return None."""
         return None
 
