@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from websockets import Subprotocol, NegotiationError
+from websockets.http11 import Request, Response
 import websockets.server
 from websockets.asyncio.server import ServerConnection
 
@@ -180,10 +181,33 @@ class CentralSystem:
         else:
             self.ssl_context = None
 
+        async def _fix_missing_connection_header(
+            connection: ServerConnection, request: Request
+        ) -> Response | None:
+            """Work around a bug in some charger firmware (e.g. Autel MaxiCharger
+            US AC LW10-N14, firmware v1.38.00/v1.22.00) that omits the required
+            Connection: Upgrade header from the WebSocket opening handshake.
+
+            websockets 14+ strictly validates this header and raises
+            InvalidUpgrade when it is absent, preventing the charger from
+            ever connecting.  We inject the header before the library validates
+            it so that the handshake can proceed normally.
+            """
+            if not request.headers.get_all("Connection"):
+                _LOGGER.warning(
+                    "Charger at %s sent a WebSocket upgrade request without the "
+                    "required 'Connection: Upgrade' header. Injecting header as "
+                    "a workaround — consider updating the charger firmware.",
+                    connection.remote_address,
+                )
+                request.headers["Connection"] = "upgrade"
+            return None
+
         server = await websockets.serve(
             self.on_connect,
             self.settings.host,
             self.settings.port,
+            process_request=_fix_missing_connection_header,
             select_subprotocol=self.select_subprotocol,
             subprotocols=self.subprotocols,
             ping_interval=None,  # ping interval is not used here, because we send pings mamually in ChargePoint.monitor_connection()
