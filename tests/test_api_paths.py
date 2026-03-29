@@ -433,8 +433,9 @@ async def test_fix_missing_connection_header_injects_when_absent(caplog):
 
 
 @pytest.mark.asyncio
-async def test_fix_missing_connection_header_leaves_existing_intact():
+async def test_fix_missing_connection_header_leaves_existing_intact(caplog):
     """Existing Connection header is not overwritten and no warning is logged."""
+    import logging
     from websockets.datastructures import Headers
 
     headers = Headers()
@@ -442,7 +443,9 @@ async def test_fix_missing_connection_header_leaves_existing_intact():
     request = SimpleNamespace(headers=headers)
     connection = SimpleNamespace(remote_address=("192.168.1.100", 9000))
 
-    result = await _fix_missing_connection_header(connection, request)
+    with caplog.at_level(logging.WARNING):
+        result = await _fix_missing_connection_header(connection, request)
 
     assert result is None
     assert request.headers.get("Connection") == "Upgrade"
+    assert not any(r.levelname == "WARNING" for r in caplog.records)
