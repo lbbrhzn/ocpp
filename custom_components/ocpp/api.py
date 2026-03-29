@@ -38,6 +38,29 @@ from .chargepoint import SetVariableResult
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 # Uncomment these when Debugging
 # logging.getLogger("asyncio").setLevel(logging.DEBUG)
+
+
+async def _fix_missing_connection_header(
+    connection: ServerConnection, request: Request
+) -> Response | None:
+    """Work around a bug in some charger firmware (e.g. Autel MaxiCharger
+    US AC LW10-N14, firmware v1.38.00/v1.22.00) that omits the required
+    Connection: Upgrade header from the WebSocket opening handshake.
+
+    websockets 14+ strictly validates this header and raises
+    InvalidUpgrade when it is absent, preventing the charger from
+    ever connecting.  We inject the header before the library validates
+    it so that the handshake can proceed normally.
+    """
+    if not request.headers.get_all("Connection"):
+        _LOGGER.warning(
+            "Charger at %s sent a WebSocket upgrade request without the "
+            "required 'Connection: Upgrade' header. Injecting header as "
+            "a workaround — consider updating the charger firmware.",
+            connection.remote_address,
+        )
+        request.headers["Connection"] = "upgrade"
+    return None
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
@@ -180,28 +203,6 @@ class CentralSystem:
             )
         else:
             self.ssl_context = None
-
-        async def _fix_missing_connection_header(
-            connection: ServerConnection, request: Request
-        ) -> Response | None:
-            """Work around a bug in some charger firmware (e.g. Autel MaxiCharger
-            US AC LW10-N14, firmware v1.38.00/v1.22.00) that omits the required
-            Connection: Upgrade header from the WebSocket opening handshake.
-
-            websockets 14+ strictly validates this header and raises
-            InvalidUpgrade when it is absent, preventing the charger from
-            ever connecting.  We inject the header before the library validates
-            it so that the handshake can proceed normally.
-            """
-            if not request.headers.get_all("Connection"):
-                _LOGGER.warning(
-                    "Charger at %s sent a WebSocket upgrade request without the "
-                    "required 'Connection: Upgrade' header. Injecting header as "
-                    "a workaround — consider updating the charger firmware.",
-                    connection.remote_address,
-                )
-                request.headers["Connection"] = "upgrade"
-            return None
 
         server = await websockets.serve(
             self.on_connect,
