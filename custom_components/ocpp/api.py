@@ -43,9 +43,11 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 async def _fix_missing_connection_header(
     connection: ServerConnection, request: Request
 ) -> Response | None:
-    """Work around a bug in some charger firmware (e.g. Autel MaxiCharger
-    US AC LW10-N14, firmware v1.38.00/v1.22.00) that omits the required
-    Connection: Upgrade header from the WebSocket opening handshake.
+    """Work around charger firmware that omits the Connection: Upgrade header.
+
+    Some charger firmware (e.g. Autel MaxiCharger US AC LW10-N14,
+    firmware v1.38.00/v1.22.00) omits the required Connection: Upgrade
+    header from the WebSocket opening handshake.
 
     websockets 14+ strictly validates this header and raises
     InvalidUpgrade when it is absent, preventing the charger from
@@ -61,6 +63,8 @@ async def _fix_missing_connection_header(
         )
         request.headers["Connection"] = "upgrade"
     return None
+
+
 # logging.getLogger("websockets").setLevel(logging.DEBUG)
 
 UFW_SERVICE_DATA_SCHEMA = vol.Schema(
