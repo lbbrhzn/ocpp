@@ -982,7 +982,7 @@ class ChargePoint(cp):
                                 ].value
                         else:
                             # Initialize baseline on first tx-bound EAIR; then derive Session = EAIR - meter_start.
-                            ms_metric = self._metrics[(target_cid, csess.meter_start)]
+                            ms_metric = self._metrics[(target_cid, csess.meter_start.value)]
                             if ms_metric.value is None:
                                 ms_metric.value = value
                                 ms_metric.unit = unit
