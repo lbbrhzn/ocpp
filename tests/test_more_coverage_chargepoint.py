@@ -8,8 +8,12 @@ import pytest
 import websockets
 from websockets.protocol import State
 
-from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
 
+from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
+from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
+from custom_components.ocpp.const import DEFAULT_MEASURAND
+from unittest.mock import MagicMock, AsyncMock
+from ocpp.v16.enums import Measurand, Phase
 
 # Reuse the client helpers & fixtures from your main v16 test module.
 from .test_charge_point_v16 import wait_ready, ChargePoint
@@ -513,3 +517,102 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+
+@pytest.mark.asyncio
+async def test_process_phases_neutral_shield():
+    """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
+    from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
+    from unittest.mock import MagicMock
+
+    # 1. Setup Mock ChargePoint
+    cp = MagicMock(spec=BaseCP)
+
+    class MockMetric:
+        def __init__(self):
+            self.value = None
+            self.unit = None
+            self.extra_attr = {}
+
+    # Pre-populate the main Voltage bucket
+    cp._metrics = {(1, Measurand.voltage.value): MockMetric()}
+
+    # 2. PASS 1: The Valid L1-N Payload (Positional format: measurand, value, phase, unit, context, location)
+    payload_l1n = [
+        MeasurandValue(
+            Measurand.voltage.value,
+            241.5,
+            Phase.l1_n.value,
+            "V",
+            None,
+            None,
+        )
+    ]
+    BaseCP.process_phases(cp, payload_l1n, connector_id=1)
+
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
+
+    # 3. PASS 2: The Isolated "N" Payload (The Saboteur)
+    payload_n = [
+        MeasurandValue(
+            Measurand.voltage.value,
+            2.1,
+            Phase.n.value,
+            "V",
+            None,
+            None,
+        )
+    ]
+    BaseCP.process_phases(cp, payload_n, connector_id=1)
+
+    # Shield should protect the 241.5 value!
+    assert cp._metrics[(1, Measurand.voltage.value)].value == 241.5
+
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_clean_measurands_logic():
+    """Test that get_supported_measurands strips illegal phases and drops garbage."""
+
+    # 1. Setup Mock v1.6 ChargePoint
+    cp = MagicMock(spec=CPv16)
+    cp.id = "test_charger"
+    cp.settings = MagicMock()
+    # Force the non-autodetect path to keep the test fast and isolated
+    cp.settings.monitored_variables = ""
+    cp.settings.monitored_variables_autoconfig = False
+    cp.configure = AsyncMock()
+
+    # Scenario A: Real-world messy data from a broken firmware charger
+    dirty_string = (
+        "Voltage.L1-N, Voltage.N, Temperature, Current.Offered.L1, "
+        "Current.Import.L1, Power.Active.Import.L1, , "
+        "Energy.Active.Import.Register.L1, GarbageText.L2, "
+        "Current.Export.L2, Current.Export.L3, "
+    )
+    cp.get_configuration = AsyncMock(return_value=dirty_string)
+
+    result_a = await CPv16.get_supported_measurands(cp)
+
+    result_set = set(result_a.split(","))
+    assert result_set == {
+        "Voltage",
+        "Temperature",
+        "Current.Offered",
+        "Current.Import",
+        "Power.Active.Import",
+        "Energy.Active.Import.Register",
+        "Current.Export",
+    }
+    assert "GarbageText" not in result_set
+
+    # Scenario B: Complete garbage (Should fall back to DEFAULT_MEASURAND)
+    cp.get_configuration = AsyncMock(return_value="TotalGarbage.L1, Random.String.N")
+    result_b = await CPv16.get_supported_measurands(cp)
+
+    assert result_b == DEFAULT_MEASURAND
+
+    # Scenario C: Empty string / None
+    cp.get_configuration = AsyncMock(return_value="")
+    result_c = await CPv16.get_supported_measurands(cp)
+
+    assert result_c == ""
