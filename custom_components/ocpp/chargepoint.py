@@ -883,9 +883,8 @@ class ChargePoint(cp):
             # Pre-scan: Count how many distinct phases are reported for the main energy register
             eair_phases = set()
             for v in bucket:
-                if getattr(v, "measurand", None) == DEFAULT_MEASURAND and getattr(
-                    v, "phase", None
-                ):
+                v_measurand = getattr(v, "measurand", None) or DEFAULT_MEASURAND
+                if v_measurand == DEFAULT_MEASURAND and getattr(v, "phase", None):
                     eair_phases.add(v.phase)
 
             for idx, sampled_value in enumerate(bucket):
@@ -898,8 +897,9 @@ class ChargePoint(cp):
 
                 # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 energy reading.
                 # If multiple phases exist (e.g., L1, L2), leave them intact so process_phases() can sum them.
+                normalized_measurand = measurand or DEFAULT_MEASURAND
                 if (
-                    measurand == DEFAULT_MEASURAND
+                    normalized_measurand == DEFAULT_MEASURAND
                     and phase == Phase.l1.value
                     and len(eair_phases) == 1
                 ):

@@ -561,6 +561,7 @@ async def test_session_and_lifetime_eair_distinction(hass):
     sess_l1 = srv3._metrics[(1, "Energy.Session")]
     assert sess_l1.value == pytest.approx(0.5, rel=1e-6)
 
+
 @pytest.mark.asyncio
 async def test_process_phases_neutral_shield():
     """Test that isolated Neutral (N) phases do not overwrite main sensors with 0.0."""
