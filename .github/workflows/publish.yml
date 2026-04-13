@@ -46,7 +46,7 @@ jobs:
           zip ocpp.zip -r ./
 
       - name: 📤 Upload zip to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: ${{ github.event_name == 'release' }}
         with:
           files: ${{ github.workspace }}/custom_components/ocpp/ocpp.zip
