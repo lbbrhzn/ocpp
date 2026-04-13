@@ -426,6 +426,7 @@ async def test_session_and_lifetime_eair_distinction(hass):
 
     When the charger does NOT report session energy in EAIR:
     - both an in-transaction EAIR reading and a non-transaction EAIR reading write the lifetime EAIR metric.
+    - a single-phase EAIR reading tagged with "L1" has its phase stripped to derive session energy correctly.
     """
 
     # ------ First scenario: charger reports session energy ------
@@ -513,3 +514,45 @@ async def test_session_and_lifetime_eair_distinction(hass):
     main_after_life2 = srv2._metrics[(1, "Energy.Active.Import.Register")].value
     # Lifetime EAIR should be updated to 123.45 kWh.
     assert pytest.approx(main_after_life2, rel=1e-6) == 123.45
+
+    # ------ Third scenario: single-phase charger sending L1 tag on main EAIR ------
+    # New CP instance to test the L1 stripping logic.
+    srv3 = BaseCP(
+        "cp_dummy3",
+        fake_conn,
+        version,
+        fake_hass,
+        fake_entry,
+        fake_central,
+        fake_settings,
+    )
+    srv3._ocpp_version = "1.6"
+    srv3._charger_reports_session_energy = False
+
+    # 1) Set baseline meter_start (Car plugged in at 10.0 kWh)
+    # The correct string key is "Energy.Meter.Start"
+    srv3._metrics[(1, "Energy.Meter.Start")].value = 10.0
+    srv3._metrics[(1, "Energy.Meter.Start")].unit = "kWh"
+
+    # 2) Send in-transaction EAIR reading with an isolated L1 phase (10500 Wh -> 10.5 kWh)
+    l1_samples = [
+        [
+            MeasurandValue(
+                measurand="Energy.Active.Import.Register",
+                value=10500.0,
+                phase="L1",
+                unit="Wh",
+                context=None,
+                location=None,
+            )
+        ]
+    ]
+    srv3.process_measurands(l1_samples, is_transaction=True, connector_id=1)
+
+    # 3) Lifetime EAIR should update to 10.5 kWh
+    main_l1 = srv3._metrics[(1, "Energy.Active.Import.Register")]
+    assert pytest.approx(main_l1.value, rel=1e-6) == 10.5
+
+    # 4) Session Energy should derive to 0.5 kWh (10.5 - 10.0)
+    sess_l1 = srv3._metrics[(1, "Energy.Session")]
+    assert sess_l1.value == pytest.approx(0.5, rel=1e-6)
