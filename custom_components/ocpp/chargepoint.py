@@ -873,6 +873,14 @@ class ChargePoint(cp):
 
             unprocessed: list[MeasurandValue] = []
 
+            # Pre-scan: Count how many distinct phases are reported for the main energy register
+            eair_phases = set()
+            for v in bucket:
+                if getattr(v, "measurand", None) == DEFAULT_MEASURAND and getattr(
+                    v, "phase", None
+                ):
+                    eair_phases.add(v.phase)
+
             for idx, sampled_value in enumerate(bucket):
                 measurand = sampled_value.measurand
                 value = sampled_value.value
@@ -880,6 +888,15 @@ class ChargePoint(cp):
                 phase = sampled_value.phase
                 location = sampled_value.location
                 context = sampled_value.context or ReadingContext.sample_periodic.value
+
+                # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 energy reading.
+                # If multiple phases exist (e.g., L1, L2), leave them intact so process_phases() can sum them.
+                if (
+                    measurand == DEFAULT_MEASURAND
+                    and phase == Phase.l1.value
+                    and len(eair_phases) == 1
+                ):
+                    phase = None
 
                 # Backwards compatibility
                 if sampled_value.measurand is None:
@@ -904,9 +921,7 @@ class ChargePoint(cp):
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
-                is_eair = measurand == DEFAULT_MEASURAND
-                is_best_eair = is_eair and (idx == best_eair_idx)
-                if phase is None or is_best_eair:
+                if phase is None:
                     is_eair = measurand == DEFAULT_MEASURAND
 
                     # Determine if this is a single-connector charger (only if explicitly known)
