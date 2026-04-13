@@ -297,10 +297,22 @@ class ChargePoint(cp):
         """Get remote id tag from configuration.yaml or generate a random 20 char one."""
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         alphabet = string.ascii_uppercase + string.digits
-        return config.get(
-            CONF_REMOTE_ID_TAG, "".join(secrets.choice(alphabet) for i in range(20))
-        )
+        fallback = "".join(secrets.choice(alphabet) for i in range(20))
+        remote_id_tag = config.get(CONF_REMOTE_ID_TAG)
 
+        if isinstance(remote_id_tag, str):
+            remote_id_tag = remote_id_tag.strip()
+            if 0 < len(remote_id_tag) <= 20:
+                return remote_id_tag
+
+        if remote_id_tag is not None:
+            _LOGGER.warning(
+                "Invalid %s configured for charge point %s; using generated fallback tag",
+                CONF_REMOTE_ID_TAG,
+                self.id,
+            )
+
+        return fallback
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
         return self.num_connectors
