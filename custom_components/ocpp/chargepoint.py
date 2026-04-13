@@ -904,7 +904,9 @@ class ChargePoint(cp):
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
-                if phase is None:
+                is_eair = measurand == DEFAULT_MEASURAND
+                is_best_eair = is_eair and (idx == best_eair_idx)
+                if phase is None or is_best_eair:
                     is_eair = measurand == DEFAULT_MEASURAND
 
                     # Determine if this is a single-connector charger (only if explicitly known)
