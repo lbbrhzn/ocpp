@@ -809,14 +809,26 @@ class ChargePoint(cp):
             )
             return False
 
-    async def get_configuration(self, key: str = "") -> str:
-        """Get Configuration of charger for supported keys else return None."""
+    async def get_configuration(self, key: str = "") -> str | dict | None:
+        """Get Configuration of charger for supported keys.
+
+        When key is empty, returns a dict of all configuration key-value pairs.
+        When key is specified, returns the value as a string.
+        """
         if key == "":
             req = call.GetConfiguration()
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
         if resp.configuration_key:
+            if key == "":
+                result = {}
+                for entry in resp.configuration_key:
+                    entry_key = entry.get("key", "")
+                    entry_value = entry.get(om.value.value, "")
+                    result[entry_key] = entry_value
+                _LOGGER.debug("Get Configuration returned %d keys", len(result))
+                return result
             value = resp.configuration_key[0][om.value.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             self._metrics[0][cdet.config_response.value].value = datetime.now(tz=UTC)
