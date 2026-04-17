@@ -51,6 +51,7 @@ from .const import (
     CONF_AUTH_STATUS,
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
+    CONF_REMOTE_ID_TAG,
     CONF_MONITORED_VARIABLES,
     CONF_NUM_CONNECTORS,
     CONF_CPIDS,
@@ -279,8 +280,7 @@ class ChargePoint(cp):
         self._metrics[(0, cstat.reconnects.value)].value = 0
 
         self._attr_supported_features = prof.NONE
-        alphabet = string.ascii_uppercase + string.digits
-        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
+        self._remote_id_tag = self.get_remote_id_tag()
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
 
     def _init_connector_slots(self, conn_id: int) -> None:
@@ -293,6 +293,26 @@ class ChargePoint(cp):
         self._metrics[(conn_id, csess.session_energy.value)].unit = HA_ENERGY_UNIT
         self._metrics[(conn_id, csess.meter_start.value)].unit = HA_ENERGY_UNIT
 
+    def get_remote_id_tag(self) -> str:
+        """Get remote id tag from configuration.yaml or generate a random 20 char one."""
+        config = self.hass.data[DOMAIN].get(CONFIG, {})
+        alphabet = string.ascii_uppercase + string.digits
+        fallback = "".join(secrets.choice(alphabet) for i in range(20))
+        remote_id_tag = config.get(CONF_REMOTE_ID_TAG)
+
+        if isinstance(remote_id_tag, str):
+            remote_id_tag = remote_id_tag.strip()
+            if 0 < len(remote_id_tag) <= 20:
+                return remote_id_tag
+
+        if remote_id_tag is not None:
+            _LOGGER.warning(
+                "Invalid %s configured for charge point %s; using generated fallback tag",
+                CONF_REMOTE_ID_TAG,
+                self.id,
+            )
+
+        return fallback
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
         return self.num_connectors
