@@ -62,6 +62,8 @@ from .const import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
+CURRENT_LIMIT_CONFIGURATION_KEY = "ChargeRate"
+
 
 def _to_message_trigger(name: str) -> MessageTrigger | None:
     if isinstance(name, MessageTrigger):
@@ -432,7 +434,7 @@ class ChargePoint(cp):
 
         if not (int(self.supported_features or 0) & prof.SMART):
             _LOGGER.info("Smart charging is not supported by this charger")
-            return False
+            return await self._set_charge_rate_via_configuration(limit_amps)
 
         # Determine allowed unit (default to Amps if not reported)
         units_resp = await self.get_configuration(
@@ -577,7 +579,53 @@ class ChargePoint(cp):
                     f"Note: Active TxProfile applied, but TxDefaultProfile failed: {ex}"
                 )
 
-        return bool(txp_ok or txd_ok)
+        if txp_ok or txd_ok:
+            return True
+
+        return await self._set_charge_rate_via_configuration(limit_amps)
+
+    async def _set_charge_rate_via_configuration(self, limit_amps: int) -> bool:
+        """Set charge current using an optional configuration key if available."""
+        try:
+            amps = int(float(limit_amps))
+        except (TypeError, ValueError):
+            return False
+
+        if amps <= 0:
+            return False
+
+        try:
+            current = await self.get_configuration(CURRENT_LIMIT_CONFIGURATION_KEY)
+        except Exception as ex:
+            _LOGGER.debug(
+                "Could not read %s configuration key: %s",
+                CURRENT_LIMIT_CONFIGURATION_KEY,
+                ex,
+            )
+            return False
+
+        if not current or str(current).strip().lower() == "unknown":
+            return False
+
+        target = str(amps)
+        if str(current).strip() == target:
+            return True
+
+        try:
+            result = await self.configure(CURRENT_LIMIT_CONFIGURATION_KEY, target)
+        except Exception as ex:
+            _LOGGER.debug(
+                "Could not set %s configuration key: %s",
+                CURRENT_LIMIT_CONFIGURATION_KEY,
+                ex,
+            )
+            return False
+
+        return result in (
+            SetVariableResult.accepted,
+            SetVariableResult.reboot_required,
+            None,
+        )
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
