@@ -170,7 +170,7 @@ Supported OCPP requests for the 3.x.x firmware are documented in a PDF on their 
 
 Other Grizzl-E chargers on the 5.x.x firmware have some defects in OCPP implementation, which can be worked around. See [User Guide](https://github.com/lbbrhzn/ocpp/blob/main/docs/user-guide.md) section in Documentation for details.)
 
-Grizzle-E has now locked OCPP support behind a $200 paywall https://grizzl-e.com/ocpp-access/ (support may [unlock](https://community.home-assistant.io/t/grizzl-e-charger-and-has-ocpp-integration/804698/23) access for devices purchased before Sept 2025).
+Grizzl-E has now locked OCPP support behind a $200 paywall https://grizzl-e.com/ocpp-access/ (support may [unlock](https://community.home-assistant.io/t/grizzl-e-charger-and-has-ocpp-integration/804698/23) access for devices purchased before Sept 2025).
 
 ## [V2C Trydan](https://v2charge.com/trydan)
 
