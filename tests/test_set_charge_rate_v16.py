@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.ocpp.ocppv16 import ChargePoint as ChargePointv16
+from custom_components.ocpp.chargepoint import SetVariableResult
 from custom_components.ocpp.enums import (
     Profiles as prof,
     ConfigurationKey as ckey,
@@ -89,7 +90,7 @@ async def test_custom_profile_path_exception_triggers_notify_and_returns_false(
 async def test_smart_charging_not_supported_returns_false_no_notify(
     cp_v16, monkeypatch
 ):
-    """2) If the charger doesn't advertise SMART profile, return False without notifications."""
+    """2) If SMART and ChargeRate are unavailable, return False without notifications."""
     cp_v16._attr_supported_features = prof.NONE
 
     notices = []
@@ -98,20 +99,79 @@ async def test_smart_charging_not_supported_returns_false_no_notify(
         notices.append(msg)
         return True
 
-    # get_configuration and call should not be called
-    async def fake_get_conf(_key):
-        pytest.fail("get_configuration should not be called when SMART not supported")
+    async def fake_get_conf(key):
+        assert key == "ChargeRate"
+        return "Unknown"
 
     async def fake_call(_req):
         pytest.fail("call should not be called when SMART not supported")
 
+    async def fake_configure(_key, _value):
+        pytest.fail("configure should not be called for an unknown key")
+
     monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
     monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
     monkeypatch.setattr(cp_v16, "call", fake_call)
+    monkeypatch.setattr(cp_v16, "configure", fake_configure)
 
     ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
     assert ok is False
     assert notices == []
+
+
+@pytest.mark.asyncio
+async def test_smart_charging_not_supported_uses_charge_rate_key(
+    cp_v16, monkeypatch
+):
+    """If SMART is missing, fall back to the optional current configuration key."""
+    cp_v16._attr_supported_features = prof.NONE
+    configured = []
+
+    async def fake_get_conf(key):
+        assert key == "ChargeRate"
+        return "32"
+
+    async def fake_configure(key, value):
+        configured.append((key, value))
+        return SetVariableResult.accepted
+
+    async def fake_call(_req):
+        pytest.fail("SetChargingProfile should not be called when SMART is missing")
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "configure", fake_configure)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+
+    ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
+
+    assert ok is True
+    assert configured == [("ChargeRate", "16")]
+
+
+@pytest.mark.asyncio
+async def test_smart_charging_not_supported_charge_rate_unknown_returns_false(
+    cp_v16, monkeypatch
+):
+    """Unknown ChargeRate support leaves the old failure behavior intact."""
+    cp_v16._attr_supported_features = prof.NONE
+
+    async def fake_get_conf(key):
+        assert key == "ChargeRate"
+        return "Unknown"
+
+    async def fake_configure(_key, _value):
+        pytest.fail("configure should not be called for an unknown key")
+
+    async def fake_call(_req):
+        pytest.fail("SetChargingProfile should not be called when SMART is missing")
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "configure", fake_configure)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+
+    ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
+
+    assert ok is False
 
 
 @pytest.mark.asyncio
@@ -185,3 +245,40 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
     assert ok is True
     assert notices == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_smart_profiles_fall_back_to_charge_rate_key(
+    cp_v16, monkeypatch
+):
+    """If standard smart profiles are rejected, use the optional current key."""
+    configured = []
+
+    async def fake_get_conf(key: str):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level.value:
+            return "3"
+        if key == "ChargeRate":
+            return "32"
+        pytest.fail(f"Unexpected get_configuration key: {key}")
+
+    async def fake_call(req):
+        assert req.cs_charging_profiles["chargingProfilePurpose"] in (
+            ChargingProfilePurposeType.charge_point_max_profile.value,
+            ChargingProfilePurposeType.tx_default_profile.value,
+        )
+        return SimpleNamespace(status=ChargingProfileStatus.rejected)
+
+    async def fake_configure(key, value):
+        configured.append((key, value))
+        return SetVariableResult.accepted
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+    monkeypatch.setattr(cp_v16, "configure", fake_configure)
+
+    ok = await cp_v16.set_charge_rate(limit_amps=12, conn_id=2)
+
+    assert ok is True
+    assert configured == [("ChargeRate", "12")]

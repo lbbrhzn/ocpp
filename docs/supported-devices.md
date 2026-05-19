@@ -50,6 +50,15 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 
 ## [Alfen - Eve Single S-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 
+## BRC Opticharge 11
+Configure OCPP 1.6-J with a WebSocket URL that includes the charge point
+identity, for example `ws://homeassistant.local:9000/<charge-point-id>`.
+
+If needed, disable automatic measurand detection and manually select current,
+energy, power, temperature, and voltage import/export measurands. Dynamic current
+control uses standard OCPP smart charging first, with a configuration fallback
+when supported by the charger.
+
 ## [CTEK Chargestorm Connected 1, dual connectors](https://www.ctek.com/uk/ev-charging/chargestorm-connected-1)
 See CTEK Chargestorm Connected 2 below for getting started instructions.
 
