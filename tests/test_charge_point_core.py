@@ -328,3 +328,36 @@ async def test_handle_call_wraps_notimplementederror_and_sends(hass):
         await cp._handle_call(DummyMsg())
 
     assert sent.get("payload") == "ERR_JSON"
+
+
+def test_session_energy_uses_meter_start_from_start_transaction(hass):
+    """Session energy should use the meter_start set by StartTransaction, not re-baseline from the first EAIR.
+
+    Regression test: process_measurands previously looked up csess.meter_start
+    (the enum member) instead of csess.meter_start.value (the string key),
+    so it never found the meter_start written by on_start_transaction and
+    created a shadow baseline from the first EAIR sample.
+    """
+    cp = _mk_cp(hass, version=OcppVersion.V201)
+
+    # Simulate on_start_transaction setting meter_start to 500.0 kWh
+    cp._metrics[(1, csess.meter_start.value)].value = 500.0
+    cp._metrics[(1, csess.meter_start.value)].unit = HA_ENERGY_UNIT
+
+    # First MeterValues: EAIR = 500200 Wh = 500.2 kWh
+    mv1 = _mv("Energy.Active.Import.Register", 500200.0, unit=DEFAULT_ENERGY_UNIT)
+    cp.process_measurands([[mv1]], is_transaction=True, connector_id=1)
+
+    # Session energy should be 500.2 - 500.0 = 0.2 kWh (not 0.0)
+    assert cp._metrics[(1, csess.session_energy.value)].value == pytest.approx(
+        0.2, abs=1e-6
+    )
+
+    # Second MeterValues: EAIR = 501500 Wh = 501.5 kWh
+    mv2 = _mv("Energy.Active.Import.Register", 501500.0, unit=DEFAULT_ENERGY_UNIT)
+    cp.process_measurands([[mv2]], is_transaction=True, connector_id=1)
+
+    # Session energy should be 501.5 - 500.0 = 1.5 kWh
+    assert cp._metrics[(1, csess.session_energy.value)].value == pytest.approx(
+        1.5, abs=1e-6
+    )
