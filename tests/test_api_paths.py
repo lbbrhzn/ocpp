@@ -10,7 +10,7 @@ from homeassistant.const import STATE_OK, STATE_UNAVAILABLE
 from homeassistant.exceptions import HomeAssistantError
 from websockets import NegotiationError
 
-from custom_components.ocpp.api import CentralSystem
+from custom_components.ocpp.api import CentralSystem, _fix_missing_connection_header
 from custom_components.ocpp.const import DOMAIN
 from custom_components.ocpp.enums import (
     HAChargerServices as csvcs,
@@ -412,3 +412,40 @@ def test_del_metric_variants(hass):
 
     # --- Case C: unknown cpid -> returns None, no exception
     assert cs.del_metric("unknown_cpid", "Voltage") is None
+
+
+@pytest.mark.asyncio
+async def test_fix_missing_connection_header_injects_when_absent(caplog):
+    """Header is injected and warning logged when Connection header is missing."""
+    import logging
+    from websockets.datastructures import Headers
+
+    headers = Headers()  # empty — no Connection header
+    request = SimpleNamespace(headers=headers)
+    connection = SimpleNamespace(remote_address=("192.168.1.100", 9000))
+
+    with caplog.at_level(logging.WARNING):
+        result = await _fix_missing_connection_header(connection, request)
+
+    assert result is None
+    assert request.headers.get("Connection") == "upgrade"
+    assert "Connection: Upgrade" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_fix_missing_connection_header_leaves_existing_intact(caplog):
+    """Existing Connection header is not overwritten and no warning is logged."""
+    import logging
+    from websockets.datastructures import Headers
+
+    headers = Headers()
+    headers["Connection"] = "Upgrade"
+    request = SimpleNamespace(headers=headers)
+    connection = SimpleNamespace(remote_address=("192.168.1.100", 9000))
+
+    with caplog.at_level(logging.WARNING):
+        result = await _fix_missing_connection_header(connection, request)
+
+    assert result is None
+    assert request.headers.get("Connection") == "Upgrade"
+    assert not any(r.levelname == "WARNING" for r in caplog.records)
