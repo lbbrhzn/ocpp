@@ -514,12 +514,16 @@ async def test_get_configuration_empty_key_path(
                     req, "key", None
                 )
                 return SimpleNamespace(
-                    configuration_key=[{"value": "42"}], unknown_key=None
+                    configuration_key=[
+                        {"key": "HeartbeatInterval", "value": "300"},
+                        {"key": "MeterValueSampleInterval", "value": "60"},
+                    ],
+                    unknown_key=None,
                 )
 
             monkeypatch.setattr(srv, "call", fake_call, raising=True)
             val = await srv.get_configuration("")
-            assert val == "42"
+            assert val == {"HeartbeatInterval": "300", "MeterValueSampleInterval": "60"}
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

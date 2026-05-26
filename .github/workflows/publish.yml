@@ -32,7 +32,7 @@ jobs:
           python3 ${{ github.workspace }}/manage/update_manifest.py --version ${{ steps.version.outputs.version }}
 
       - name: 📤 Upload zip to action
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         if: ${{ github.event_name == 'push' }}
         with:
           name: ocpp
@@ -46,7 +46,7 @@ jobs:
           zip ocpp.zip -r ./
 
       - name: 📤 Upload zip to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: ${{ github.event_name == 'release' }}
         with:
           files: ${{ github.workspace }}/custom_components/ocpp/ocpp.zip

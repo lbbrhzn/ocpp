@@ -138,8 +138,8 @@ get_configuration:
       example: charger
     ocpp_key:
       name: Configuration key name
-      description: v1.6- Key name v2.0.1- Component name/Key name
-      required: true
+      description: v1.6- Key name v2.0.1- Component name/Key name. Leave empty to retrieve all configuration keys (v1.6 only).
+      required: false
       advanced: true
       example: "WebSocketPingInterval"
 
