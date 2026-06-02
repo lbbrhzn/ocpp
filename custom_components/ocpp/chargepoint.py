@@ -297,7 +297,7 @@ class ChargePoint(cp):
         """Get remote id tag from configuration.yaml or generate a random 20 char one."""
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         alphabet = string.ascii_uppercase + string.digits
-        fallback = "".join(secrets.choice(alphabet) for i in range(20))
+        fallback = "".join(secrets.choice(alphabet) for _ in range(20))
         remote_id_tag = config.get(CONF_REMOTE_ID_TAG)
 
         if isinstance(remote_id_tag, str):
