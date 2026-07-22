@@ -360,7 +360,21 @@ class ChargePoint(cp):
                 evse_target, _ = self._global_to_pair(int(conn_id))
         if profile is not None:
             req = call.SetChargingProfile(evse_target, profile)
-            resp: call_result.SetChargingProfile = await self.call(req)
+            resp: call_result.SetChargingProfile | None = None
+            for attempt in range(3):
+                try:
+                    resp = await self.call(req)
+                    break
+                except Exception as ex:
+                    if attempt < 2:
+                        _LOGGER.debug(
+                            "SetChargingProfile attempt %d failed, retrying: %s",
+                            attempt + 1,
+                            ex,
+                        )
+                        await asyncio.sleep(0.5 + (attempt * 0.5))
+                    else:
+                        raise
             if resp.status != ChargingProfileStatusEnumType.accepted:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
@@ -408,7 +422,21 @@ class ChargePoint(cp):
         req: call.SetChargingProfile = call.SetChargingProfile(
             evse_target, charging_profile
         )
-        resp: call_result.SetChargingProfile = await self.call(req)
+        resp: call_result.SetChargingProfile | None = None
+        for attempt in range(3):
+            try:
+                resp = await self.call(req)
+                break
+            except Exception as ex:
+                if attempt < 2:
+                    _LOGGER.debug(
+                        "SetChargingProfile attempt %d failed, retrying: %s",
+                        attempt + 1,
+                        ex,
+                    )
+                    await asyncio.sleep(0.5 + (attempt * 0.5))
+                else:
+                    raise
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,

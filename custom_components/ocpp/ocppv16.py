@@ -1,5 +1,6 @@
 """Representation of a OCPP 1.6 charging station."""
 
+import asyncio
 from datetime import datetime, timedelta, UTC
 import logging
 
@@ -415,19 +416,33 @@ class ChargePoint(cp):
     ) -> bool:
         """Set charge rate."""
         if profile is not None:
-            try:
-                req = call.SetChargingProfile(
-                    connector_id=int(conn_id), cs_charging_profiles=profile
-                )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    return True
-                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
-            except Exception as ex:
-                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
-                await self.notify_ha(
-                    "Warning: Set charging profile failed with response Exception"
-                )
+            req = call.SetChargingProfile(
+                connector_id=int(conn_id), cs_charging_profiles=profile
+            )
+            for attempt in range(3):
+                try:
+                    resp = await self.call(req)
+                    if resp.status == ChargingProfileStatus.accepted:
+                        return True
+                    _LOGGER.warning(
+                        "Custom SetChargingProfile rejected: %s", resp.status
+                    )
+                    return False
+                except Exception as ex:
+                    if attempt < 2:
+                        _LOGGER.debug(
+                            "SetChargingProfile attempt %d failed, retrying: %s",
+                            attempt + 1,
+                            ex,
+                        )
+                        await asyncio.sleep(0.5 + (attempt * 0.5))
+                    else:
+                        _LOGGER.warning(
+                            "Custom SetChargingProfile failed after 3 attempts: %s", ex
+                        )
+                        await self.notify_ha(
+                            "Warning: Set charging profile failed with response Exception"
+                        )
             return False
 
         if not (int(self.supported_features or 0) & prof.SMART):
