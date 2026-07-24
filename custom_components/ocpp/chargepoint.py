@@ -2,6 +2,7 @@
 
 import asyncio
 from collections import defaultdict
+import contextlib
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -39,6 +40,11 @@ from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
 from ocpp.exceptions import NotImplementedError
 
+from .command_queue import (
+    CommandQueue,
+    QueuedCommand,
+    profile_purpose as queue_profile_purpose,
+)
 from .enums import (
     HAChargerDetails as cdet,
     HAChargerSession as csess,
@@ -328,6 +334,7 @@ class ChargePoint(cp):
         # Counts BootNotifications. A rebooted charger may reuse transaction
         # ids, so anything keyed on an id alone must also carry this number.
         self.charger_generation: int = 0
+        self._command_queue = CommandQueue()
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -803,6 +810,99 @@ class ChargePoint(cp):
         self._reconnect_token = None
         await self._stop_session(self._get_session())
 
+    async def _monitor_and_replay(self) -> None:
+        """Monitor the new session and, alongside it, replay what timed out.
+
+        Replay rides the monitor rather than taking a session task of its own:
+        the session task set is all session-lifetime tasks, and a short-lived
+        member would break that invariant for the retirement bookkeeping built
+        on it. Owning the replay here still ends it with the session, and
+        keeps it off the monitor's own backstop and ping schedule.
+        """
+        replay = asyncio.ensure_future(self._replay_queue())
+        try:
+            await self.monitor_connection()
+        finally:
+            replay.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await replay
+
+    async def _replay_queue(self) -> None:
+        """Replay commands queued by timeouts, once the new session is live.
+
+        It must not take the session down with it: every per-command failure
+        is logged and the rest still replay. Only cancellation propagates,
+        which is teardown asking it to stop.
+        """
+        try:
+            commands = await self._command_queue.dequeue_all()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.exception("%s: could not drain the command queue", self.id)
+            return
+        if not commands:
+            return
+        # Yield so the receiver task started alongside this one is listening
+        # before the first replayed call goes out and its response comes back.
+        await asyncio.sleep(0)
+        _LOGGER.debug("%s: replaying %d queued command(s)", self.id, len(commands))
+        for cmd in commands:
+            try:
+                await cmd.execute()
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                _LOGGER.warning("Replay of %s failed: %s", cmd.call_type, ex)
+
+    async def _call_with_timeout_handling(
+        self, req, call_type: str, connector_id: int | None = None, **call_kwargs
+    ):
+        """Wrap self.call() to handle timeouts by queuing for reconnect replay.
+
+        On timeout: queues the failed command for replay on next reconnect.
+        On success: returns the response.
+        On charger rejection: returns the response (no retry needed).
+
+        Timeouts are queued but the exception is re-raised to let the caller handle
+        the immediate failure. Reconnection happens naturally via monitor_connection
+        when the websocket detects the disconnect.
+        """
+        try:
+            return await self.call(req, **call_kwargs)
+        except TimeoutError:
+            # Recoverable, and the caller logs the immediate failure too, so
+            # this stays below error level.
+            _LOGGER.warning(
+                "OCPP call %s timed out for charger %s; queuing for replay on reconnect",
+                call_type,
+                self.id,
+            )
+            # Extract profile purpose for SetChargingProfile to prevent coalescing
+            # different profile types. TxProfile and TxDefaultProfile are sent to
+            # the same connector, so purpose is their only discriminator: without
+            # it the live-session TxProfile is dropped for the TxDefaultProfile
+            # queued after it, and the ongoing charge rate never changes.
+            profile_purpose = None
+            if call_type == "SetChargingProfile":
+                profile_purpose = queue_profile_purpose(req)
+
+            cmd = QueuedCommand(
+                call_type=call_type,
+                call_fn=self._call_with_timeout_handling,
+                args=(req,),
+                kwargs={
+                    "call_type": call_type,
+                    "connector_id": connector_id,
+                    **call_kwargs,
+                },
+                connector_id=connector_id,
+                profile_purpose=profile_purpose,
+            )
+            await self._command_queue.enqueue(cmd)
+
+            raise
+
     async def reconnect(self, connection: ServerConnection):
         """Retire the previous session before publishing the newest replacement."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
@@ -852,7 +952,7 @@ class ChargePoint(cp):
             self._metrics[(0, cstat.reconnects)].value += 1
             installed = True
             # post connect remains handled by boot notification / monitor backstop
-            await self.run([super().start(), self.monitor_connection()])
+            await self.run([super().start(), self._monitor_and_replay()])
         finally:
             if not installed:
                 await self._stop_session(candidate)
