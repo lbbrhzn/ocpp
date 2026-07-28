@@ -26,6 +26,7 @@ CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
 CONF_MONITORED_VARIABLES_AUTOCONFIG = "monitored_variables_autoconfig"
 CONF_NAME = ha.CONF_NAME
 CONF_NUM_CONNECTORS = "num_connectors"
+CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
@@ -54,7 +55,16 @@ DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+OCPP_1_6 = "ocpp1.6"
 OCPP_2_0 = "ocpp2"
+OCPP_VERSION_AUTO = "auto"
+DEFAULT_OCPP_VERSION = OCPP_VERSION_AUTO
+# Selectable values for the config-flow "OCPP version" field. "auto" advertises
+# every supported subprotocol (DEFAULT_SUBPROTOCOLS) and negotiates in that
+# order, so a charger offering several versions gets the first entry; any other
+# value restricts negotiation to that single OCPP version, so such a charger is
+# held to it and cannot fall back to (and then crash on) the wrong one.
+OCPP_VERSIONS = [OCPP_VERSION_AUTO, "1.6", "2.0.1", "2.1"]
 DEFAULT_METER_INTERVAL = 60
 DEFAULT_IDLE_INTERVAL = 900
 DEFAULT_WEBSOCKET_CLOSE_TIMEOUT = 10
@@ -172,6 +182,8 @@ class CentralSystemSettings:
     websocket_ping_tries: int
     cpids: list = field(default_factory=list)  # holds cpid config flow settings
     subprotocols: list = field(default_factory=lambda: DEFAULT_SUBPROTOCOLS)
+    # "auto" (advertise all) or a specific OCPP version to pin negotiation to.
+    ocpp_version: str = DEFAULT_OCPP_VERSION
 
     # def __post_init__(self):
     #     i = 0

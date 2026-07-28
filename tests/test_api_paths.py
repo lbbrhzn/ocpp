@@ -412,3 +412,243 @@ def test_del_metric_variants(hass):
 
     # --- Case C: unknown cpid -> returns None, no exception
     assert cs.del_metric("unknown_cpid", "Voltage") is None
+
+
+@pytest.mark.asyncio
+async def test_select_subprotocol_follows_server_order(hass):
+    """Selection is deterministic and follows the server's preference order.
+
+    This mirrors the documented websockets behaviour the override replaces:
+    "pick the first one in the list declared the server". The previous code
+    iterated a set() of the client's offer, so for a charger offering several
+    subprotocols the result depended on set-iteration order and varied between
+    handshakes (issue #2008).
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    # DEFAULT_SUBPROTOCOLS order is ocpp1.6, ocpp2.0.1, ocpp2.1
+    assert cs.subprotocols[0] == "ocpp1.6"
+    # a dual-stack charger gets 1.6 regardless of the order it offers them in
+    assert cs.select_subprotocol(None, ["ocpp1.6", "ocpp2.0.1"]) == "ocpp1.6"
+    assert cs.select_subprotocol(None, ["ocpp2.0.1", "ocpp1.6"]) == "ocpp1.6"
+    # a charger that cannot do 1.6 still gets its version
+    assert cs.select_subprotocol(None, ["ocpp2.0.1"]) == "ocpp2.0.1"
+    # unsupported entries are skipped
+    assert cs.select_subprotocol(None, ["bogus", "ocpp2.0.1"]) == "ocpp2.0.1"
+    # no subprotocol offered while 1.6 is advertised -> legacy 1.6 default
+    assert cs.select_subprotocol(None, []) is None
+
+
+@pytest.mark.asyncio
+async def test_pinned_version_overrides_server_preference(hass):
+    """Pinning 2.0.1 beats the default 1.6-first preference."""
+    data = MOCK_CONFIG_DATA.copy()
+    data["ocpp_version"] = "2.0.1"
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    cs = CentralSystem(hass, entry)
+
+    assert cs.select_subprotocol(None, ["ocpp1.6", "ocpp2.0.1"]) == "ocpp2.0.1"
+    assert cs.select_subprotocol(None, ["ocpp2.0.1", "ocpp1.6"]) == "ocpp2.0.1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_subprotocols_auto_and_pinned(hass):
+    """Pinning an OCPP version advertises only that version's subprotocol."""
+    from custom_components.ocpp.const import (
+        CentralSystemSettings,
+        DEFAULT_SUBPROTOCOLS,
+    )
+
+    base = {
+        "csid": "c",
+        "host": "h",
+        "port": "1",
+        "ssl": False,
+        "ssl_certfile_path": "",
+        "ssl_keyfile_path": "",
+        "websocket_close_timeout": 1,
+        "websocket_ping_interval": 1,
+        "websocket_ping_timeout": 1,
+        "websocket_ping_tries": 1,
+    }
+
+    auto = CentralSystemSettings(**base, ocpp_version="auto")
+    assert CentralSystem._resolve_subprotocols(auto) == DEFAULT_SUBPROTOCOLS
+
+    for version in ("1.6", "2.0.1", "2.1"):
+        pinned = CentralSystemSettings(**base, ocpp_version=version)
+        assert CentralSystem._resolve_subprotocols(pinned) == [f"ocpp{version}"]
+
+
+@pytest.mark.asyncio
+async def test_pinned_version_restricts_negotiation(hass):
+    """A pinned OCPP version forces negotiation and blocks fallback.
+
+    Regression guard for issue #2008: a charger that advertises several OCPP
+    versions must be held to the pinned one, and a charger that cannot offer
+    the pinned version is rejected rather than silently falling back to a
+    version the integration would then mis-validate.
+    """
+    data = MOCK_CONFIG_DATA.copy()
+    data["ocpp_version"] = "2.0.1"
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    cs = CentralSystem(hass, entry)
+
+    assert cs.subprotocols == ["ocpp2.0.1"]
+    # charger offering both is held to 2.0.1 regardless of its own order
+    assert cs.select_subprotocol(None, ["ocpp1.6", "ocpp2.0.1"]) == "ocpp2.0.1"
+    assert cs.select_subprotocol(None, ["ocpp2.0.1", "ocpp1.6"]) == "ocpp2.0.1"
+    # charger that can only do 1.6 is rejected (no silent fallback)
+    with pytest.raises(NegotiationError):
+        cs.select_subprotocol(None, ["ocpp1.6"])
+    # charger offering NO subprotocol must also be rejected: accepting it
+    # would default the connection to a v1.6 ChargePoint, poisoning the cache
+    # for the follow-up pinned-version connection
+    with pytest.raises(NegotiationError):
+        cs.select_subprotocol(None, [])
+
+
+def _make_ws(subprotocol, path="/CP_1"):
+    """Build a minimal fake websocket for on_connect."""
+    return SimpleNamespace(
+        subprotocol=subprotocol,
+        request=SimpleNamespace(path=path),
+    )
+
+
+@pytest.mark.asyncio
+async def test_negotiated_ocpp_version(hass):
+    """The negotiated version string is derived from the subprotocol."""
+    assert CentralSystem._negotiated_ocpp_version(_make_ws("ocpp1.6")) == "1.6"
+    assert CentralSystem._negotiated_ocpp_version(_make_ws("ocpp2.0.1")) == "2.0.1"
+    assert CentralSystem._negotiated_ocpp_version(_make_ws("ocpp2.1")) == "2.1"
+    # no subprotocol negotiated -> the 1.6 default
+    assert CentralSystem._negotiated_ocpp_version(_make_ws(None)) == "1.6"
+
+
+class _FakeReconnectCP:
+    """Fake ChargePoint recording lifecycle calls for on_connect tests."""
+
+    def __init__(self, ocpp_version):
+        """Initialize."""
+        self._ocpp_version = ocpp_version
+        self.settings = SimpleNamespace(cpid="CP_1_cpid")
+        self.stopped = False
+        self.started = False
+        self.reconnected_with = None
+
+    async def stop(self):
+        """Stop."""
+        self.stopped = True
+
+    async def start(self):
+        """Start."""
+        self.started = True
+
+    async def reconnect(self, connection):
+        """Reconnect."""
+        self.reconnected_with = connection
+
+
+@pytest.mark.asyncio
+async def test_on_connect_rebuilds_on_version_change(hass, monkeypatch):
+    """A reconnect with a different OCPP version rebuilds the ChargePoint.
+
+    Regression test for issue #2008: the cached ChargePoint keeps the OCPP
+    version (and validator/message set) it was first built with. Some chargers
+    (e.g. FoxESS A-series) make a short-lived 1.6 probe connection right after
+    a version switch, planting a v16 object; the real 2.0.1 connection must
+    rebuild from its own negotiated subprotocol instead of reusing the stale
+    object (which would validate 2.0.1 payloads against the 1.6 schema).
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    old_cp = _FakeReconnectCP("1.6")
+    cs.charge_points["CP_1"] = old_cp
+
+    new_cp = _FakeReconnectCP("2.0.1")
+    built = []
+
+    def _fake_build(cp_id, websocket, cp_settings):
+        built.append((cp_id, websocket.subprotocol, cp_settings))
+        return new_cp
+
+    monkeypatch.setattr(cs, "_build_charge_point", _fake_build)
+
+    # charger reconnects negotiating 2.0.1 while cache holds a 1.6 CP
+    await cs.on_connect(_make_ws("ocpp2.0.1"))
+
+    assert old_cp.stopped is True
+    assert built and built[0][1] == "ocpp2.0.1"
+    assert built[0][2] is old_cp.settings  # settings carried over
+    assert cs.charge_points["CP_1"] is new_cp
+    assert new_cp.started is True
+    # a rebuild is not a plain reconnect
+    assert new_cp.reconnected_with is None
+
+
+@pytest.mark.asyncio
+async def test_on_connect_cancels_tasks_when_stop_fails(hass, monkeypatch):
+    """A failing stop() must not leave the stale ChargePoint's tasks running.
+
+    ChargePoint.stop() closes the websocket before cancelling its tasks, so if
+    the close raises, cancellation never happens. The rebuild must cancel them
+    itself, or the replaced instance keeps running monitor_connection against a
+    charger that now belongs to a new ChargePoint.
+    """
+
+    class _StuckCP(_FakeReconnectCP):
+        """Fake whose stop() fails the way a failed socket close would."""
+
+        def __init__(self, ocpp_version):
+            super().__init__(ocpp_version)
+            self.tasks = [SimpleNamespace(cancelled=False)]
+            for task in self.tasks:
+                task.cancel = lambda t=task: setattr(t, "cancelled", True)
+
+        async def stop(self):
+            """Raise where a failed websocket close would, before cancelling."""
+            raise OSError("connection close failed")
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    old_cp = _StuckCP("1.6")
+    cs.charge_points["CP_1"] = old_cp
+    new_cp = _FakeReconnectCP("2.0.1")
+    monkeypatch.setattr(cs, "_build_charge_point", lambda *a, **kw: new_cp)
+
+    # must not raise, and must still replace the charge point
+    await cs.on_connect(_make_ws("ocpp2.0.1"))
+
+    assert all(
+        task.cancelled for task in old_cp.tasks
+    ), "stale charge point's tasks must be cancelled when stop() fails"
+    assert cs.charge_points["CP_1"] is new_cp
+    assert new_cp.started is True
+
+
+@pytest.mark.asyncio
+async def test_on_connect_reconnects_when_version_unchanged(hass, monkeypatch):
+    """A reconnect with the same OCPP version reuses the cached ChargePoint."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    cp = _FakeReconnectCP("2.0.1")
+    cs.charge_points["CP_1"] = cp
+
+    def _fail_build(*args, **kwargs):
+        raise AssertionError(
+            "_build_charge_point must not be called on same-version reconnect"
+        )
+
+    monkeypatch.setattr(cs, "_build_charge_point", _fail_build)
+
+    ws = _make_ws("ocpp2.0.1")
+    await cs.on_connect(ws)
+
+    assert cs.charge_points["CP_1"] is cp
+    assert cp.reconnected_with is ws
+    assert cp.stopped is False

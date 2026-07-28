@@ -237,3 +237,77 @@ async def test_failed_config_flow(hass, error_on_get_data):
 #
 #     # Verify that the options were updated
 #     assert entry.options == {BINARY_SENSOR: True, SENSOR: False, SWITCH: True}
+
+
+async def test_reconfigure_flow(hass, bypass_get_data):
+    """Test reconfiguring an existing entry (e.g. to pin the OCPP version)."""
+    from custom_components.ocpp.const import CONF_OCPP_VERSION
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_CS.copy(),
+        entry_id="test_reconf",
+        version=2,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    # Change the OCPP version pin, keep everything else
+    new_input = MOCK_CONFIG_CS.copy()
+    new_input.pop(CONF_CPIDS)
+    new_input[CONF_OCPP_VERSION] = "2.0.1"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=new_input
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_OCPP_VERSION] == "2.0.1"
+    # cpid settings must be preserved across reconfigure
+    assert CONF_CPIDS in entry.data
+
+
+async def test_reconfigure_does_not_schedule_second_reload(hass, bypass_get_data):
+    """Reconfigure must not reload on top of the entry-update listener.
+
+    async_setup_entry registers add_update_listener(async_reload_entry), so
+    updating the entry already reloads it. Scheduling another reload from the
+    flow overlaps the two: the websocket server is rebound while the first
+    setup is still in flight and the platform forwards fail with "config entry
+    ... has already been setup".
+    """
+    from custom_components.ocpp.const import CONF_OCPP_VERSION
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_CS.copy(),
+        entry_id="test_reconf_reload",
+        version=2,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+
+    scheduled: list[str] = []
+    with patch.object(
+        hass.config_entries,
+        "async_schedule_reload",
+        side_effect=lambda entry_id: scheduled.append(entry_id),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        new_input = MOCK_CONFIG_CS.copy()
+        new_input.pop(CONF_CPIDS)
+        new_input[CONF_OCPP_VERSION] = "2.0.1"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=new_input
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert entry.data[CONF_OCPP_VERSION] == "2.0.1"
+    assert scheduled == [], (
+        "reconfigure scheduled its own reload; the update listener already "
+        f"reloads the entry (scheduled={scheduled})"
+    )
