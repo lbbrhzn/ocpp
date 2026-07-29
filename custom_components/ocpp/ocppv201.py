@@ -165,6 +165,24 @@ class ChargePoint(cp):
         self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
     ):
         """Update per connector and evse aggregated."""
+        # Station-level notifications (evseId=0 / connectorId=0, which the OCPP
+        # 2.0.1 spec allows and e.g. the FoxESS A-series sends on every boot)
+        # don't belong in the per-connector bookkeeping below: evse_id - 1 == -1
+        # would either raise IndexError, on the first such notification when
+        # _connector_status is still empty, or silently write the station's
+        # status into the LAST EVSE's slot once it is not.
+        # Record them as the charger-level Status metric instead - the same key
+        # the OCPP 1.6 handler uses for connectorId=0 and that the availability
+        # switch reads. (0, Status.Connector) must stay owned by the EVSE
+        # aggregation in _report_evse_status, or a station-level 'Available'
+        # would mask a faulted connector via the flattened sensor's fallback
+        # chain.
+        if evse_id < 1 or connector_id < 1:
+            self._metrics[(0, cstat.status.value)].value = ConnectorStatusEnumType(
+                connector_status
+            ).value
+            return
+
         if evse_id > len(self._connector_status):
             needed = evse_id - len(self._connector_status)
             self._connector_status.extend([[] for _ in range(needed)])
