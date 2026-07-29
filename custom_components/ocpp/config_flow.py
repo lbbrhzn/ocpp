@@ -22,6 +22,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
+    CONF_OCPP_VERSION,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_NUM_CONNECTORS,
+    DEFAULT_OCPP_VERSION,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -53,6 +55,7 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
     MEASURANDS,
+    OCPP_VERSIONS,
 )
 
 STEP_USER_CS_DATA_SCHEMA = vol.Schema(
@@ -63,6 +66,9 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SSL_CERTFILE_PATH, default=DEFAULT_SSL_CERTFILE_PATH): str,
         vol.Required(CONF_SSL_KEYFILE_PATH, default=DEFAULT_SSL_KEYFILE_PATH): str,
         vol.Required(CONF_CSID, default=DEFAULT_CSID): vol.All(str, vol.Length(max=20)),
+        vol.Required(CONF_OCPP_VERSION, default=DEFAULT_OCPP_VERSION): vol.In(
+            OCPP_VERSIONS
+        ),
         vol.Required(
             CONF_WEBSOCKET_CLOSE_TIMEOUT, default=DEFAULT_WEBSOCKET_CLOSE_TIMEOUT
         ): int,
@@ -136,6 +142,39 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_CS_DATA_SCHEMA,
             errors=errors,
+            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
+        )
+
+    async def async_step_reconfigure(self, user_input=None) -> ConfigFlowResult:
+        """Allow reconfiguring the central system settings of an existing entry.
+
+        Without this, settings added after an entry was created (such as the
+        OCPP version pin) could only be changed by deleting and re-adding the
+        integration.
+        """
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            # Don't allow servers to use same websocket port (the entry being
+            # reconfigured is excluded from the match).
+            self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
+            # Updating the entry already triggers a reload, via the
+            # add_update_listener(async_reload_entry) registered in
+            # async_setup_entry. async_update_reload_and_abort() would schedule
+            # a second one on top of it, and the two overlap: the websocket
+            # server is rebound while the first setup is still in flight and
+            # the platform forwards then fail with "config entry ... has
+            # already been setup". Update only, and let the listener reload.
+            self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, **user_input}
+            )
+            return self.async_abort(reason="reconfigure_successful")
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_CS_DATA_SCHEMA, entry.data
+            ),
             description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
