@@ -8,6 +8,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from websockets.protocol import State
 
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.setup import async_setup_component
 
 from custom_components.ocpp.chargepoint import (
@@ -328,3 +329,97 @@ async def test_handle_call_wraps_notimplementederror_and_sends(hass):
         await cp._handle_call(DummyMsg())
 
     assert sent.get("payload") == "ERR_JSON"
+
+
+# -----------------------------
+# stop() must always cancel tasks
+# -----------------------------
+def _mk_task():
+    """Return a task-like object that records cancellation."""
+    task = SimpleNamespace(cancelled=False)
+    task.cancel = lambda t=task: setattr(t, "cancelled", True)
+    return task
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_tasks_when_close_fails(hass):
+    """A websocket close that raises must not skip task cancellation.
+
+    monitor_connection lives in self.tasks and keeps pinging the connection
+    forever, so leaving it running after stop() means the charge point never
+    really stops.
+    """
+    cp = _mk_cp(hass)
+    cp.tasks = [_mk_task(), _mk_task()]
+
+    async def failing_close():
+        raise OSError("close failed")
+
+    cp._connection.state = State.OPEN
+    cp._connection.close = failing_close
+
+    # the caller still learns the close failed
+    with pytest.raises(OSError):
+        await cp.stop()
+
+    assert all(
+        task.cancelled for task in cp.tasks
+    ), "tasks must be cancelled even when the websocket close raises"
+    assert cp.status == STATE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_tasks_when_close_is_cancelled(hass):
+    """Cancellation of the close must not skip task cancellation either.
+
+    CancelledError derives from BaseException, so an "except Exception" guard
+    around stop() at a call site would not catch it. Only the finally block
+    keeps the tasks from outliving the charge point on this path.
+    """
+    cp = _mk_cp(hass)
+    cp.tasks = [_mk_task(), _mk_task()]
+
+    async def cancelled_close():
+        raise asyncio.CancelledError
+
+    cp._connection.state = State.OPEN
+    cp._connection.close = cancelled_close
+
+    # cancellation is not swallowed
+    with pytest.raises(asyncio.CancelledError):
+        await cp.stop()
+
+    assert all(
+        task.cancelled for task in cp.tasks
+    ), "tasks must be cancelled even when the websocket close is cancelled"
+    assert cp.status == STATE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_stop_without_tasks_does_not_raise(hass):
+    """stop() before run() has populated self.tasks must be a no-op, not a crash."""
+    cp = _mk_cp(hass)
+    assert cp.tasks is None  # never started
+
+    await cp.stop()
+
+    assert cp.status == STATE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_stop_closes_connection_and_cancels_tasks(hass):
+    """The normal path still closes the websocket and cancels the tasks."""
+    cp = _mk_cp(hass)
+    cp.tasks = [_mk_task()]
+    closed = []
+
+    async def close():
+        closed.append(True)
+
+    cp._connection.state = State.OPEN
+    cp._connection.close = close
+
+    await cp.stop()
+
+    assert closed == [True]
+    assert all(task.cancelled for task in cp.tasks)
