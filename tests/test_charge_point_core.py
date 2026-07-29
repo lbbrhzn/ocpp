@@ -369,6 +369,33 @@ async def test_stop_cancels_tasks_when_close_fails(hass):
 
 
 @pytest.mark.asyncio
+async def test_stop_cancels_tasks_when_close_is_cancelled(hass):
+    """Cancellation of the close must not skip task cancellation either.
+
+    CancelledError derives from BaseException, so an "except Exception" guard
+    around stop() at a call site would not catch it. Only the finally block
+    keeps the tasks from outliving the charge point on this path.
+    """
+    cp = _mk_cp(hass)
+    cp.tasks = [_mk_task(), _mk_task()]
+
+    async def cancelled_close():
+        raise asyncio.CancelledError
+
+    cp._connection.state = State.OPEN
+    cp._connection.close = cancelled_close
+
+    # cancellation is not swallowed
+    with pytest.raises(asyncio.CancelledError):
+        await cp.stop()
+
+    assert all(
+        task.cancelled for task in cp.tasks
+    ), "tasks must be cancelled even when the websocket close is cancelled"
+    assert cp.status == STATE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
 async def test_stop_without_tasks_does_not_raise(hass):
     """stop() before run() has populated self.tasks must be a no-op, not a crash."""
     cp = _mk_cp(hass)
