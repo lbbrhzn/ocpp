@@ -277,8 +277,9 @@ class ChargePoint(cp):
             # reporting must not abort post_connect: swallowing the timeout
             # lets get_number_of_connectors fall back to one connector below.
             # Accepted trade-off: parts that did arrive may yield a partial
-            # inventory; anything wrong with it self-heals on the next
-            # reconnect, when the inventory is fetched again.
+            # inventory, and since a same-version reconnect reuses this
+            # ChargePoint, anything wrong with it persists until the
+            # integration is reloaded.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._wait_inventory.wait(), self._response_timeout
@@ -313,24 +314,36 @@ class ChargePoint(cp):
         Accepted limitation: a genuine multi-connector charger with an
         unusable inventory is exposed as a single connector - discovering
         more would require growing entities after setup. Statuses for a
-        second pair route to an index with no entity behind it; harmless,
-        and corrected on the next reconnect if the charger ever reports a
-        usable inventory.
+        second pair route to an index with no entity behind it; harmless.
+        A same-version reconnect reuses this ChargePoint and its maps, so
+        anything imperfect here persists until the integration is reloaded
+        (or the charger starts reporting a usable inventory and Home
+        Assistant is restarted).
         """
         await self._get_inventory()
         total = self._total_connectors()
         if total == 0:
             total = DEFAULT_NUM_CONNECTORS
-            # The inventory exchange is over and produced no usable topology,
-            # so nothing else will flush the statuses buffered during it.
-            # Route them through the dynamic allocation now (station-level
-            # (0, 0) entries go to the charger-level Status metric).
-            pending = self._pending_status_notifications
-            self._pending_status_notifications = []
-            for timestamp, status, evse_id, connector_id in pending:
-                self._apply_status_notification(
-                    timestamp, status, evse_id, connector_id
-                )
+            # Flush the statuses buffered during the exchange - but only if no
+            # inventory attempt is still in flight. post_connect can run twice
+            # (boot notification + the 10s monitor backstop), and with a slow
+            # multipart report _get_inventory returns early for the second
+            # caller while the first is still waiting: _inventory exists from
+            # the first part, but the connector counts have not arrived.
+            # Flushing here would install a dynamic map that the real
+            # inventory could then never replace (_build_connector_map keeps a
+            # populated map), leaving a working multi-connector charger's
+            # sensors permanently swapped. Left buffered, the statuses are
+            # flushed by the in-flight attempt's own completion instead.
+            # Station-level (0, 0) entries go to the charger-level Status
+            # metric.
+            if self._wait_inventory is None:
+                pending = self._pending_status_notifications
+                self._pending_status_notifications = []
+                for timestamp, status, evse_id, connector_id in pending:
+                    self._apply_status_notification(
+                        timestamp, status, evse_id, connector_id
+                    )
         return total
 
     async def set_standard_configuration(self):
@@ -699,17 +712,18 @@ class ChargePoint(cp):
             evse_id >= 1
             and connector_id >= 1
             and not self._ensure_connector_map()
-            and not self.post_connect_success
+            and (not self.post_connect_success or self._wait_inventory is not None)
         ):
-            # No inventory-derived map yet and setup is still running: hold
-            # the status until get_number_of_connectors has settled the
-            # topology, so a pre-inventory status cannot poison the map of a
-            # charger whose real report is still on its way.
+            # No inventory-derived map, and either setup is still running or
+            # an inventory attempt is in flight (stop_transaction re-fetches
+            # when none is cached, so this can happen after setup too): hold
+            # the status until the attempt settles, so it cannot poison the
+            # map of a charger whose real report is still on its way.
             #
-            # Once setup HAS finished without producing a map, the inventory
-            # is unusable and no flush is ever coming - fall through and let
-            # _pair_to_global's dynamic allocation route it instead of
-            # buffering it forever.
+            # Once setup has finished and no attempt is running, a missing
+            # map means the inventory is unusable and no flush is ever
+            # coming - fall through and let _pair_to_global's dynamic
+            # allocation route it instead of buffering it forever.
             self._pending_status_notifications.append(
                 (timestamp, connector_status, evse_id, connector_id)
             )

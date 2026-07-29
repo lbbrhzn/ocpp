@@ -103,3 +103,87 @@ async def test_refused_inventory_still_gets_the_floor(hass):
     total = await cp.get_number_of_connectors()
 
     assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_second_post_connect_during_slow_inventory_does_not_poison_map(hass):
+    """A concurrent setup pass must not flush statuses mid-inventory.
+
+    post_connect can run twice (boot notification + the 10s monitor
+    backstop). With a slow multipart inventory, the first NotifyReport part
+    makes _inventory truthy before any connector counts arrive, so the second
+    pass skips the wait, sees zero connectors, and - if it flushed - would
+    install a dynamic map from buffered statuses. Arrived in the order
+    (2,1), (1,1), that map is reversed, and _build_connector_map keeps an
+    already-populated map when the real inventory lands: a working
+    two-connector charger's sensors stay swapped until the integration is
+    reloaded.
+    """
+    cp = _mk_cp(hass)
+
+    # owner attempt in flight; first report part arrived, counts still absent
+    cp._wait_inventory = asyncio.Event()
+    from custom_components.ocpp.ocppv201 import InventoryReport
+
+    cp._inventory = InventoryReport()
+    cp._pending_status_notifications = [
+        ("2026-01-01T00:00:00Z", "Faulted", 2, 1),
+        ("2026-01-01T00:00:01Z", "Available", 1, 1),
+    ]
+
+    total = await cp.get_number_of_connectors()  # the second, concurrent pass
+
+    assert total == 1  # the floor still applies to the returned count
+    assert (
+        cp._evse_to_global == {}
+    ), "no map may be installed while the inventory attempt is in flight"
+    assert (
+        len(cp._pending_status_notifications) == 2
+    ), "statuses must stay buffered for the real map"
+
+    # the real inventory finishes: two EVSEs, one connector each
+    cp._inventory.evse_count = 2
+    cp._inventory.connector_count = [1, 1]
+    cp._wait_inventory = None
+    assert cp._build_connector_map()
+    cp._flush_pending_status_notifications()
+
+    assert cp._evse_to_global == {(1, 1): 1, (2, 1): 2}
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._metrics[(2, cstat.status_connector.value)].value == "Faulted"
+
+
+@pytest.mark.asyncio
+async def test_status_buffers_while_post_setup_refetch_is_in_flight(hass):
+    """The dynamic-routing fall-through must also wait out an active attempt.
+
+    stop_transaction re-fetches the inventory when none is cached, so an
+    attempt can be in flight after setup succeeded. A status arriving then
+    must buffer - not route dynamically past the attempt - and route only
+    once the attempt has settled.
+    """
+    cp = _mk_cp(hass)
+    cp.post_connect_success = True
+    cp._wait_inventory = asyncio.Event()  # post-setup refetch in flight
+
+    cp.on_status_notification(
+        timestamp="2026-01-01T00:00:00Z",
+        connector_status="Available",
+        evse_id=1,
+        connector_id=1,
+    )
+    assert cp._pending_status_notifications == [
+        ("2026-01-01T00:00:00Z", "Available", 1, 1)
+    ], "a status must not route dynamically while an attempt is in flight"
+    assert cp._evse_to_global == {}
+
+    # attempt settles with nothing usable; the next status routes dynamically
+    cp._wait_inventory = None
+    cp.on_status_notification(
+        timestamp="2026-01-01T00:00:02Z",
+        connector_status="Occupied",
+        evse_id=1,
+        connector_id=1,
+    )
+    assert cp._evse_to_global == {(1, 1): 1}
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Occupied"
