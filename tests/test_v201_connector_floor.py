@@ -1,0 +1,105 @@
+"""The one-connector floor for OCPP 2.0.1 chargers with unusable inventories.
+
+The websocket-level scenarios in test_charge_point_v201.py cover the FoxESS
+shape (inventory with no connector components), refused and unsupported
+GetBaseReport, and a first status arriving only after setup. These unit tests
+cover the one shape a test charge point cannot conveniently fake: a charger
+that accepts GetBaseReport and then never finishes reporting.
+"""
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+from ocpp.exceptions import OCPPError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+from websockets.protocol import State
+
+from custom_components.ocpp.const import (
+    DOMAIN,
+    CentralSystemSettings,
+    ChargerSystemSettings,
+)
+from custom_components.ocpp.enums import HAChargerStatuses as cstat
+from custom_components.ocpp.ocppv201 import ChargePoint
+
+from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
+
+
+def _mk_cp(hass):
+    """Build a v201 ChargePoint detached from any real connection."""
+    data = {
+        "host": "127.0.0.1",
+        "port": 0,
+        "csid": "cs",
+        "cpids": [{"CP_A": {"cpid": "test_cpid"}}],
+        "subprotocols": ["ocpp2.0.1"],
+        "websocket_close_timeout": 5,
+        "ssl": False,
+        "websocket_ping_interval": 0.0,
+        "websocket_ping_timeout": 0.01,
+        "websocket_ping_tries": 0,
+        "ssl_certfile_path": CONF_SSL_CERTFILE_PATH,
+        "ssl_keyfile_path": CONF_SSL_KEYFILE_PATH,
+    }
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    entry.add_to_hass(hass)
+    central = CentralSystemSettings(**data)
+    charger = ChargerSystemSettings(
+        cpid="test_cpid",
+        max_current=32.0,
+        idle_interval=60,
+        meter_interval=60,
+        monitored_variables="",
+        monitored_variables_autoconfig=False,
+        skip_schema_validation=False,
+        force_smart_charging=False,
+    )
+    conn = SimpleNamespace(
+        state=State.CLOSED,
+        close=lambda: asyncio.sleep(0),
+        subprotocol="ocpp2.0.1",
+    )
+    cp = ChargePoint("CP_A", conn, hass, entry, central, charger)
+    cp._response_timeout = 0.05
+    return cp
+
+
+@pytest.mark.asyncio
+async def test_silent_charger_still_gets_the_floor(hass):
+    """Accepting GetBaseReport and never reporting must not abort setup.
+
+    The report-wait TimeoutError previously escaped get_number_of_connectors
+    and post_connect swallowed it, so the connector slots were never created:
+    no units, a spurious units_changed repair, and statuses buffered forever.
+    """
+    cp = _mk_cp(hass)
+
+    async def accept_and_never_report(req):
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = accept_and_never_report
+
+    # buffered during the (silent) inventory exchange
+    cp._pending_status_notifications = [("2026-01-01T00:00:00Z", "Available", 1, 1)]
+
+    total = await cp.get_number_of_connectors()  # must not raise
+
+    assert total == 1
+    assert cp._pending_status_notifications == []
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+
+
+@pytest.mark.asyncio
+async def test_refused_inventory_still_gets_the_floor(hass):
+    """A refused GetBaseReport lands in the same place: one logical connector."""
+    cp = _mk_cp(hass)
+
+    async def refuse(req):
+        raise OCPPError("refused")
+
+    cp.call = refuse
+
+    total = await cp.get_number_of_connectors()
+
+    assert total == 1

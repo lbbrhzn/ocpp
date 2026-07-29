@@ -54,6 +54,7 @@ from .enums import (
 from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
+    DEFAULT_NUM_CONNECTORS,
     DOMAIN,
     HA_ENERGY_UNIT,
 )
@@ -272,15 +273,65 @@ class ChargePoint(cp):
         except OCPPError:
             self._inventory = None
         if (resp is not None) and (resp.status == "Accepted"):
-            await asyncio.wait_for(self._wait_inventory.wait(), self._response_timeout)
+            # A charger that accepts GetBaseReport but never finishes
+            # reporting must not abort post_connect: swallowing the timeout
+            # lets get_number_of_connectors fall back to one connector below.
+            # Accepted trade-off: parts that did arrive may yield a partial
+            # inventory; anything wrong with it self-heals on the next
+            # reconnect, when the inventory is fetched again.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._wait_inventory.wait(), self._response_timeout
+                )
         self._wait_inventory = None
         if self._inventory:
             self._build_connector_map()
 
     async def get_number_of_connectors(self) -> int:
-        """Return number of connectors on this charger."""
+        """Return number of connectors on this charger.
+
+        Some chargers (e.g. FoxESS A-series, issue #2008) answer
+        GetBaseReport with an inventory that omits their EVSE/Connector
+        components - only a charging-station-level ``evse.id=0`` entry is
+        reported - so the inventory yields 0 connectors even though the
+        charger clearly has one (its StatusNotification reports
+        evseId=1/connectorId=1). Chargers that cannot answer GetBaseReport at
+        all land in the same place.
+
+        Returning 0 left the base post_connect connector-slot init loop
+        empty, so session metrics (Time.Session, Session.Energy, meter_start)
+        never received their units - raising a spurious `units_changed`
+        repair when a charger switches between OCPP 1.6 and 2.0.1 - and the
+        EVSE<->global connector map could never be built, so buffered
+        StatusNotifications were held forever.
+
+        Such a charger is exposed as one logical connector, matching the
+        OCPP 1.6 path which already defaults to 1. No topology is invented:
+        statuses route through _pair_to_global's existing dynamic
+        allocation, so the first charger-reported pair becomes connector 1.
+
+        Accepted limitation: a genuine multi-connector charger with an
+        unusable inventory is exposed as a single connector - discovering
+        more would require growing entities after setup. Statuses for a
+        second pair route to an index with no entity behind it; harmless,
+        and corrected on the next reconnect if the charger ever reports a
+        usable inventory.
+        """
         await self._get_inventory()
-        return self._total_connectors()
+        total = self._total_connectors()
+        if total == 0:
+            total = DEFAULT_NUM_CONNECTORS
+            # The inventory exchange is over and produced no usable topology,
+            # so nothing else will flush the statuses buffered during it.
+            # Route them through the dynamic allocation now (station-level
+            # (0, 0) entries go to the charger-level Status metric).
+            pending = self._pending_status_notifications
+            self._pending_status_notifications = []
+            for timestamp, status, evse_id, connector_id in pending:
+                self._apply_status_notification(
+                    timestamp, status, evse_id, connector_id
+                )
+        return total
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
@@ -644,7 +695,21 @@ class ChargePoint(cp):
         # charger whose inventory yields no map would strand them - and the
         # chargers that send station-level statuses (e.g. FoxESS A-series)
         # are exactly the ones with such inventories.
-        if evse_id >= 1 and connector_id >= 1 and not self._ensure_connector_map():
+        if (
+            evse_id >= 1
+            and connector_id >= 1
+            and not self._ensure_connector_map()
+            and not self.post_connect_success
+        ):
+            # No inventory-derived map yet and setup is still running: hold
+            # the status until get_number_of_connectors has settled the
+            # topology, so a pre-inventory status cannot poison the map of a
+            # charger whose real report is still on its way.
+            #
+            # Once setup HAS finished without producing a map, the inventory
+            # is unusable and no flush is ever coming - fall through and let
+            # _pair_to_global's dynamic allocation route it instead of
+            # buffering it forever.
             self._pending_status_notifications.append(
                 (timestamp, connector_status, evse_id, connector_id)
             )
