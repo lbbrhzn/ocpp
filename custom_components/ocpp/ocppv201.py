@@ -288,24 +288,32 @@ class ChargePoint(cp):
         req = call.GetBaseReport(1, "FullInventory")
         resp: call_result.GetBaseReport | None = None
         try:
-            resp = await self.call(req)
-        except ocpp.exceptions.NotImplementedError:
-            self._inventory = InventoryReport()
-        except OCPPError:
-            self._inventory = None
-        if (resp is not None) and (resp.status == "Accepted"):
-            # A charger that accepts GetBaseReport but never finishes
-            # reporting must not abort post_connect: swallowing the timeout
-            # lets get_number_of_connectors fall back to one connector below.
-            # Accepted trade-off: parts that did arrive may yield a partial
-            # inventory, and since a same-version reconnect reuses this
-            # ChargePoint, anything wrong with it persists until the
-            # integration is reloaded.
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    self._wait_inventory.wait(), self._response_timeout
-                )
-        self._wait_inventory = None
+            try:
+                resp = await self.call(req)
+            except ocpp.exceptions.NotImplementedError:
+                self._inventory = InventoryReport()
+            except OCPPError:
+                self._inventory = None
+            if (resp is not None) and (resp.status == "Accepted"):
+                # A charger that accepts GetBaseReport but never finishes
+                # reporting must not abort post_connect: swallowing the
+                # timeout lets get_number_of_connectors fall back to one
+                # connector below. Accepted trade-off: parts that did arrive
+                # may yield a partial inventory, and since a same-version
+                # reconnect reuses this ChargePoint, anything wrong with it
+                # persists until the integration is reloaded.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._wait_inventory.wait(), self._response_timeout
+                    )
+        finally:
+            # Release ownership on EVERY exit. The request itself can raise
+            # something the handlers above don't cover - the ocpp library's
+            # response timeout is a bare TimeoutError, and the task can be
+            # cancelled - and now that an in-flight event turns other callers
+            # away, leaking it set would make every future attempt silently
+            # return forever.
+            self._wait_inventory = None
         if self._inventory:
             self._build_connector_map()
         # However this attempt ended - final report received, timed out,

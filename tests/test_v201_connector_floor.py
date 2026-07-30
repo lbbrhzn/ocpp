@@ -323,3 +323,37 @@ async def test_concurrent_get_inventory_has_a_single_owner(hass):
 
     assert len(calls) == 1, "only the owning attempt may send GetBaseReport"
     assert cp._wait_inventory is None
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_releases_ownership_for_the_next_one(hass):
+    """An escaping request failure must not leave the attempt gate locked.
+
+    The ocpp library's response timeout raises a bare TimeoutError that the
+    inventory handlers don't cover. With an in-flight event now turning other
+    callers away, leaking it set would make every future attempt - including
+    post_connect re-running after the charger's next boot - silently return
+    forever.
+    """
+    cp = _mk_cp(hass)
+    calls: list[int] = []
+
+    async def timeout_then_refuse(req):
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise TimeoutError("lib response timeout")
+        raise OCPPError("refused")
+
+    cp.call = timeout_then_refuse
+
+    with pytest.raises(TimeoutError):
+        await cp.get_number_of_connectors()
+
+    assert (
+        cp._wait_inventory is None
+    ), "a failed attempt must release ownership on its way out"
+
+    total = await cp.get_number_of_connectors()
+
+    assert len(calls) == 2, "the next attempt must be able to run"
+    assert total == 1
