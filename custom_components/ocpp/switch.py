@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Final
 
 from homeassistant.components.switch import (
@@ -17,6 +18,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util import slugify
 from ocpp.v16.enums import ChargePointStatus
 
+_LOGGER = logging.getLogger(__package__)
+
 from .api import CentralSystem
 from .const import (
     CONF_CPID,
@@ -27,7 +30,7 @@ from .const import (
     DOMAIN,
     ICON,
 )
-from .enums import HAChargerServices, HAChargerStatuses
+from .enums import ConfigurationKey, HAChargerServices, HAChargerStatuses
 
 
 # Switch configuration definitions
@@ -43,6 +46,9 @@ class OcppSwitchDescription(SwitchEntityDescription):
     metric_condition: list[str] | None = None
     default_state: bool = False
     per_connector: bool = False
+    config_key: str | None = None
+    config_on_value: str | None = None
+    config_off_value: str | None = None
 
 
 SWITCHES: Final[list[OcppSwitchDescription]] = [
@@ -89,6 +95,16 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         ],
         default_state=True,
         per_connector=True,
+    ),
+    OcppSwitchDescription(
+        key="permanent_cable_lock",
+        name="Permanent Cable Lock",
+        icon="mdi:lock",
+        config_key=ConfigurationKey.unlock_connector_on_ev_side_disconnect.value,
+        config_on_value="false",
+        config_off_value="true",
+        default_state=False,
+        per_connector=False,
     ),
 ]
 
@@ -176,6 +192,7 @@ class ChargePointSwitch(SwitchEntity):
         self.connector_id = connector_id
         self._flatten_single = flatten_single
         self._state = self.entity_description.default_state
+        self._supported: bool | None = None
         parts = [SWITCH_DOMAIN, DOMAIN, cpid]
         if self.connector_id and not self._flatten_single:
             parts.append(f"conn{self.connector_id}")
@@ -209,13 +226,16 @@ class ChargePointSwitch(SwitchEntity):
 
     @property
     def should_poll(self) -> bool:
-        """Don't poll - updates will be pushed."""
-        return False
+        """Poll config-backed entities; push updates for metric-backed ones."""
+        return self.entity_description.config_key is not None
 
     @property
     def is_on(self) -> bool:
         """Return true if the switch is on."""
-        """Test metric state against condition if present"""
+        if self.entity_description.config_key is not None:
+            return self._state
+
+        # Test metric state against condition if present
         if self.entity_description.metric_state is not None:
             metric_conn = (
                 self.connector_id
@@ -235,8 +255,80 @@ class ChargePointSwitch(SwitchEntity):
                 self._state = bool(resp)
         return self._state
 
+    async def async_update(self) -> None:
+        """Fetch the current config value for config-backed switches."""
+        if self.entity_description.config_key is None:
+            return
+
+        cp_id = self.central_system.cpids.get(self.cpid, self.cpid)
+        cp = self.central_system.charge_points.get(cp_id)
+        if cp is None or not self.available:
+            return
+
+        try:
+            value = await cp.get_configuration(self.entity_description.config_key)
+        except Exception as ex:
+            if "unknown" in str(ex).lower():
+                _LOGGER.debug(
+                    "Configuration key %s unsupported on %s: %s",
+                    self.entity_description.config_key,
+                    self.entity_id,
+                    ex,
+                )
+                await self.async_remove()
+                return
+            _LOGGER.debug(
+                "Failed to probe configuration key %s for %s: %s",
+                self.entity_description.config_key,
+                self.entity_id,
+                ex,
+            )
+            return
+
+        if value is None:
+            return
+
+        value_str = str(value).strip().lower()
+        if value_str == "unknown":
+            _LOGGER.debug(
+                "Configuration key %s unsupported on %s, removing entity",
+                self.entity_description.config_key,
+                self.entity_id,
+            )
+            await self.async_remove()
+            return
+
+        self._supported = True
+        if self.entity_description.config_on_value is not None:
+            self._state = value_str == self.entity_description.config_on_value.lower()
+        elif self.entity_description.config_off_value is not None:
+            self._state = value_str != self.entity_description.config_off_value.lower()
+        else:
+            self._state = value_str in ("true", "1", "yes", "on")
+
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
+        if self.entity_description.config_key is not None:
+            cp_id = self.central_system.cpids.get(self.cpid, self.cpid)
+            cp = self.central_system.charge_points.get(cp_id)
+            if cp is None:
+                return
+
+            result = await cp.configure(
+                self.entity_description.config_key,
+                self.entity_description.config_on_value or "true",
+            )
+            if result == "Unknown":
+                _LOGGER.debug(
+                    "Configuration key %s unsupported on %s during turn_on",
+                    self.entity_description.config_key,
+                    self.entity_id,
+                )
+                await self.async_remove()
+                return
+            self._state = True
+            return
+
         target_conn = self.connector_id if self.entity_description.per_connector else 0
         self._state = await self.central_system.set_charger_state(
             self.cpid, self.entity_description.on_action, True, connector_id=target_conn
@@ -244,6 +336,27 @@ class ChargePointSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
+        if self.entity_description.config_key is not None:
+            cp_id = self.central_system.cpids.get(self.cpid, self.cpid)
+            cp = self.central_system.charge_points.get(cp_id)
+            if cp is None:
+                return
+
+            result = await cp.configure(
+                self.entity_description.config_key,
+                self.entity_description.config_off_value or "false",
+            )
+            if result == "Unknown":
+                _LOGGER.debug(
+                    "Configuration key %s unsupported on %s during turn_off",
+                    self.entity_description.config_key,
+                    self.entity_id,
+                )
+                await self.async_remove()
+                return
+            self._state = False
+            return
+
         target_conn = self.connector_id if self.entity_description.per_connector else 0
         if self.entity_description.off_action is None:
             resp = True
