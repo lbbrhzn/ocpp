@@ -189,7 +189,12 @@ There are many other diagnostic entities about the features, ids, model, firmwar
 * `Charge Control`
 * `Maximum Current` (if `Current Offered` doesn't reach this when charging, raise the current to the max in the EVO app itself, connect via Bluetooth)
 * `Reset` (reboot the charger)
-* `Unlock` (I think this will unlock the charging cable, if permanent lock is enabled from the app)
+* `Unlock` (requests an immediate connector unlock; this does not change whether permanent lock is enabled)
+* `Permanent Cable Lock`
+  * When ON, the charger is kept in permanent cable lock mode.
+  * When OFF, the charger may unlock the connector when the EV disconnects.
+  * This switch maps to the OCPP configuration key `UnlockConnectorOnEVSideDisconnect`.
+  * Shown only when the charger reports the setting is supported.
 
 ## OCPP Compatibility Issues
 
