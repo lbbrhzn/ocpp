@@ -128,11 +128,6 @@ async def test_handle_call_notimplemented_sends_call_error(
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await ws.close()
-            for original_task in original_tasks:
-                original_task.cancel()
-            for original_task in original_tasks:
-                with contextlib.suppress(Exception):
-                    await original_task
 
 
 @pytest.mark.timeout(5)
@@ -192,6 +187,11 @@ async def test_run_handles_timeout_and_other_exception(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            for original_task in original_tasks:
+                original_task.cancel()
+            for original_task in original_tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await original_task
             await ws.close()
 
 
