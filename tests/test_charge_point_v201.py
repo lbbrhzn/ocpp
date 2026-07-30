@@ -1580,8 +1580,9 @@ async def test_cms_responses_v201(hass, socket_enabled):
     )
 
     # Same incomplete inventory, but no StatusNotification arrives until after
-    # setup completes: the provisional (1,1) fallback must be rebound to the
-    # first observed real pair.
+    # setup completes: no mapping exists yet (nothing is provisioned from
+    # nothing), so the first observed real pair must bind connector 1 via the
+    # dynamic allocation.
     cp_id5 = "CP_2_incomplete_late"
     entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
     entry.data[CONF_CPIDS].append({cp_id5: MOCK_CONFIG_CP_APPEND.copy()})

@@ -154,17 +154,28 @@ async def test_second_post_connect_during_slow_inventory_does_not_poison_map(has
 
 
 @pytest.mark.asyncio
-async def test_status_buffers_while_post_setup_refetch_is_in_flight(hass):
-    """The dynamic-routing fall-through must also wait out an active attempt.
+async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass):
+    """A status held for an in-flight attempt must be applied when it settles.
 
     stop_transaction re-fetches the inventory when none is cached, so an
     attempt can be in flight after setup succeeded. A status arriving then
-    must buffer - not route dynamically past the attempt - and route only
-    once the attempt has settled.
+    buffers - it must not route dynamically past the attempt - and the
+    attempt's settling must drain it: a silently timed-out refetch previously
+    left the entry buffered forever, and repeated silent refetches would
+    accumulate more.
     """
     cp = _mk_cp(hass)
     cp.post_connect_success = True
-    cp._wait_inventory = asyncio.Event()  # post-setup refetch in flight
+    started = asyncio.Event()
+
+    async def accept_then_go_quiet(req):
+        started.set()
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = accept_then_go_quiet
+
+    refetch = asyncio.create_task(cp._get_inventory())
+    await started.wait()
 
     cp.on_status_notification(
         timestamp="2026-01-01T00:00:00Z",
@@ -177,13 +188,84 @@ async def test_status_buffers_while_post_setup_refetch_is_in_flight(hass):
     ], "a status must not route dynamically while an attempt is in flight"
     assert cp._evse_to_global == {}
 
-    # attempt settles with nothing usable; the next status routes dynamically
-    cp._wait_inventory = None
+    await refetch  # the attempt times out and settles
+
+    assert (
+        cp._pending_status_notifications == []
+    ), "settling the attempt must drain the buffer"
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._evse_to_global == {(1, 1): 1}
+
+    # and a later status now routes directly
     cp.on_status_notification(
         timestamp="2026-01-01T00:00:02Z",
         connector_status="Occupied",
         evse_id=1,
         connector_id=1,
     )
-    assert cp._evse_to_global == {(1, 1): 1}
+    assert cp._pending_status_notifications == []
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Occupied"
+
+
+@pytest.mark.asyncio
+async def test_partial_topology_timeout_still_drains_buffered_statuses(hass):
+    """A timed-out report that yielded SOME connectors must still drain.
+
+    A first NotifyReport part can supply real EVSE/connector counts before the
+    charger goes quiet. The floor is then bypassed (total > 0), so the drain
+    cannot live only in the zero-connector fallback: the boot status buffered
+    during the exchange previously stayed unapplied forever even though setup
+    succeeded.
+    """
+    cp = _mk_cp(hass)
+    started = asyncio.Event()
+
+    async def accept_then_go_quiet(req):
+        started.set()
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = accept_then_go_quiet
+
+    setup = asyncio.create_task(cp.get_number_of_connectors())
+    await started.wait()
+
+    # the charger's boot status lands first, before any report part exists to
+    # build a map from - so it buffers
+    cp.on_status_notification(
+        timestamp="2026-01-01T00:00:01Z",
+        connector_status="Available",
+        evse_id=1,
+        connector_id=1,
+    )
+    assert cp._pending_status_notifications, "status buffers during the exchange"
+
+    # then the first report part arrives, describing one EVSE with one
+    # connector - and the final part never comes
+    cp.on_report(
+        1,
+        "2026-01-01T00:00:00Z",
+        0,
+        report_data=[
+            {
+                "component": {"name": "EVSE", "evse": {"id": 1}},
+                "variable": {"name": "AvailabilityState"},
+            },
+            {
+                "component": {
+                    "name": "Connector",
+                    "evse": {"id": 1, "connector_id": 1},
+                },
+                "variable": {"name": "AvailabilityState"},
+            },
+        ],
+        tbc=True,
+    )
+
+    total = await setup  # report wait times out; partial inventory kept
+
+    assert total == 1, "the partial inventory bypasses the floor"
+    assert (
+        cp._pending_status_notifications == []
+    ), "the drain must not live only in the zero-connector fallback"
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._evse_to_global == {(1, 1): 1}

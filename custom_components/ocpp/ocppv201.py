@@ -287,6 +287,26 @@ class ChargePoint(cp):
         self._wait_inventory = None
         if self._inventory:
             self._build_connector_map()
+        # However this attempt ended - final report received, timed out,
+        # refused or unsupported - it is over, and nothing else will drain the
+        # statuses buffered while it ran: on_report's flush only fires when a
+        # final part arrives, and a timed-out partial report that yielded SOME
+        # connectors bypasses the zero-connector fallback below entirely.
+        # Drain here, at the one point every outcome passes through. With a
+        # map (even a partial one) statuses route through it; without one they
+        # take _pair_to_global's dynamic allocation, so the first
+        # charger-reported pair becomes connector 1. (Station-level statuses
+        # never buffer - on_status_notification applies them immediately - so
+        # only real connector pairs pass through here.)
+        # A concurrent second caller (boot notification racing the 10s monitor
+        # backstop) never reaches this point mid-stream - it returns early on
+        # the _inventory check above - so a half-streamed report can never be
+        # drained into a dynamic map that the real inventory could then not
+        # replace.
+        pending = self._pending_status_notifications
+        self._pending_status_notifications = []
+        for timestamp, status, evse_id, connector_id in pending:
+            self._apply_status_notification(timestamp, status, evse_id, connector_id)
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger.
@@ -323,27 +343,10 @@ class ChargePoint(cp):
         await self._get_inventory()
         total = self._total_connectors()
         if total == 0:
+            # Buffered statuses were already drained when the inventory
+            # attempt settled (see _get_inventory); only the count needs
+            # flooring here.
             total = DEFAULT_NUM_CONNECTORS
-            # Flush the statuses buffered during the exchange - but only if no
-            # inventory attempt is still in flight. post_connect can run twice
-            # (boot notification + the 10s monitor backstop), and with a slow
-            # multipart report _get_inventory returns early for the second
-            # caller while the first is still waiting: _inventory exists from
-            # the first part, but the connector counts have not arrived.
-            # Flushing here would install a dynamic map that the real
-            # inventory could then never replace (_build_connector_map keeps a
-            # populated map), leaving a working multi-connector charger's
-            # sensors permanently swapped. Left buffered, the statuses are
-            # flushed by the in-flight attempt's own completion instead.
-            # Station-level (0, 0) entries go to the charger-level Status
-            # metric.
-            if self._wait_inventory is None:
-                pending = self._pending_status_notifications
-                self._pending_status_notifications = []
-                for timestamp, status, evse_id, connector_id in pending:
-                    self._apply_status_notification(
-                        timestamp, status, evse_id, connector_id
-                    )
         return total
 
     async def set_standard_configuration(self):
@@ -719,6 +722,8 @@ class ChargePoint(cp):
             # when none is cached, so this can happen after setup too): hold
             # the status until the attempt settles, so it cannot poison the
             # map of a charger whose real report is still on its way.
+            # _get_inventory drains this buffer when the attempt ends, however
+            # it ends, so nothing held here can be stranded.
             #
             # Once setup has finished and no attempt is running, a missing
             # map means the inventory is unusable and no flush is ever
