@@ -275,6 +275,15 @@ class ChargePoint(cp):
     async def _get_inventory(self):
         if self._inventory is not None:
             return
+        if self._wait_inventory is not None:
+            # An attempt is already in flight (post_connect can run twice:
+            # boot notification racing the 10s monitor backstop). Taking
+            # ownership here would overwrite the owner's event, and once the
+            # owner settled and cleared it, this caller's accepted response
+            # would dereference None at _wait_inventory.wait(). Return and
+            # leave the attempt - and the drain at its settle point - to the
+            # single owner.
+            return
         self._wait_inventory = asyncio.Event()
         req = call.GetBaseReport(1, "FullInventory")
         resp: call_result.GetBaseReport | None = None
@@ -352,8 +361,10 @@ class ChargePoint(cp):
         await self._get_inventory()
         total = self._total_connectors()
         if total == 0:
-            # Buffered statuses were already drained when the inventory
-            # attempt settled (see _get_inventory); only the count needs
+            # Buffered statuses are drained by the owning attempt when it
+            # settles (see _get_inventory); a concurrent second caller can
+            # reach this floor while that attempt is still in flight, and
+            # correctly leaves them for the owner. Only the count needs
             # flooring here.
             total = DEFAULT_NUM_CONNECTORS
         return total
