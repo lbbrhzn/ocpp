@@ -1041,6 +1041,20 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert boot_res.status == RegistrationStatusEnumType.accepted.value
     assert boot_res.status_info is None
     datetime.fromisoformat(boot_res.current_time)
+    # Regression: a station-level StatusNotification (evseId=0/connectorId=0,
+    # which the spec permits and which e.g. the FoxESS A-series sends on every
+    # boot) must not enter the per-connector bookkeeping. It previously indexed
+    # _connector_status[-1], raising IndexError while that list was still empty
+    # and aborting post_connect. A deliberately different status is used here so
+    # the assertions below also catch it being written to the connector's slot.
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.unavailable,
+            0,
+            0,
+        )
+    )
     await cp.call(
         call.StatusNotification(
             datetime.now(tz=UTC).isoformat(), ConnectorStatusEnumType.available, 1, 1
@@ -1069,6 +1083,21 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert (
         cs.get_metric(cpid, cstat.status_connector.value)
         == ConnectorStatusEnumType.available.value
+    )
+    # The station-level notification landed on the charger-level Status metric
+    # (the key the OCPP 1.6 handler uses for connectorId=0 and the availability
+    # switch reads) and did not overwrite the connector's own status above.
+    server_cp = cs.charge_points[cp_id]
+    assert (
+        server_cp._metrics[(0, cstat.status.value)].value
+        == ConnectorStatusEnumType.unavailable.value
+    )
+    # (0, Status.Connector) stays owned by the EVSE aggregation - a
+    # station-level 'Unavailable' written there would mask the connector's real
+    # state through the flattened sensor's fallback chain.
+    assert (
+        server_cp._metrics[(0, cstat.status_connector.value)].value
+        != ConnectorStatusEnumType.unavailable.value
     )
     assert cp.tx_updated_interval == DEFAULT_METER_INTERVAL
     assert cp.tx_updated_measurands == supported_measurands
