@@ -233,15 +233,27 @@ class ChargePoint(cp):
                 v16 = ChargePointStatusv16.preparing
             self._report_evse_status(evse_id, v16)
 
-    def _flush_pending_status_notifications(self):
-        """Flush buffered status notifications when the map is ready."""
-        if not self._ensure_connector_map():
-            return
+    def _drain_pending_status_notifications(self):
+        """Apply and clear buffered status notifications, then notify HA.
+
+        The HA update must be scheduled here rather than left to
+        _apply_status_notification: that only schedules one via
+        _report_evse_status, which is skipped while any connector in the EVSE
+        still has no known status, so a drained entry could change a metric
+        without the sensor ever refreshing.
+        """
         pending = self._pending_status_notifications
         self._pending_status_notifications = []
         for t, st, evse_id, conn_id in pending:
             self._apply_status_notification(t, st, evse_id, conn_id)
-        self.hass.async_create_task(self.update(self.settings.cpid))
+        if pending:
+            self.hass.async_create_task(self.update(self.settings.cpid))
+
+    def _flush_pending_status_notifications(self):
+        """Flush buffered status notifications when the map is ready."""
+        if not self._ensure_connector_map():
+            return
+        self._drain_pending_status_notifications()
 
     def _total_connectors(self) -> int:
         """Total physical connectors across all EVSE."""
@@ -303,10 +315,7 @@ class ChargePoint(cp):
         # the _inventory check above - so a half-streamed report can never be
         # drained into a dynamic map that the real inventory could then not
         # replace.
-        pending = self._pending_status_notifications
-        self._pending_status_notifications = []
-        for timestamp, status, evse_id, connector_id in pending:
-            self._apply_status_notification(timestamp, status, evse_id, connector_id)
+        self._drain_pending_status_notifications()
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger.

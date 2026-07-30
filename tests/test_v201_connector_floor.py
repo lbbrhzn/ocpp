@@ -174,17 +174,27 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
 
     cp.call = accept_then_go_quiet
 
+    updates: list[str] = []
+
+    async def record_update(cpid):
+        updates.append(cpid)
+
+    cp.update = record_update
+
     refetch = asyncio.create_task(cp._get_inventory())
     await started.wait()
 
+    # connector 2 of an EVSE whose connector 1 has no known status: the
+    # EVSE aggregation in _apply_status_notification skips its HA update in
+    # exactly this shape, so only the drain's own notify covers it
     cp.on_status_notification(
         timestamp="2026-01-01T00:00:00Z",
         connector_status="Available",
         evse_id=1,
-        connector_id=1,
+        connector_id=2,
     )
     assert cp._pending_status_notifications == [
-        ("2026-01-01T00:00:00Z", "Available", 1, 1)
+        ("2026-01-01T00:00:00Z", "Available", 1, 2)
     ], "a status must not route dynamically while an attempt is in flight"
     assert cp._evse_to_global == {}
 
@@ -194,14 +204,19 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
         cp._pending_status_notifications == []
     ), "settling the attempt must drain the buffer"
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
-    assert cp._evse_to_global == {(1, 1): 1}
+    assert cp._evse_to_global == {(1, 2): 1}
+    await asyncio.sleep(0)  # let the scheduled update task run
+    assert updates, (
+        "the drain must notify HA itself - _report_evse_status skips while "
+        "any connector in the EVSE has no known status"
+    )
 
     # and a later status now routes directly
     cp.on_status_notification(
         timestamp="2026-01-01T00:00:02Z",
         connector_status="Occupied",
         evse_id=1,
-        connector_id=1,
+        connector_id=2,
     )
     assert cp._pending_status_notifications == []
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Occupied"
