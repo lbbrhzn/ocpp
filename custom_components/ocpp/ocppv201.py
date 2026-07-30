@@ -54,6 +54,7 @@ from .enums import (
 from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
+    DEFAULT_NUM_CONNECTORS,
     DOMAIN,
     HA_ENERGY_UNIT,
 )
@@ -232,15 +233,27 @@ class ChargePoint(cp):
                 v16 = ChargePointStatusv16.preparing
             self._report_evse_status(evse_id, v16)
 
-    def _flush_pending_status_notifications(self):
-        """Flush buffered status notifications when the map is ready."""
-        if not self._ensure_connector_map():
-            return
+    def _drain_pending_status_notifications(self):
+        """Apply and clear buffered status notifications, then notify HA.
+
+        The HA update must be scheduled here rather than left to
+        _apply_status_notification: that only schedules one via
+        _report_evse_status, which is skipped while any connector in the EVSE
+        still has no known status, so a drained entry could change a metric
+        without the sensor ever refreshing.
+        """
         pending = self._pending_status_notifications
         self._pending_status_notifications = []
         for t, st, evse_id, conn_id in pending:
             self._apply_status_notification(t, st, evse_id, conn_id)
-        self.hass.async_create_task(self.update(self.settings.cpid))
+        if pending:
+            self.hass.async_create_task(self.update(self.settings.cpid))
+
+    def _flush_pending_status_notifications(self):
+        """Flush buffered status notifications when the map is ready."""
+        if not self._ensure_connector_map():
+            return
+        self._drain_pending_status_notifications()
 
     def _total_connectors(self) -> int:
         """Total physical connectors across all EVSE."""
@@ -272,15 +285,78 @@ class ChargePoint(cp):
         except OCPPError:
             self._inventory = None
         if (resp is not None) and (resp.status == "Accepted"):
-            await asyncio.wait_for(self._wait_inventory.wait(), self._response_timeout)
+            # A charger that accepts GetBaseReport but never finishes
+            # reporting must not abort post_connect: swallowing the timeout
+            # lets get_number_of_connectors fall back to one connector below.
+            # Accepted trade-off: parts that did arrive may yield a partial
+            # inventory, and since a same-version reconnect reuses this
+            # ChargePoint, anything wrong with it persists until the
+            # integration is reloaded.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._wait_inventory.wait(), self._response_timeout
+                )
         self._wait_inventory = None
         if self._inventory:
             self._build_connector_map()
+        # However this attempt ended - final report received, timed out,
+        # refused or unsupported - it is over, and nothing else will drain the
+        # statuses buffered while it ran: on_report's flush only fires when a
+        # final part arrives, and a timed-out partial report that yielded SOME
+        # connectors bypasses the zero-connector fallback below entirely.
+        # Drain here, at the one point every outcome passes through. With a
+        # map (even a partial one) statuses route through it; without one they
+        # take _pair_to_global's dynamic allocation, so the first
+        # charger-reported pair becomes connector 1. (Station-level statuses
+        # never buffer - on_status_notification applies them immediately - so
+        # only real connector pairs pass through here.)
+        # A concurrent second caller (boot notification racing the 10s monitor
+        # backstop) never reaches this point mid-stream - it returns early on
+        # the _inventory check above - so a half-streamed report can never be
+        # drained into a dynamic map that the real inventory could then not
+        # replace.
+        self._drain_pending_status_notifications()
 
     async def get_number_of_connectors(self) -> int:
-        """Return number of connectors on this charger."""
+        """Return number of connectors on this charger.
+
+        Some chargers (e.g. FoxESS A-series, issue #2008) answer
+        GetBaseReport with an inventory that omits their EVSE/Connector
+        components - only a charging-station-level ``evse.id=0`` entry is
+        reported - so the inventory yields 0 connectors even though the
+        charger clearly has one (its StatusNotification reports
+        evseId=1/connectorId=1). Chargers that cannot answer GetBaseReport at
+        all land in the same place.
+
+        Returning 0 left the base post_connect connector-slot init loop
+        empty, so session metrics (Time.Session, Session.Energy, meter_start)
+        never received their units - raising a spurious `units_changed`
+        repair when a charger switches between OCPP 1.6 and 2.0.1 - and the
+        EVSE<->global connector map could never be built, so buffered
+        StatusNotifications were held forever.
+
+        Such a charger is exposed as one logical connector, matching the
+        OCPP 1.6 path which already defaults to 1. No topology is invented:
+        statuses route through _pair_to_global's existing dynamic
+        allocation, so the first charger-reported pair becomes connector 1.
+
+        Accepted limitation: a genuine multi-connector charger with an
+        unusable inventory is exposed as a single connector - discovering
+        more would require growing entities after setup. Statuses for a
+        second pair route to an index with no entity behind it; harmless.
+        A same-version reconnect reuses this ChargePoint and its maps, so
+        anything imperfect here persists until the integration is reloaded
+        (or the charger starts reporting a usable inventory and Home
+        Assistant is restarted).
+        """
         await self._get_inventory()
-        return self._total_connectors()
+        total = self._total_connectors()
+        if total == 0:
+            # Buffered statuses were already drained when the inventory
+            # attempt settled (see _get_inventory); only the count needs
+            # flooring here.
+            total = DEFAULT_NUM_CONNECTORS
+        return total
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
@@ -644,7 +720,24 @@ class ChargePoint(cp):
         # charger whose inventory yields no map would strand them - and the
         # chargers that send station-level statuses (e.g. FoxESS A-series)
         # are exactly the ones with such inventories.
-        if evse_id >= 1 and connector_id >= 1 and not self._ensure_connector_map():
+        if (
+            evse_id >= 1
+            and connector_id >= 1
+            and not self._ensure_connector_map()
+            and (not self.post_connect_success or self._wait_inventory is not None)
+        ):
+            # No inventory-derived map, and either setup is still running or
+            # an inventory attempt is in flight (stop_transaction re-fetches
+            # when none is cached, so this can happen after setup too): hold
+            # the status until the attempt settles, so it cannot poison the
+            # map of a charger whose real report is still on its way.
+            # _get_inventory drains this buffer when the attempt ends, however
+            # it ends, so nothing held here can be stranded.
+            #
+            # Once setup has finished and no attempt is running, a missing
+            # map means the inventory is unusable and no flush is ever
+            # coming - fall through and let _pair_to_global's dynamic
+            # allocation route it instead of buffering it forever.
             self._pending_status_notifications.append(
                 (timestamp, connector_status, evse_id, connector_id)
             )
