@@ -71,8 +71,14 @@ async def async_setup_entry(hass, entry, async_add_devices):
         for item in entry.data.get(CONF_CPIDS, []):
             for _, cfg in item.items():
                 if cfg.get(CONF_CPID) == cpid:
-                    num_connectors = int(
-                        cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
+                    # Clamp to at least one connector: a stored count of 0
+                    # would make the entity loops below empty, so the charger
+                    # would come up with no connector entities at all and no
+                    # indication why. Config can hold 0 from an integration
+                    # version whose OCPP 2.0.1 inventory handling yielded no
+                    # connectors - post_connect persists whatever it computed.
+                    num_connectors = max(
+                        1, int(cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS))
                     )
                     break
             else:
