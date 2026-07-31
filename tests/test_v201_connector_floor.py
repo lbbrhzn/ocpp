@@ -346,12 +346,20 @@ async def test_failed_attempt_releases_ownership_for_the_next_one(hass):
 
     cp.call = timeout_then_refuse
 
+    # buffered while the failing attempt is in flight
+    cp._pending_status_notifications = [("2026-01-01T00:00:00Z", "Available", 1, 1)]
+
     with pytest.raises(TimeoutError):
         await cp.get_number_of_connectors()
 
     assert (
         cp._wait_inventory is None
     ), "a failed attempt must release ownership on its way out"
+    assert cp._pending_status_notifications == [], (
+        "even a failed attempt must drain on its way out - on a persistently "
+        "failing charger the next attempt would strand these again"
+    )
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
 
     total = await cp.get_number_of_connectors()
 
