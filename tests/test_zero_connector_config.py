@@ -48,9 +48,9 @@ async def test_zero_num_connectors_still_creates_connector_entities(
     await create_configuration(hass, config_entry)
     try:
         cpid = cp_cfg[CONF_CPID]
-        assert hass.states.get(f"switch.{cpid}_charge_control") is not None, (
-            "a stored count of 0 must not suppress the charge control switch"
-        )
+        assert (
+            hass.states.get(f"switch.{cpid}_charge_control") is not None
+        ), "a stored count of 0 must not suppress the charge control switch"
         # the other per-connector platforms are built from the same value
         assert hass.states.get(f"number.{cpid}_maximum_current") is not None
         assert hass.states.get(f"button.{cpid}_reset") is not None
