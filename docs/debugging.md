@@ -152,15 +152,17 @@ p.write_text(json.dumps(d))
 ha core restart
 ```
 
-Use `ha core restart`, not `ha core stop` — the Terminal add-on is served by
-Home Assistant Core, so stopping it also closes the terminal you are working in.
+Use `ha core restart`, not `ha core stop`. The Terminal & SSH add-on runs
+separately from Core, but its *web* terminal is reached through Home Assistant's
+own web interface, so stopping Core leaves you without the terminal you are
+working in. A direct SSH session to the add-on is not affected.
 
 After the restart, run the check command again to confirm the new value was
 kept. Home Assistant holds config entries in memory and rewrites the file
 whenever they change, so an edit made while Core is running can be overwritten.
-If the value has gone back to `0`, stop Core before editing — from a terminal
-that does not depend on it, such as the Home Assistant OS console — and start it
-again afterwards.
+If the value has gone back to `0`, stop Core before editing — from a direct SSH
+session to the add-on or the Home Assistant OS console, rather than the web
+terminal — and start it again afterwards.
 
 Once the connector entities are recreated, the session sensors regain their
 units and Home Assistant may raise a one-time `units_changed` repair for
