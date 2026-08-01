@@ -36,6 +36,7 @@ from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
 from ocpp.exceptions import NotImplementedError
 
+from .command_queue import CommandQueue
 from .enums import (
     HAChargerDetails as cdet,
     HAChargerSession as csess,
@@ -282,6 +283,8 @@ class ChargePoint(cp):
         alphabet = string.ascii_uppercase + string.digits
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+        self._command_queue = CommandQueue()
+        self._reconnect_in_progress = False
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -571,6 +574,67 @@ class ChargePoint(cp):
             for task in self.tasks or []:
                 task.cancel()
 
+    async def _replay_queue(self) -> None:
+        """Replay queued commands from last timeout/disconnect."""
+        commands = await self._command_queue.dequeue_all()
+        for cmd in commands:
+            try:
+                await cmd.execute()
+            except Exception as ex:
+                _LOGGER.warning("Replay of %s failed: %s", cmd.call_type, ex)
+
+    async def _call_with_timeout_handling(
+        self, req, call_type: str, connector_id: int | None = None, **call_kwargs
+    ):
+        """Wrap self.call() to handle timeouts by queuing for reconnect replay.
+
+        On timeout: queues the failed command for replay on next reconnect.
+        On success: returns the response.
+        On charger rejection: returns the response (no retry needed).
+
+        Timeouts are queued but the exception is re-raised to let the caller handle
+        the immediate failure. Reconnection happens naturally via monitor_connection
+        when the websocket detects the disconnect.
+        """
+        try:
+            return await self.call(req, **call_kwargs)
+        except TimeoutError:
+            _LOGGER.error(
+                "OCPP call %s timed out for charger %s; queuing for replay on reconnect",
+                call_type,
+                self.id,
+            )
+            from .command_queue import QueuedCommand
+
+            # Extract profile purpose for SetChargingProfile to prevent coalescing
+            # different profile types (e.g., TxProfile vs TxDefaultProfile)
+            profile_purpose = None
+            if call_type == "SetChargingProfile" and hasattr(
+                req, "cs_charging_profiles"
+            ):
+                # Get the purpose from the profile if available
+                profiles = req.cs_charging_profiles
+                if isinstance(profiles, dict):
+                    profile_purpose = profiles.get("charging_profile_purpose")
+                elif hasattr(profiles, "charging_profile_purpose"):
+                    profile_purpose = profiles.charging_profile_purpose
+
+            cmd = QueuedCommand(
+                call_type=call_type,
+                call_fn=self._call_with_timeout_handling,
+                args=(req,),
+                kwargs={
+                    "call_type": call_type,
+                    "connector_id": connector_id,
+                    **call_kwargs,
+                },
+                connector_id=connector_id,
+                profile_purpose=profile_purpose,
+            )
+            await self._command_queue.enqueue(cmd)
+
+            raise
+
     async def reconnect(self, connection: ServerConnection):
         """Reconnect charge point."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
@@ -579,8 +643,33 @@ class ChargePoint(cp):
         self.status = STATE_OK
         self._connection = connection
         self._metrics[(0, cstat.reconnects.value)].value += 1
-        # post connect now handled on receiving boot notification or with backstop in monitor connection
-        await self.run([super().start(), self.monitor_connection()])
+
+        # Start receiver and monitor as background tasks
+        self.tasks = [
+            asyncio.ensure_future(super().start()),
+            asyncio.ensure_future(self.monitor_connection()),
+        ]
+
+        try:
+            # Give receiver a moment to start listening for responses
+            await asyncio.sleep(0.01)
+
+            # Replay queued commands while receiver is active
+            await self._replay_queue()
+
+            # Wait for receiver and monitor to complete
+            await asyncio.gather(*self.tasks)
+        except TimeoutError:
+            pass
+        except WebSocketException as websocket_exception:
+            _LOGGER.debug(f"Connection closed to '{self.id}': {websocket_exception}")
+        except Exception as other_exception:
+            _LOGGER.error(
+                f"Unexpected exception in connection to '{self.id}': '{other_exception}'",
+                exc_info=True,
+            )
+        finally:
+            await self.stop()
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str

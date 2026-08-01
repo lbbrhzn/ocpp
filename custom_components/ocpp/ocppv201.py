@@ -490,7 +490,11 @@ class ChargePoint(cp):
                 evse_target, _ = self._global_to_pair(int(conn_id))
         if profile is not None:
             req = call.SetChargingProfile(evse_target, profile)
-            resp: call_result.SetChargingProfile = await self.call(req)
+            resp: call_result.SetChargingProfile = (
+                await self._call_with_timeout_handling(
+                    req, call_type="SetChargingProfile", connector_id=int(conn_id or 0)
+                )
+            )
             if resp.status != ChargingProfileStatusEnumType.accepted:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
@@ -538,7 +542,9 @@ class ChargePoint(cp):
         req: call.SetChargingProfile = call.SetChargingProfile(
             evse_target, charging_profile
         )
-        resp: call_result.SetChargingProfile = await self.call(req)
+        resp: call_result.SetChargingProfile = await self._call_with_timeout_handling(
+            req, call_type="SetChargingProfile", connector_id=int(conn_id or 0)
+        )
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -556,7 +562,11 @@ class ChargePoint(cp):
             else OperationalStatusEnumType.inoperative.value
         )
         if not connector_id:
-            await self.call(call.ChangeAvailability(status))
+            await self._call_with_timeout_handling(
+                call.ChangeAvailability(status),
+                call_type="ChangeAvailability",
+                connector_id=0,
+            )
             return
 
         evse_id = None
@@ -564,9 +574,17 @@ class ChargePoint(cp):
             evse_id, _ = self._global_to_pair(int(connector_id))
 
         if evse_id:
-            await self.call(call.ChangeAvailability(status, evse={"id": evse_id}))
+            await self._call_with_timeout_handling(
+                call.ChangeAvailability(status, evse={"id": evse_id}),
+                call_type="ChangeAvailability",
+                connector_id=int(connector_id),
+            )
         else:
-            await self.call(call.ChangeAvailability(status))
+            await self._call_with_timeout_handling(
+                call.ChangeAvailability(status),
+                call_type="ChangeAvailability",
+                connector_id=int(connector_id),
+            )
 
     async def start_transaction(self, connector_id: int = 1) -> bool:
         """Remote start a transaction."""
@@ -582,7 +600,11 @@ class ChargePoint(cp):
             },
             remote_start_id=1,
         )
-        resp: call_result.RequestStartTransaction = await self.call(req)
+        resp: call_result.RequestStartTransaction = (
+            await self._call_with_timeout_handling(
+                req, call_type="RequestStartTransaction", connector_id=connector_id
+            )
+        )
         return resp.status == RequestStartStopStatusEnumType.accepted.value
 
     async def stop_transaction(self, connector_id: int | None = None) -> bool:
@@ -621,7 +643,11 @@ class ChargePoint(cp):
         req: call.RequestStopTransaction = call.RequestStopTransaction(
             transaction_id=tx_id
         )
-        resp: call_result.RequestStopTransaction = await self.call(req)
+        resp: call_result.RequestStopTransaction = (
+            await self._call_with_timeout_handling(
+                req, call_type="RequestStopTransaction", connector_id=connector_id or 0
+            )
+        )
         return resp.status == RequestStartStopStatusEnumType.accepted.value
 
     async def reset(self, typ: str = ""):
