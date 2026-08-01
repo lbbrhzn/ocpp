@@ -163,7 +163,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 1
+    MINOR_VERSION = 2
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     @staticmethod

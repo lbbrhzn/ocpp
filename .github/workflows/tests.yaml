@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python ${{ env.DEFAULT_PYTHON }}
         uses: actions/setup-python@v7.0.0
@@ -47,6 +49,8 @@ jobs:
     steps:
       - name: Check out the repository
         uses: "actions/checkout@v7"
+        with:
+          persist-credentials: false
 
       - name: HACS validation
         uses: "hacs/action@main"
@@ -60,6 +64,8 @@ jobs:
     steps:
       - name: Check out the repository
         uses: "actions/checkout@v7"
+        with:
+          persist-credentials: false
 
       - name: Hassfest validation
         uses: "home-assistant/actions/hassfest@master"
@@ -70,6 +76,8 @@ jobs:
     steps:
       - name: Check out code from GitHub
         uses: "actions/checkout@v7"
+        with:
+          persist-credentials: false
       - name: Setup Python ${{ env.DEFAULT_PYTHON }}
         uses: "actions/setup-python@v7.0.0"
         with:

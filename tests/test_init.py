@@ -7,8 +7,15 @@ from collections.abc import AsyncGenerator
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocpp import CentralSystem
-from custom_components.ocpp.const import DOMAIN, CONF_CPID
+from custom_components.ocpp import CentralSystem, async_migrate_entry
+from custom_components.ocpp.const import (
+    CONF_CPID,
+    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_OCPP_VERSION,
+    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
+    DEFAULT_OCPP_VERSION,
+    DOMAIN,
+)
 
 from .const import (
     MOCK_CONFIG_DATA,
@@ -129,12 +136,35 @@ async def test_migration_entry(
     assert config_entry.data.keys() == MOCK_CONFIG_DATA.keys()
     # check versions match
     assert config_entry.version == 2
-    assert config_entry.minor_version == 1
+    assert config_entry.minor_version == 2
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_migration_backfills_version_2_defaults(hass: HomeAssistant):
+    """Test version-2 entries receive defaults added in minor version 2."""
+    old_data = MOCK_CONFIG_DATA_1.copy()
+    old_data.pop(CONF_ENABLE_REBOOT_NOTIFICATIONS)
+    old_data.pop(CONF_OCPP_VERSION)
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=old_data,
+        entry_id="test_version_2_migration",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, config_entry)
+    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is (
+        DEFAULT_ENABLE_REBOOT_NOTIFICATIONS
+    )
+    assert config_entry.data[CONF_OCPP_VERSION] == DEFAULT_OCPP_VERSION
+    assert config_entry.version == 2
+    assert config_entry.minor_version == 2
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):

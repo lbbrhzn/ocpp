@@ -199,35 +199,30 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             config_entry, data=new_data, minor_version=0, version=2
         )
 
-    if config_entry.version == 2 and config_entry.minor_version == 0:
+    if config_entry.version == 2 and config_entry.minor_version < 2:
         data = {**config_entry.data}
         cpids = data.get(CONF_CPIDS, [])
 
-        changed = False
-        for idx, cp_map in enumerate(cpids):
-            if not isinstance(cp_map, dict) or not cp_map:
-                continue
-            cp_id, cp_data = next(iter(cp_map.items()))
-            if CONF_NUM_CONNECTORS not in cp_data:
-                cp_data = {**cp_data, CONF_NUM_CONNECTORS: DEFAULT_NUM_CONNECTORS}
-                cpids[idx] = {cp_id: cp_data}
-                changed = True
+        if config_entry.minor_version == 0:
+            for idx, cp_map in enumerate(cpids):
+                if not isinstance(cp_map, dict) or not cp_map:
+                    continue
+                cp_id, cp_data = next(iter(cp_map.items()))
+                if CONF_NUM_CONNECTORS not in cp_data:
+                    cp_data = {**cp_data, CONF_NUM_CONNECTORS: DEFAULT_NUM_CONNECTORS}
+                    cpids[idx] = {cp_id: cp_data}
 
-        if changed:
-            data[CONF_CPIDS] = cpids
-            hass.config_entries.async_update_entry(
-                config_entry,
-                data=data,
-                version=2,
-                minor_version=1,
-            )
-        else:
-            hass.config_entries.async_update_entry(
-                config_entry,
-                data=data,
-                version=2,
-                minor_version=1,
-            )
+        data[CONF_CPIDS] = cpids
+        data.setdefault(
+            CONF_ENABLE_REBOOT_NOTIFICATIONS, DEFAULT_ENABLE_REBOOT_NOTIFICATIONS
+        )
+        data.setdefault(CONF_OCPP_VERSION, DEFAULT_OCPP_VERSION)
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=data,
+            version=2,
+            minor_version=2,
+        )
 
     _LOGGER.info(
         "Migration to configuration version %s.%s successful",
