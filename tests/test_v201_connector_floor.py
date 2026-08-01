@@ -272,15 +272,96 @@ async def test_partial_topology_timeout_still_drains_buffered_statuses(hass):
                 },
                 "variable": {"name": "AvailabilityState"},
             },
+            {
+                "component": {
+                    "name": "Connector",
+                    "evse": {"id": 1, "connector_id": 2},
+                },
+                "variable": {"name": "AvailabilityState"},
+            },
         ],
         tbc=True,
     )
 
     total = await setup  # report wait times out; partial inventory kept
 
-    assert total == 1, "the partial inventory bypasses the floor"
+    # two connectors proves the partial topology was RETAINED - the
+    # one-connector floor would have produced 1
+    assert total == 2, "the partial inventory bypasses the floor"
     assert (
         cp._pending_status_notifications == []
     ), "the drain must not live only in the zero-connector fallback"
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
-    assert cp._evse_to_global == {(1, 1): 1}
+    assert cp._evse_to_global == {(1, 1): 1, (1, 2): 2}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_get_inventory_has_a_single_owner(hass):
+    """A second concurrent _get_inventory must not take over the attempt.
+
+    Both callers used to pass the cached-inventory guard before any report
+    part arrived, so the second overwrote the owner's event - and once the
+    owner settled and cleared it, the second caller's accepted response
+    dereferenced None at _wait_inventory.wait(). Only one GetBaseReport may
+    go out, and the second caller must return without touching the attempt.
+    """
+    cp = _mk_cp(hass)
+    calls: list[int] = []
+
+    async def slow_accept(req):
+        calls.append(len(calls) + 1)
+        await asyncio.sleep(0.02)
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = slow_accept
+
+    async def second_caller():
+        await asyncio.sleep(0.005)  # enter while the first call is pending
+        await cp._get_inventory()
+
+    await asyncio.gather(cp._get_inventory(), second_caller())
+
+    assert len(calls) == 1, "only the owning attempt may send GetBaseReport"
+    assert cp._wait_inventory is None
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_releases_ownership_for_the_next_one(hass):
+    """An escaping request failure must not leave the attempt gate locked.
+
+    The ocpp library's response timeout raises a bare TimeoutError that the
+    inventory handlers don't cover. With an in-flight event now turning other
+    callers away, leaking it set would make every future attempt - including
+    post_connect re-running after the charger's next boot - silently return
+    forever.
+    """
+    cp = _mk_cp(hass)
+    calls: list[int] = []
+
+    async def timeout_then_refuse(req):
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise TimeoutError("lib response timeout")
+        raise OCPPError("refused")
+
+    cp.call = timeout_then_refuse
+
+    # buffered while the failing attempt is in flight
+    cp._pending_status_notifications = [("2026-01-01T00:00:00Z", "Available", 1, 1)]
+
+    with pytest.raises(TimeoutError):
+        await cp.get_number_of_connectors()
+
+    assert (
+        cp._wait_inventory is None
+    ), "a failed attempt must release ownership on its way out"
+    assert cp._pending_status_notifications == [], (
+        "even a failed attempt must drain on its way out - on a persistently "
+        "failing charger the next attempt would strand these again"
+    )
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+
+    total = await cp.get_number_of_connectors()
+
+    assert len(calls) == 2, "the next attempt must be able to run"
+    assert total == 1

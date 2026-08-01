@@ -275,47 +275,67 @@ class ChargePoint(cp):
     async def _get_inventory(self):
         if self._inventory is not None:
             return
+        if self._wait_inventory is not None:
+            # An attempt is already in flight (post_connect can run twice:
+            # boot notification racing the 10s monitor backstop). Taking
+            # ownership here would overwrite the owner's event, and once the
+            # owner settled and cleared it, this caller's accepted response
+            # would dereference None at _wait_inventory.wait(). Return and
+            # leave the attempt - and the drain at its settle point - to the
+            # single owner.
+            return
         self._wait_inventory = asyncio.Event()
         req = call.GetBaseReport(1, "FullInventory")
         resp: call_result.GetBaseReport | None = None
         try:
-            resp = await self.call(req)
-        except ocpp.exceptions.NotImplementedError:
-            self._inventory = InventoryReport()
-        except OCPPError:
-            self._inventory = None
-        if (resp is not None) and (resp.status == "Accepted"):
-            # A charger that accepts GetBaseReport but never finishes
-            # reporting must not abort post_connect: swallowing the timeout
-            # lets get_number_of_connectors fall back to one connector below.
-            # Accepted trade-off: parts that did arrive may yield a partial
-            # inventory, and since a same-version reconnect reuses this
-            # ChargePoint, anything wrong with it persists until the
-            # integration is reloaded.
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    self._wait_inventory.wait(), self._response_timeout
-                )
-        self._wait_inventory = None
-        if self._inventory:
-            self._build_connector_map()
-        # However this attempt ended - final report received, timed out,
-        # refused or unsupported - it is over, and nothing else will drain the
-        # statuses buffered while it ran: on_report's flush only fires when a
-        # final part arrives, and a timed-out partial report that yielded SOME
-        # connectors bypasses the zero-connector fallback below entirely.
-        # Drain here, at the one point every outcome passes through. With a
-        # map (even a partial one) statuses route through it; without one they
-        # take _pair_to_global's dynamic allocation, so the first
-        # charger-reported pair becomes connector 1. (Station-level statuses
-        # never buffer - on_status_notification applies them immediately - so
-        # only real connector pairs pass through here.)
-        # A concurrent second caller (boot notification racing the 10s monitor
-        # backstop) never reaches this point mid-stream - it returns early on
-        # the _inventory check above - so a half-streamed report can never be
-        # drained into a dynamic map that the real inventory could then not
-        # replace.
-        self._drain_pending_status_notifications()
+            try:
+                resp = await self.call(req)
+            except ocpp.exceptions.NotImplementedError:
+                self._inventory = InventoryReport()
+            except OCPPError:
+                self._inventory = None
+            if (resp is not None) and (resp.status == "Accepted"):
+                # A charger that accepts GetBaseReport but never finishes
+                # reporting must not abort post_connect: swallowing the
+                # timeout lets get_number_of_connectors fall back to one
+                # connector below. Accepted trade-off: parts that did arrive
+                # may yield a partial inventory, and since a same-version
+                # reconnect reuses this ChargePoint, anything wrong with it
+                # persists until the integration is reloaded.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._wait_inventory.wait(), self._response_timeout
+                    )
+        finally:
+            # Release ownership on EVERY exit. The request itself can raise
+            # something the handlers above don't cover - the ocpp library's
+            # response timeout is a bare TimeoutError, and the task can be
+            # cancelled - and now that an in-flight event turns other callers
+            # away, leaking it set would make every future attempt silently
+            # return forever.
+            self._wait_inventory = None
+            # However this attempt ended - final report received, timed out,
+            # refused, unsupported, or an escaping exception - it is over,
+            # and nothing else will drain the statuses buffered while it ran:
+            # on_report's flush only fires when a final part arrives, a
+            # timed-out partial report that yielded SOME connectors bypasses
+            # the zero-connector fallback entirely, and on a persistently
+            # failing charger the next attempt would strand them again. Drain
+            # inside the finally so this really is the one point every
+            # outcome passes through. With a map (even a partial one)
+            # statuses route through it; without one they take
+            # _pair_to_global's dynamic allocation, so the first
+            # charger-reported pair becomes connector 1. (Station-level
+            # statuses never buffer - on_status_notification applies them
+            # immediately - so only real connector pairs pass through here.)
+            # A concurrent second caller (boot notification racing the 10s
+            # monitor backstop) never reaches this point mid-stream - it
+            # returns early on the _inventory check above - so a
+            # half-streamed report can never be drained into a dynamic map
+            # that the real inventory could then not replace.
+            if self._inventory:
+                self._build_connector_map()
+            self._drain_pending_status_notifications()
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger.
@@ -352,8 +372,10 @@ class ChargePoint(cp):
         await self._get_inventory()
         total = self._total_connectors()
         if total == 0:
-            # Buffered statuses were already drained when the inventory
-            # attempt settled (see _get_inventory); only the count needs
+            # Buffered statuses are drained by the owning attempt when it
+            # settles (see _get_inventory); a concurrent second caller can
+            # reach this floor while that attempt is still in flight, and
+            # correctly leaves them for the owner. Only the count needs
             # flooring here.
             total = DEFAULT_NUM_CONNECTORS
         return total
