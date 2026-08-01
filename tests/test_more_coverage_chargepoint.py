@@ -153,6 +153,14 @@ async def test_run_handles_timeout_and_other_exception(
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
 
+            # srv.run() below is called directly (bypassing start()) to exercise
+            # its exception-handling paths in isolation. That overwrites
+            # srv.tasks, so the original start()/monitor_connection() tasks
+            # from the real connection would otherwise never get cancelled
+            # (gather() does not cancel siblings when one raises). Keep a
+            # reference so they can be cleaned up explicitly in `finally`.
+            original_tasks = list(srv.tasks)
+
             stopped = {"count": 0}
 
             async def fake_stop():
@@ -179,6 +187,11 @@ async def test_run_handles_timeout_and_other_exception(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            for original_task in original_tasks:
+                original_task.cancel()
+            for original_task in original_tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await original_task
             await ws.close()
 
 

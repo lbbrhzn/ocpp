@@ -99,8 +99,6 @@ match transactions and it won't report some meter values such as session time.
 
 ## [EVBox Elvi](https://evbox.com/en/ev-chargers/elvi)
 
-## [EVLink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
-
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/)
 (Ability to configure a custom OCPP server such as HA is being discontinued)
 
@@ -124,6 +122,12 @@ entity in HA will be capped.
 
 You can still connect with the EVO app via Bluetooth after setting the OCPP server,
 but certain features (eg. scheduling) may not work.
+
+## [Schneider Electric EVlink ProAC](https://www.se.com/uk/en/product-range/23107242-evlink-pro-ac/)
+"Supervision URL" setting must be set to the OCPP server address using eSetup mobile app or EcoStruxure Charging Configuration Tool (ECCT) PC software.
+
+## [Schneider Electric EVlink Wallbox Plus](https://www.se.com/nl/en/product/EVH3S22P0CK/evlink-wallbox-plus-t2-attached-cable-3-phase-32a-22kw/)
+Model is discontinued by the manufacturer.
 
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly

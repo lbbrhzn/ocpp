@@ -17,6 +17,7 @@ from .const import (
     CONF_AUTH_STATUS,
     CONF_CPIDS,
     CONF_DEFAULT_AUTH_STATUS,
+    CONF_ENABLE_REBOOT_NOTIFICATIONS,
     CONF_ID_TAG,
     CONF_NAME,
     CONF_CPID,
@@ -26,6 +27,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
+    CONF_OCPP_VERSION,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
@@ -40,12 +42,14 @@ from .const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONFIG,
     DEFAULT_CPID,
+    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
     DEFAULT_METER_INTERVAL,
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_NUM_CONNECTORS,
+    DEFAULT_OCPP_VERSION,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
@@ -166,6 +170,8 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             CONF_HOST: DEFAULT_HOST,
             CONF_PORT: DEFAULT_PORT,
             CONF_CSID: DEFAULT_CSID,
+            CONF_ENABLE_REBOOT_NOTIFICATIONS: DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
+            CONF_OCPP_VERSION: DEFAULT_OCPP_VERSION,
             CONF_SSL: DEFAULT_SSL,
             CONF_SSL_CERTFILE_PATH: DEFAULT_SSL_CERTFILE_PATH,
             CONF_SSL_KEYFILE_PATH: DEFAULT_SSL_KEYFILE_PATH,
@@ -181,13 +187,13 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             csid_data.update({key: old_data.get(key, value)})
 
         new_data = csid_data
-        cp_id = hass.states.get(f"sensor.{cpid_data[CONF_CPID].lower()}_id")
-        if cp_id is None:
+        cp_id_state = hass.states.get(f"sensor.{cpid_data[CONF_CPID].lower()}_id")
+        if cp_id_state is None:
             _LOGGER.warning(
                 "Could not find charger id during migration, try a clean install"
             )
             return False
-        new_data.update({CONF_CPIDS: [{cp_id: cpid_data}]})
+        new_data.update({CONF_CPIDS: [{cp_id_state.state: cpid_data}]})
 
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, minor_version=0, version=2

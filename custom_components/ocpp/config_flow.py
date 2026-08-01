@@ -24,6 +24,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
+    CONF_OCPP_VERSION,
     CONF_PORT,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -45,6 +46,7 @@ from .const import (
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_NUM_CONNECTORS,
+    DEFAULT_OCPP_VERSION,
     DEFAULT_PORT,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
@@ -56,6 +58,7 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_TRIES,
     DOMAIN,
     MEASURANDS,
+    OCPP_VERSIONS,
 )
 
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
@@ -120,6 +123,10 @@ def _get_cs_data_schema(config: dict[str, Any] | None = None) -> vol.Schema:
                     DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
                 ),
             ): bool,
+            vol.Required(
+                CONF_OCPP_VERSION,
+                default=config.get(CONF_OCPP_VERSION, DEFAULT_OCPP_VERSION),
+            ): vol.In(OCPP_VERSIONS),
             vol.Required(
                 CONF_WEBSOCKET_CLOSE_TIMEOUT,
                 default=config.get(
@@ -191,28 +198,37 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle reconfiguration from the integrations page."""
+    async def async_step_reconfigure(self, user_input=None) -> ConfigFlowResult:
+        """Allow reconfiguring the central system settings of an existing entry.
 
-        errors: dict[str, str] = {}
+        Without this, settings added after an entry was created (such as the
+        OCPP version pin) could only be changed by deleting and re-adding the
+        integration.
+        """
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            # Don't allow servers to use same websocket port (the entry being
+            # reconfigured is excluded from the match).
             if user_input[CONF_PORT] != entry.data[CONF_PORT]:
                 self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
-
-            return self.async_update_reload_and_abort(
+            # Updating the entry already triggers a reload, via the
+            # add_update_listener(async_reload_entry) registered in
+            # async_setup_entry. async_update_reload_and_abort() would schedule
+            # a second one on top of it, and the two overlap: the websocket
+            # server is rebound while the first setup is still in flight and
+            # the platform forwards then fail with "config entry ... has
+            # already been setup". Update only, and let the listener reload.
+            self.hass.config_entries.async_update_entry(
                 entry,
                 title=user_input[CONF_CSID],
-                data_updates=user_input,
+                data={**entry.data, **user_input},
             )
+            return self.async_abort(reason="reconfigure_successful")
 
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=_get_cs_data_schema(entry.data),
-            errors=errors,
             description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
 
@@ -326,14 +342,20 @@ class OcppOptionsFlowHandler(OptionsFlow):
 
         if user_input is not None:
             if user_input[CONF_PORT] != self._config_entry.data[CONF_PORT]:
-                self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
+                for entry in self.hass.config_entries.async_entries(
+                    self._config_entry.domain
+                ):
+                    if (
+                        entry.entry_id != self._config_entry.entry_id
+                        and entry.data.get(CONF_PORT) == user_input[CONF_PORT]
+                    ):
+                        return self.async_abort(reason="already_configured")
 
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
                 title=user_input[CONF_CSID],
                 data={**self._config_entry.data, **user_input},
             )
-            self.hass.config_entries.async_schedule_reload(self._config_entry.entry_id)
             return self.async_create_entry(title="", data=self._config_entry.options)
 
         return self.async_show_form(
