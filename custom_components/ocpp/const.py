@@ -29,6 +29,7 @@ CONF_NUM_CONNECTORS = "num_connectors"
 CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
+CONF_REMOTE_ID_TAG = "remote_id_tag"
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
