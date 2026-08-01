@@ -104,8 +104,11 @@ No Charge Control switch, and the charger cannot be started
 Home Assistant. In *Developer tools / States* the entity either does not appear
 at all, or appears as `unavailable` with a `restored: true` attribute (meaning
 it is a leftover registry entry that the integration is not creating). There is
-no error in the log, and restarting Home Assistant, reloading the integration or
-switching the charger between OCPP 1.6 and 2.0.1 makes no difference.
+no error in the log. If the charger cannot complete its connection setup —
+because it is offline, or failing partway through setup — then restarting Home
+Assistant, reloading the integration and switching the charger between OCPP 1.6
+and 2.0.1 all appear to change nothing, because the count is stored in the
+config entry rather than held in runtime state.
 
 **Cause:** the connector count stored in the config entry is `0`. The
 per-connector entities are created from that number, so a stored `0` creates
@@ -115,7 +118,7 @@ the value is written into the config entry it survives restarts and updates.
 
 **Check it** — in the *Terminal* add-on:
 
-```
+```bash
 python3 -c "import json;d=json.load(open('/config/.storage/core.config_entries'));[print(k,v.get('num_connectors')) for e in d['data']['entries'] if e['domain']=='ocpp' for c in e['data'].get('cpids',[]) for k,v in c.items()]"
 ```
 
@@ -129,7 +132,7 @@ integration and adding it back also clears it.
 To repair the stored value directly instead, back it up first, then edit and
 restart Home Assistant Core:
 
-```
+```bash
 cp /config/.storage/core.config_entries /config/core.config_entries.backup
 
 python3 -c "
@@ -151,6 +154,13 @@ ha core restart
 
 Use `ha core restart`, not `ha core stop` — the Terminal add-on is served by
 Home Assistant Core, so stopping it also closes the terminal you are working in.
+
+After the restart, run the check command again to confirm the new value was
+kept. Home Assistant holds config entries in memory and rewrites the file
+whenever they change, so an edit made while Core is running can be overwritten.
+If the value has gone back to `0`, stop Core before editing — from a terminal
+that does not depend on it, such as the Home Assistant OS console — and start it
+again afterwards.
 
 Once the connector entities are recreated, the session sensors regain their
 units and Home Assistant may raise a one-time `units_changed` repair for
