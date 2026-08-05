@@ -86,7 +86,8 @@
         "error": {
             "auth": "Username/Password is wrong.",
             "no_measurands_selected": "No measurand selected: please select at least one",
-            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _"
+            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _",
+            "duplicate_cpid": "This charge point identity is already used by another charge point. Choose a unique one."
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed",
