@@ -93,9 +93,6 @@ Filtering for websockets.server should yield something like this:
 2022-03-16 16:35:40 DEBUG (MainThread) [websockets.server] > TEXT '[3,"5191e2e7-f555-48b3-8b08-626679df5a80",{}]' [45 bytes]
 ```
 
-Troubleshooting
-===============
-
 No Charge Control switch, and the charger cannot be started
 -----------------------------------------------------------
 
@@ -128,41 +125,6 @@ A charger reporting `0` is affected.
 charger connects and completes its setup, so reconnecting the charger is
 usually enough. If the charger cannot complete setup, removing the
 integration and adding it back also clears it.
-
-To repair the stored value directly instead, back it up first, then edit and
-restart Home Assistant Core:
-
-```bash
-cp /config/.storage/core.config_entries /config/core.config_entries.backup
-
-python3 -c "
-import json,pathlib
-p=pathlib.Path('/config/.storage/core.config_entries')
-d=json.loads(p.read_text())
-for e in d['data']['entries']:
-    if e['domain']=='ocpp':
-        for c in e['data'].get('cpids',[]):
-            for k,v in c.items():
-                if v.get('num_connectors')==0:
-                    v['num_connectors']=1
-                    print('fixed',k)
-p.write_text(json.dumps(d))
-"
-
-ha core restart
-```
-
-Use `ha core restart`, not `ha core stop`. The Terminal & SSH add-on runs
-separately from Core, but its *web* terminal is reached through Home Assistant's
-own web interface, so stopping Core leaves you without the terminal you are
-working in. A direct SSH session to the add-on is not affected.
-
-After the restart, run the check command again to confirm the new value was
-kept. Home Assistant holds config entries in memory and rewrites the file
-whenever they change, so an edit made while Core is running can be overwritten.
-If the value has gone back to `0`, stop Core before editing — from a direct SSH
-session to the add-on or the Home Assistant OS console, rather than the web
-terminal — and start it again afterwards.
 
 Once the connector entities are recreated, the session sensors regain their
 units and Home Assistant may raise a one-time `units_changed` repair for
