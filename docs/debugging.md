@@ -92,3 +92,43 @@ Filtering for websockets.server should yield something like this:
 2022-03-16 16:35:40 DEBUG (MainThread) [websockets.server] < TEXT '[2,"5191e2e7-f555-48b3-8b08-626679df5a80","Mete... 0,"transactionId": 0}]' [304 bytes]
 2022-03-16 16:35:40 DEBUG (MainThread) [websockets.server] > TEXT '[3,"5191e2e7-f555-48b3-8b08-626679df5a80",{}]' [45 bytes]
 ```
+
+No Charge Control switch, and the charger cannot be started
+-----------------------------------------------------------
+
+**Symptom:** the charger's connector entities are missing — most visibly
+`switch.<cpid>_charge_control`, so charging cannot be started or stopped from
+Home Assistant. In *Developer tools / States* the entity either does not appear
+at all, or appears as `unavailable` with a `restored: true` attribute (meaning
+it is a leftover registry entry that the integration is not creating). There is
+no error in the log. If the charger cannot complete its connection setup —
+because it is offline, or failing partway through setup — then restarting Home
+Assistant, reloading the integration and switching the charger between OCPP 1.6
+and 2.0.1 all appear to change nothing, because the count is stored in the
+config entry rather than held in runtime state.
+
+**Cause:** the connector count stored in the config entry is `0`. The
+per-connector entities are created from that number, so a stored `0` creates
+none of them. Chargers whose OCPP 2.0.1 `GetBaseReport` inventory reports no
+`Connector` components could produce a `0` on earlier versions, and because
+the value is written into the config entry it survives restarts and updates.
+
+**Check it** — in the *Terminal* add-on:
+
+```bash
+python3 -c "import json;d=json.load(open('/config/.storage/core.config_entries'));[print(k,v.get('num_connectors')) for e in d['data']['entries'] if e['domain']=='ocpp' for c in e['data'].get('cpids',[]) for k,v in c.items()]"
+```
+
+A charger reporting `0` is affected.
+
+**Fix it.** Current versions correct the value automatically the next time a
+charger connects and completes its setup, so reconnecting the charger is
+usually enough. If the charger cannot complete setup, removing the
+integration and adding it back also clears it.
+
+Once the connector entities are recreated, the session sensors regain their
+units and Home Assistant may raise a one-time `units_changed` repair for
+`sensor.<cpid>_time_session`. Choose **"Update the unit of the historic
+statistic values, without converting"** to keep the existing history: the values
+were always minutes, only the unit label was missing while the connector slots
+were uninitialised.
