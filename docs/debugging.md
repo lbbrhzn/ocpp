@@ -4,7 +4,7 @@ Debugging
 To enable debug logging for this integration and related libraries you
 need to update your Home Assistant `configuration.yaml` file:
 
-```
+```yaml
 logger:
   default: info
   logs:
@@ -25,7 +25,7 @@ You can filter for OCPP related messages by typing 'ocpp' in the 'search logs' b
 
 A typical log for a working connection should look like this:
 
-```
+```text
 2022-03-16 16:33:08 INFO (MainThread) [custom_components.ocpp] {'host': '0.0.0.0', 'port': 9000, 'csid': 'central', 'cpid': 'pulsar', 'meter_interval': 60, 'idle_interval': 900, 'websocket_close_timeout': 10, 'WEBSOCKET_PING_TRIES': 2, 'websocket_ping_interval': 20, 'websocket_ping_timeout': 20, 'skip_schema_validation': False, 'monitored_variables': 'Energy.Active.Import.Register,Energy.Reactive.Import.Register,Energy.Active.Import.Interval,Energy.Reactive.Import.Interval,Power.Active.Import,Power.Reactive.Import,Power.Offered,Power.Factor,Current.Import,Current.Offered,Voltage,Frequency,RPM,SoC,Temperature,Current.Export,Energy.Active.Export.Register,Energy.Reactive.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Export.Interval,Power.Active.Export,Power.Reactive.Export'}
 2022-03-16 16:35:40 INFO (MainThread) [custom_components.ocpp] Websocket Subprotocol matched: ocpp1.6
 2022-03-16 16:35:40 INFO (MainThread) [custom_components.ocpp] Charger websocket path=/pulsar
@@ -50,7 +50,7 @@ A typical log for a working connection should look like this:
 
 To debug issues with establishing the ocpp connection, you can enable debug logging for websockets.server:
 
-```
+```yaml
 logger:
   default: info
   logs:
@@ -59,7 +59,7 @@ logger:
 
 Filtering for websockets.server should yield something like this:
 
-```
+```text
 2022-03-16 16:33:08 INFO (MainThread) [websockets.server] server listening on 0.0.0.0:9000
 2022-03-16 16:35:40 DEBUG (MainThread) [websockets.server] = connection is CONNECTING
 2022-03-16 16:35:40 DEBUG (MainThread) [websockets.server] < GET /pulsar HTTP/1.1
