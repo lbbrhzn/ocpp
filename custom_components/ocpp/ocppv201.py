@@ -72,6 +72,13 @@ class InventoryReport:
     reservation_available: bool = False
     local_auth_available: bool = False
     tx_updated_measurands: list[MeasurandEnumType] = field(default_factory=list)
+    # Precedence of the resolved list, so a later report entry cannot
+    # silently narrow a better-scoped one:
+    #   2 = advertised valuesList, charging-station level - authoritative
+    #   1 = advertised valuesList, EVSE-scoped - may be narrower than the
+    #       station, so it is reported but never written back
+    #   0 = derived from the current value, or entries were dropped
+    tx_updated_measurands_rank: int = 0
 
 
 class ChargePoint(cp):
@@ -400,6 +407,32 @@ class ChargePoint(cp):
             measurands: str = ",".join(
                 measurand.value for measurand in self._inventory.tx_updated_measurands
             )
+            if not measurands:
+                # Nothing to go on. Writing an empty list would clear whatever
+                # the charger is configured to report, disabling every meter
+                # value inside TransactionEvent, and it persists on the
+                # charger. Return the configured value unchanged so the config
+                # entry is not overwritten either - post_connect stores this
+                # result in monitored_variables and reloads the entry when it
+                # differs, and sensor.py builds no measurand sensors from "".
+                _LOGGER.warning(
+                    "No measurands could be resolved for '%s'; leaving the "
+                    "charger and the configured measurands untouched",
+                    self.id,
+                )
+                return self.settings.monitored_variables or ""
+            if self._inventory.tx_updated_measurands_rank < 2:
+                # Anything short of a charging-station-level advertised list
+                # describes either the charger's current configuration or a
+                # single EVSE, while this SetVariables targets the station.
+                # Writing it back could only narrow the station's settings.
+                # Report it to Home Assistant, but leave the charger alone.
+                _LOGGER.debug(
+                    "Measurands for '%s' came from the charger's current "
+                    "configuration; not writing them back",
+                    self.id,
+                )
+                return measurands
             req = call.SetVariables(
                 [
                     {
@@ -891,13 +924,46 @@ class ChargePoint(cp):
                 characteristics: dict = (
                     report_data.get("variable_characteristics", {}) or {}
                 )
+                # valuesList is optional in OCPP 2.0.1, so a charger need not
+                # advertise the measurands it supports. Fall back to the ones
+                # it is currently configured to report - the variable's actual
+                # value, which arrives in this same report - rather than
+                # treating the omission as "no measurands".
                 values: str = str(characteristics.get("values_list", "") or "")
+                advertised: bool = bool(values.strip())
+                if not advertised:
+                    values = str(value or "")
                 meas_list = [
                     s.strip() for s in values.split(",") if s is not None and s.strip()
                 ]
-                self._inventory.tx_updated_measurands = [
-                    MeasurandEnumType(s) for s in meas_list
-                ]
+                parsed: list[MeasurandEnumType] = []
+                for s in meas_list:
+                    try:
+                        parsed.append(MeasurandEnumType(s))
+                    except ValueError:
+                        # Two sources feed this list, so a value the enum does
+                        # not know must not abort the whole report. Dropping it
+                        # does mean the list no longer describes the charger,
+                        # which is why it is not authoritative below.
+                        _LOGGER.debug(
+                            "Ignoring unknown measurand '%s' from '%s'", s, self.id
+                        )
+                # Only an advertised valuesList we understood in full may be
+                # written back. A list derived from the current value is the
+                # charger's own configuration - writing it back is a no-op at
+                # best - and a list that lost entries would narrow it.
+                understood: bool = advertised and len(parsed) == len(meas_list)
+                rank: int = 0
+                if understood:
+                    rank = 1 if "evse" in component else 2
+                # SampledDataCtrlr is reportable per-EVSE and reports may be
+                # chunked, so entries can arrive more than once and in any
+                # order. Take a new list only when it is at least as
+                # well-scoped, so ordering alone cannot decide what we hold -
+                # or, via rank 2 below, what we write to the charger.
+                if rank >= self._inventory.tx_updated_measurands_rank:
+                    self._inventory.tx_updated_measurands = parsed
+                    self._inventory.tx_updated_measurands_rank = rank
                 continue
 
         if not kwargs.get("tbc", False):
