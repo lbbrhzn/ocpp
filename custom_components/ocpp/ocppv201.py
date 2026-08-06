@@ -5,6 +5,7 @@ import contextlib
 from datetime import datetime, UTC
 from dataclasses import dataclass, field
 import logging
+from typing import Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
@@ -90,6 +91,7 @@ class ChargePoint(cp):
     _tx_start_time: dict[int, datetime]
     _global_to_evse: dict[int, tuple[int, int]]  # global_idx -> (evse_id, connector_id)
     _evse_to_global: dict[tuple[int, int], int]  # (evse_id, connector_id) -> global_idx
+    _evse_status_v16: dict[int, ChargePointStatusv16]
     _pending_status_notifications: list[
         tuple[str, str, int, int]
     ]  # (timestamp, connector_status, evse_id, connector_id)
@@ -119,6 +121,7 @@ class ChargePoint(cp):
         self._evse_to_global: dict[tuple[int, int], int] = {}
         self._pending_status_notifications: list[tuple[str, str, int, int]] = []
         self._connector_status = []
+        self._evse_status_v16: dict[int, ChargePointStatusv16] = {}
 
     # --- Connector mapping helpers (EVSE <-> global index) ---
     def _build_connector_map(self) -> bool:
@@ -169,6 +172,122 @@ class ChargePoint(cp):
         """Return (evse_id, connector_id) for a global index. Fallback: (global_idx,1)."""
         return self._global_to_evse.get(global_idx, (global_idx, 1))
 
+    # Charging states are more specific than Occupied, which only reports that
+    # a vehicle is connected. Only TransactionEvent can supply them.
+    _CHARGING_STATES = frozenset(
+        {
+            ChargePointStatusv16.charging.value,
+            ChargePointStatusv16.suspended_ev.value,
+            ChargePointStatusv16.suspended_evse.value,
+        }
+    )
+
+    def _aggregate_evse_status(self, evse_id: int):
+        """Aggregate an EVSE's connector statuses, or None while any is unknown."""
+        if evse_id - 1 >= len(self._connector_status):
+            return None
+        aggregate = None
+        for status in self._connector_status[evse_id - 1]:
+            if status is None:
+                return None
+            aggregate = status
+            if status != ConnectorStatusEnumType.available:
+                break
+        return aggregate
+
+    def _known_occupancy(self, evse_id: int, connector_id: int):
+        """Return the last connector status reported for this pair, if any."""
+        if evse_id - 1 < len(self._connector_status):
+            row = self._connector_status[evse_id - 1]
+            if connector_id - 1 < len(row):
+                return row[connector_id - 1]
+        return None
+
+    def _has_live_transaction(self, evse_id: int, connector_id: int | None = None):
+        """Whether a transaction is running on a connector, or on any of an EVSE's.
+
+        _tx_start_time is populated when a transaction starts and dropped when
+        it ends, so it is the authority on whether a charging state is still
+        meaningful.
+        """
+        if connector_id is not None:
+            # Deliberately not _pair_to_global: that allocates a global index
+            # for an unknown pair, and a read-only predicate must not create
+            # mappings for callers that merely ask a question.
+            idx = self._evse_to_global.get((evse_id, connector_id))
+            return idx is not None and idx in self._tx_start_time
+        return any(
+            idx in self._tx_start_time
+            for (e, _c), idx in self._evse_to_global.items()
+            if e == evse_id
+        )
+
+    # How prominent each state is when several EVSEs disagree. The charging
+    # station has one status metric, so a second EVSE going idle must not
+    # report the whole station as free while another is still delivering.
+    # With a single EVSE the derived value is simply that EVSE's, so this
+    # ordering only takes effect on multi-EVSE chargers.
+    _STATION_PRECEDENCE: Final[list[str]] = [
+        # Faulted first: _apply_status_notification notes that this metric must
+        # not mask a faulted connector, and ranking a charge above it would
+        # reintroduce that masking on a multi-EVSE charger.
+        ChargePointStatusv16.faulted.value,
+        ChargePointStatusv16.charging.value,
+        ChargePointStatusv16.suspended_ev.value,
+        ChargePointStatusv16.suspended_evse.value,
+        ChargePointStatusv16.preparing.value,
+        ChargePointStatusv16.finishing.value,
+        ChargePointStatusv16.reserved.value,
+        ChargePointStatusv16.unavailable.value,
+        ChargePointStatusv16.available.value,
+    ]
+
+    def _derive_station_status(self) -> str | None:
+        """Return the most prominent status across every known EVSE."""
+        seen = {v.value for v in self._evse_status_v16.values()}
+        for candidate in self._STATION_PRECEDENCE:
+            if candidate in seen:
+                return candidate
+        return None
+
+    @staticmethod
+    def _charging_state_v16(state) -> ChargePointStatusv16 | None:
+        """Map a transaction's chargingState onto the OCPP 1.6 vocabulary."""
+        if state == ChargingStateEnumType.idle:
+            return ChargePointStatusv16.available
+        if state == ChargingStateEnumType.ev_connected:
+            return ChargePointStatusv16.preparing
+        if state == ChargingStateEnumType.suspended_evse:
+            return ChargePointStatusv16.suspended_evse
+        if state == ChargingStateEnumType.suspended_ev:
+            return ChargePointStatusv16.suspended_ev
+        if state == ChargingStateEnumType.charging:
+            return ChargePointStatusv16.charging
+        return None
+
+    @staticmethod
+    def _connector_status_v16(
+        status: ConnectorStatusEnumType,
+    ) -> ChargePointStatusv16:
+        """Map an OCPP 2.0.1 connector status onto the 1.6 vocabulary.
+
+        The status_connector metric is consumed by entities whose conditions
+        are written in OCPP 1.6 terms (switch.py), so both the per-connector
+        and the charging-station-level metric must speak that vocabulary.
+        Occupied has no 1.6 equivalent on its own - it says a vehicle is
+        connected, not whether it is charging - so it maps to Preparing and
+        TransactionEvent's chargingState refines it from there.
+        """
+        if status == ConnectorStatusEnumType.available:
+            return ChargePointStatusv16.available
+        if status == ConnectorStatusEnumType.faulted:
+            return ChargePointStatusv16.faulted
+        if status == ConnectorStatusEnumType.unavailable:
+            return ChargePointStatusv16.unavailable
+        if status == ConnectorStatusEnumType.reserved:
+            return ChargePointStatusv16.reserved
+        return ChargePointStatusv16.preparing
+
     def _apply_status_notification(
         self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
     ):
@@ -217,28 +336,41 @@ class ChargePoint(cp):
         evse_list[connector_id - 1] = ConnectorStatusEnumType(connector_status)
 
         global_idx = self._pair_to_global(evse_id, connector_id)
-        self._metrics[
-            (global_idx, cstat.status_connector.value)
-        ].value = ConnectorStatusEnumType(connector_status).value
+        translated = self._connector_status_v16(
+            ConnectorStatusEnumType(connector_status)
+        )
+        # Occupied says a vehicle is connected, not whether it is charging, so
+        # it is strictly less specific than a charging state from
+        # TransactionEvent. trigger_status_notification() provokes exactly this
+        # message on every reconnect, and the periodic transaction events that
+        # follow only carry chargingState when it changes - so letting it
+        # overwrite Charging would turn charge_control off for the rest of the
+        # session. Every other status is real news and still applies.
+        current = self._metrics[(global_idx, cstat.status_connector.value)].value
+        downgrades_live_charge = (
+            translated == ChargePointStatusv16.preparing
+            and current in self._CHARGING_STATES
+            and self._has_live_transaction(evse_id, connector_id)
+        )
+        if not downgrades_live_charge:
+            self._metrics[
+                (global_idx, cstat.status_connector.value)
+            ].value = translated.value
 
-        evse_status: ConnectorStatusEnumType | None = None
-        for st in evse_list:
-            if st is None:
-                evse_status = None
-                break
-            evse_status = st
-            if st != ConnectorStatusEnumType.available:
-                break
+        evse_status = self._aggregate_evse_status(evse_id)
         if evse_status is not None:
-            if evse_status == ConnectorStatusEnumType.available:
-                v16 = ChargePointStatusv16.available
-            elif evse_status == ConnectorStatusEnumType.faulted:
-                v16 = ChargePointStatusv16.faulted
-            elif evse_status == ConnectorStatusEnumType.unavailable:
-                v16 = ChargePointStatusv16.unavailable
-            else:
-                v16 = ChargePointStatusv16.preparing
-            self._report_evse_status(evse_id, v16)
+            aggregate = self._connector_status_v16(evse_status)
+            # Same precedence as the per-connector write above, applied to this
+            # EVSE's own state. Other EVSEs are handled by deriving the station
+            # value in _report_evse_status rather than overwriting it.
+            held = self._evse_status_v16.get(evse_id)
+            if not (
+                aggregate == ChargePointStatusv16.preparing
+                and held is not None
+                and held.value in self._CHARGING_STATES
+                and self._has_live_transaction(evse_id)
+            ):
+                self._report_evse_status(evse_id, aggregate)
 
     def _drain_pending_status_notifications(self):
         """Apply and clear buffered status notifications, then notify HA.
@@ -768,9 +900,35 @@ class ChargePoint(cp):
         """Perform OCPP callback."""
         return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
 
-    def _report_evse_status(self, evse_id: int, evse_status_v16: ChargePointStatusv16):
-        """Report EVSE-level status on the global connector."""
-        self._metrics[(0, cstat.status_connector.value)].value = evse_status_v16.value
+    def _report_evse_status(
+        self,
+        evse_id: int,
+        evse_status_v16: ChargePointStatusv16,
+        connector_id: int | None = None,
+    ):
+        """Report EVSE-level status on the global connector.
+
+        With a connector_id the same value is also recorded against that
+        connector. StatusNotification reports occupancy rather than charging
+        state, so Charging/SuspendedEV/SuspendedEVSE can only reach the
+        per-connector metric from TransactionEvent - and without them
+        switch.charge_control, whose condition is written in those terms,
+        can never read on.
+        """
+        if evse_id >= 1:
+            self._evse_status_v16[evse_id] = evse_status_v16
+        derived = self._derive_station_status()
+        self._metrics[(0, cstat.status_connector.value)].value = (
+            derived if derived is not None else evse_status_v16.value
+        )
+        if connector_id is not None and evse_id >= 1 and connector_id >= 1:
+            # Same guard as _apply_status_notification: a degenerate pair would
+            # have _pair_to_global allocate a phantom connector and strand the
+            # real one, so it must not reach the metric from here either.
+            global_idx = self._pair_to_global(evse_id, connector_id)
+            self._metrics[
+                (global_idx, cstat.status_connector.value)
+            ].value = evse_status_v16.value
         self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
@@ -1068,6 +1226,24 @@ class ChargePoint(cp):
         evse_conn_id: int = (
             kwargs["evse"].get("connector_id", 1) if "evse" in kwargs else 1
         )
+        if evse_id < 1 or evse_conn_id < 1:
+            # The same degenerate pair _apply_status_notification refuses. It
+            # has to be caught before _pair_to_global, which would otherwise
+            # allocate a phantom connector, record the transaction and its
+            # meter values against it, and leave the real connector empty.
+            # The charging state is still station-level news, so report that.
+            _LOGGER.debug(
+                "Ignoring connector-scoped data from a TransactionEvent with "
+                "a malformed pair (evse_id=%s, connector_id=%s)",
+                evse_id,
+                evse_conn_id,
+            )
+            station_v16 = self._charging_state_v16(
+                transaction_info.get("charging_state")
+            )
+            if station_v16:
+                self._report_evse_status(evse_id, station_v16)
+            return call_result.TransactionEvent()
         global_idx: int = self._pair_to_global(evse_id, evse_conn_id)
         offline: bool = kwargs.get("offline", False)
         meter_values: list[dict] = kwargs.get("meter_value", [])
@@ -1076,19 +1252,30 @@ class ChargePoint(cp):
 
         if "charging_state" in transaction_info:
             state = transaction_info["charging_state"]
-            evse_status_v16: ChargePointStatusv16 | None = None
-            if state == ChargingStateEnumType.idle:
-                evse_status_v16 = ChargePointStatusv16.available
-            elif state == ChargingStateEnumType.ev_connected:
-                evse_status_v16 = ChargePointStatusv16.preparing
-            elif state == ChargingStateEnumType.suspended_evse:
-                evse_status_v16 = ChargePointStatusv16.suspended_evse
-            elif state == ChargingStateEnumType.suspended_ev:
-                evse_status_v16 = ChargePointStatusv16.suspended_ev
-            elif state == ChargingStateEnumType.charging:
-                evse_status_v16 = ChargePointStatusv16.charging
+            evse_status_v16 = self._charging_state_v16(state)
             if evse_status_v16:
-                self._report_evse_status(evse_id, evse_status_v16)
+                if state == ChargingStateEnumType.idle:
+                    # Idle means no session, not an empty connector, so its
+                    # Available must not reach the connector. Nor may the
+                    # connector keep reporting Charging: a cable left in does
+                    # not change the connector status, so the charger need not
+                    # send another StatusNotification. Fall back to the
+                    # occupancy already recorded, which is what describes the
+                    # connector once the session has gone.
+                    # The station keeps reporting the session's end. Only the
+                    # charger knows whether the cable came out with it, so
+                    # second-guessing that from stale occupancy would be wrong
+                    # whenever the transaction ended because the EV left.
+                    self._report_evse_status(evse_id, evse_status_v16)
+                    known = self._known_occupancy(evse_id, evse_conn_id)
+                    if known is not None:
+                        self._metrics[
+                            (global_idx, cstat.status_connector.value)
+                        ].value = self._connector_status_v16(known).value
+                else:
+                    self._report_evse_status(
+                        evse_id, evse_status_v16, connector_id=evse_conn_id
+                    )
 
         response = call_result.TransactionEvent()
         id_token = kwargs.get("id_token")

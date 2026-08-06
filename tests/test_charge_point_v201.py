@@ -1323,7 +1323,7 @@ async def _unsupported_base_report_test(
     )
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._pending_status_notifications == []
@@ -1385,7 +1385,7 @@ async def _incomplete_inventory_test(
     # (1, 1).
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._pending_status_notifications == []
@@ -1446,7 +1446,7 @@ async def _incomplete_inventory_late_evidence_test(
     )
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._evse_to_global == {(2, 2): 1}
