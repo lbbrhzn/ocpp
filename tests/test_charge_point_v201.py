@@ -1287,9 +1287,13 @@ async def _unsupported_base_report_test(
         )
     )
     await wait_ready(cs.charge_points[cp_id])
+    # This charger answers no GetBaseReport, so nothing is detectable from an
+    # inventory and SMART can only come from force_smart_charging, which the
+    # test charger enables (tests/const.py). Before the override was honoured
+    # on 2.0.1 this expectation omitted SMART.
     assert (
         cs.get_metric(cpid, cdet.features.value, connector_id=0)
-        == Profiles.CORE | Profiles.REM | Profiles.FW
+        == Profiles.CORE | Profiles.REM | Profiles.FW | Profiles.SMART
     )
 
     # Regression: a charger whose GetBaseReport yields no connectors (either

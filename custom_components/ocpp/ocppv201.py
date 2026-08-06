@@ -424,6 +424,14 @@ class ChargePoint(cp):
         if self._inventory and self._inventory.local_auth_available:
             features |= Profiles.AUTH
 
+        # Mirrors the OCPP 1.6 path. SmartChargingCtrlr/Available is optional
+        # in OCPP 2.0.1, so a charger can implement smart charging and still
+        # not advertise it, leaving the profile off. This override lets the
+        # user restore it, and is the only escape hatch when detection fails.
+        if self.settings.force_smart_charging:
+            _LOGGER.warning("Force Smart Charging feature profile")
+            features |= Profiles.SMART
+
         fw_req = call.UpdateFirmware(
             1,
             {
