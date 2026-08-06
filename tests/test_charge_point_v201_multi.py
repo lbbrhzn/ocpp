@@ -336,7 +336,8 @@ async def test_v201_multi_connectors_per_evse(hass, socket_enabled):
         await asyncio.sleep(0.05)
 
         assert cs.get_metric(cpid, "Status.Connector", connector_id=1) == "Available"
-        assert cs.get_metric(cpid, "Status.Connector", connector_id=2) == "Occupied"
+        # Occupied has no 1.6 equivalent of its own and maps to Preparing.
+        assert cs.get_metric(cpid, "Status.Connector", connector_id=2) == "Preparing"
         assert cs.get_metric(cpid, "Status.Connector", connector_id=3) == "Unavailable"
 
         await cp.send_tx_started_eair_wh(1, 2, "TX-1", 10_000)

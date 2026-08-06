@@ -47,7 +47,7 @@ For OCPP 1.6, the sensor can show these values:
 
 Note
 In OCPP 1.6, `connectorId = 0` (station level) only uses Available, Unavailable, or Faulted.<br>
-In OCPP 2.0.1, connector status is simplified to Available / Occupied / Reserved / Unavailable / Faulted; “Preparing/Finishing” are reflected in TransactionEvent rather than as connector statuses.
+OCPP 2.0.1 simplifies connector status to Available / Occupied / Reserved / Unavailable / Faulted and reports charging progress in TransactionEvent instead. The integration normalises both protocols onto the OCPP 1.6 vocabulary listed above, so the status sensor reads the same whichever version a charger negotiates: `Occupied` is reported as **Preparing**, and **Charging** / **SuspendedEV** / **SuspendedEVSE** come from the transaction's charging state. Automations can use the same conditions on either protocol.
 
 If your integration shows extra attributes on the connector status sensor like availability_change or availability_pending, they indicate that a status change (e.g., after ChangeAvailability) has been accepted or scheduled and will take effect once current conditions allow (e.g., after an active session ends).
 
