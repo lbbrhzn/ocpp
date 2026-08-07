@@ -606,11 +606,19 @@ class ChargePoint(cp):
                 "signature": "☺",
             },
         )
+        # A probe that goes unanswered has to cost only its own profile. The
+        # ocpp library raises asyncio.TimeoutError rather than an OCPPError
+        # when a charger never replies, so catching OCPPError alone let that
+        # escape get_supported_features, past the assignment in
+        # fetch_supported_features, into post_connect's bare handler - leaving
+        # every profile off, including SMART, and no feature metric at all.
         try:
             await self.call(fw_req)
             features |= Profiles.FW
         except OCPPError as e:
             _LOGGER.info("Firmware update not supported: %s", e)
+        except TimeoutError:
+            _LOGGER.warning("No response to UpdateFirmware probe, assuming no FW")
 
         trigger_req = call.TriggerMessage("StatusNotification")
         try:
@@ -618,6 +626,8 @@ class ChargePoint(cp):
             features |= Profiles.REM
         except OCPPError as e:
             _LOGGER.info("TriggerMessage not supported: %s", e)
+        except TimeoutError:
+            _LOGGER.warning("No response to TriggerMessage probe, assuming no REM")
 
         return features
 
