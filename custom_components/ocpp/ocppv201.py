@@ -70,7 +70,11 @@ class InventoryReport:
 
     evse_count: int = 0
     connector_count: list[int] = field(default_factory=list)
-    smart_charging_available: bool = False
+    # None means the charger never reported SmartChargingCtrlr/Available.
+    # The variable is optional in OCPP 2.0.1, so its absence is "unknown"
+    # rather than "no" - the two are told apart here so that only the
+    # unknown case is resolved by probing. An explicit false stands.
+    smart_charging_available: bool | None = None
     reservation_available: bool = False
     local_auth_available: bool = False
     tx_updated_measurands: list[MeasurandEnumType] = field(default_factory=list)
@@ -597,6 +601,29 @@ class ChargePoint(cp):
         if self.settings.force_smart_charging:
             _LOGGER.warning("Force Smart Charging feature profile")
             features |= Profiles.SMART
+
+        # SmartChargingCtrlr/Available is optional, so a charger can implement
+        # smart charging and never advertise it - the FoxESS A-series reports
+        # ProfileStackLevel, RateUnit and PeriodsPerSchedule but no Available.
+        # Absence is not a denial, so resolve it by asking. GetCompositeSchedule
+        # is read-only, unlike SetChargingProfile, which would mutate charger
+        # state on every connect. Any answer at all proves the message is
+        # implemented: Rejected is a legitimate reply to a schedule request the
+        # charger cannot compute, and says nothing about support. Only a
+        # CallError, which is how an unimplemented message comes back, denies it.
+        if (Profiles.SMART not in features) and (
+            self._inventory is None or self._inventory.smart_charging_available is None
+        ):
+            schedule_req = call.GetCompositeSchedule(60, 0)
+            try:
+                await self.call(schedule_req)
+                features |= Profiles.SMART
+            except OCPPError as e:
+                _LOGGER.info("Smart charging not supported: %s", e)
+            except TimeoutError:
+                _LOGGER.warning(
+                    "No response to GetCompositeSchedule probe, assuming no SMART"
+                )
 
         fw_req = call.UpdateFirmware(
             1,
