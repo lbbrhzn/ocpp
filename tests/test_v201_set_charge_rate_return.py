@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v201.enums import (
+    ChargingProfilePurposeEnumType,
     ChargingProfileStatusEnumType,
     ClearChargingProfileStatusEnumType,
 )
@@ -121,11 +122,21 @@ async def test_an_explicit_profile_reports_success(hass):
     ],
 )
 async def test_clearing_the_limit_reports_success(hass, kwargs):
-    """Removing a limit is a successful outcome, not a failure to apply one."""
+    """Removing a limit is a successful outcome, not a failure to apply one.
+
+    The clear also has to stay scoped to the profile this integration owns.
+    Now that every request at or above max_current reaches it, an unfiltered
+    ClearChargingProfile would take TxProfile and TxDefaultProfile entries
+    installed by the charger or another system down with it.
+    """
     cp = _mk_cp(hass)
 
     assert await cp.set_charge_rate(**kwargs) is True
     assert _sent(cp) == ["ClearChargingProfile"]
+    assert cp.sent[0].charging_profile_id is None
+    assert cp.sent[0].charging_profile_criteria == {
+        "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value
+    }
 
 
 @pytest.mark.asyncio
