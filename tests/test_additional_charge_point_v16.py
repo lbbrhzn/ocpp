@@ -939,7 +939,7 @@ async def test_session_energy_get_energy_kwh_exception_ignored(
 @pytest.mark.parametrize("cp_id", ["CP_cov_sess_ms_cast_exc"])
 @pytest.mark.parametrize("port", [9329])
 async def test_session_energy_meter_start_cast_exception(
-    hass, socket_enabled, cp_id, port, setup_config_entry
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
 ):
     """Test session energy path when meter_start cannot be cast to float."""
     cs = setup_config_entry
@@ -952,6 +952,11 @@ async def test_session_energy_meter_start_cast_exception(
             await cp.send_boot_notification()
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
+
+            async def noop_update(cpid):
+                """Avoid publishing the deliberately invalid test value to HA."""
+
+            monkeypatch.setattr(srv, "update", noop_update)
             # Poison meter_start with a non-float so that float() raises
             srv._metrics[(1, "Energy.Meter.Start")].value = object()
 
@@ -973,6 +978,7 @@ async def test_session_energy_meter_start_cast_exception(
                 transaction_id=4,
             )
             _ = await cp.call(mv)
+            srv._metrics[(1, "Energy.Meter.Start")].value = None
             # No crash is sufficient to cover lines 1023-1024
             assert True
         finally:

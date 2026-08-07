@@ -7,6 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
-    - uses: ammaraskar/sphinx-action@master
+      with:
+        persist-credentials: false
+    - uses: ammaraskar/sphinx-action@c61ac11d9ee097caf8983c10c8b5af5861b32b54 # master
       with:
         docs-folder: "docs/"

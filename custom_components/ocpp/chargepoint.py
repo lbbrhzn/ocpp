@@ -605,7 +605,10 @@ class ChargePoint(cp):
 
     def _register_boot_notification(self):
         if self.triggered_boot_notification is False:
-            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
+            if self.cs_settings.enable_reboot_notifications:
+                self.hass.async_create_task(
+                    self.notify_ha(f"Charger {self.id} rebooted")
+                )
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
 

@@ -8,7 +8,11 @@ from homeassistant.data_entry_flow import InvalidData
 import pytest
 
 from custom_components.ocpp.const import (
+    CONF_CSID,
+    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_HOST,
     CONF_NUM_CONNECTORS,
+    CONF_PORT,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
 )
@@ -69,6 +73,136 @@ async def test_successful_config_flow(hass, bypass_get_data):
     assert result["title"] == "test_csid_flow"
     assert result["data"] == MOCK_CONFIG_CS
     assert result["result"]
+
+
+async def test_config_flow_stores_reboot_notification_preference(hass, bypass_get_data):
+    """Test the central config flag is stored in the created entry."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    config = MOCK_CONFIG_CS.copy()
+    config.pop(CONF_CPIDS)
+    config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=config
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
+
+
+async def test_reconfigure_existing_entry(hass, bypass_get_data):
+    """Test reconfiguring an existing central system entry."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_FLOW,
+        entry_id="test_cms_reconfigure",
+        title=MOCK_CONFIG_FLOW[CONF_CSID],
+        version=2,
+        minor_version=1,
+    )
+    config_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": config_entry.entry_id,
+        },
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    updated_config = MOCK_CONFIG_CS.copy()
+    updated_config.pop(CONF_CPIDS)
+    updated_config[CONF_CSID] = "updated_csid"
+    updated_config[CONF_HOST] = "127.0.0.2"
+    updated_config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=updated_config
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert config_entry.title == "updated_csid"
+    assert config_entry.data[CONF_CSID] == "updated_csid"
+    assert config_entry.data[CONF_HOST] == "127.0.0.2"
+    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
+    assert config_entry.data[CONF_CPIDS] == MOCK_CONFIG_FLOW[CONF_CPIDS]
+
+
+async def test_options_flow_updates_existing_entry(hass, bypass_get_data):
+    """Test the options flow updates the central system settings."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_FLOW,
+        entry_id="test_cms_options",
+        title=MOCK_CONFIG_FLOW[CONF_CSID],
+        version=2,
+        minor_version=1,
+    )
+    config_entry.add_to_hass(hass)
+
+    assert config_entry.supports_options is True
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    updated_config = MOCK_CONFIG_CS.copy()
+    updated_config.pop(CONF_CPIDS)
+    updated_config[CONF_CSID] = "options_updated_csid"
+    updated_config[CONF_HOST] = "127.0.0.3"
+    updated_config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=updated_config
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert config_entry.title == "options_updated_csid"
+    assert config_entry.data[CONF_CSID] == "options_updated_csid"
+    assert config_entry.data[CONF_HOST] == "127.0.0.3"
+    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
+    assert config_entry.data[CONF_CPIDS] == MOCK_CONFIG_FLOW[CONF_CPIDS]
+
+
+async def test_options_flow_rejects_port_used_by_another_entry(hass):
+    """Test options abort cleanly when another entry already uses the port."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_FLOW,
+        entry_id="test_cms_options_port",
+    )
+    other_config = {**MOCK_CONFIG_FLOW, CONF_PORT: 9006}
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=other_config,
+        entry_id="other_cms",
+    )
+    config_entry.add_to_hass(hass)
+    other_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    updated_config = {**MOCK_CONFIG_CS, CONF_PORT: other_config[CONF_PORT]}
+    updated_config.pop(CONF_CPIDS)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=updated_config
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert config_entry.data[CONF_PORT] == MOCK_CONFIG_FLOW[CONF_PORT]
 
 
 async def test_successful_discovery_flow(hass, bypass_get_data):
