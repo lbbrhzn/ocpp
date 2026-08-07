@@ -37,6 +37,7 @@ from ocpp.v201.enums import (
     ChargingRateUnitEnumType,
     ChargingProfileKindEnumType,
     ChargingProfileStatusEnumType,
+    ClearChargingProfileStatusEnumType,
 )
 
 from .chargepoint import (
@@ -634,15 +635,25 @@ class ChargePoint(cp):
                 )
                 await self.call(req)
 
-    async def clear_profile(self):
-        """Clear all charging profiles."""
+    async def clear_profile(self) -> bool:
+        """Clear all charging profiles.
+
+        Returns True when the charger accepted, or reported it had nothing to
+        clear - Unknown means the end state we wanted already holds. Mirrors
+        ocppv16.clear_profile, and lets set_charge_rate avoid claiming success
+        for a clear the charger refused.
+        """
         req: call.ClearChargingProfile = call.ClearChargingProfile(
             None,
             {
                 "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value
             },
         )
-        await self.call(req)
+        resp: call_result.ClearChargingProfile = await self.call(req)
+        return resp.status in (
+            ClearChargingProfileStatusEnumType.accepted,
+            ClearChargingProfileStatusEnumType.unknown,
+        )
 
     async def set_charge_rate(
         self,
@@ -650,11 +661,18 @@ class ChargePoint(cp):
         limit_watts: int | None = None,
         conn_id: int = 0,
         profile: dict | None = None,
-    ):
+    ) -> bool:
         """Set a charging profile with defined limit (OCPP 2.x).
 
         - conn_id=0 (default) targets the Charging Station (evse_id=0).
         - conn_id>0 targets the specific EVSE corresponding to the global connector index.
+
+        Returns whether the charger honoured the request. Callers treat the
+        result as a success flag - number.py logs a rejection when it is
+        falsy - so a path that succeeded must say so, and one that cleared a
+        profile must report what the charger made of that rather than assume.
+        A refused SetChargingProfile still raises HomeAssistantError, which
+        carries the charger's own status message.
         """
 
         evse_target = 0
@@ -672,27 +690,31 @@ class ChargePoint(cp):
                         "message": f"{str(resp.status)}: {str(resp.status_info)}"
                     },
                 )
-            return
+            return True
 
+        # Removing the limit is a successful outcome too: a request at or above
+        # the maximum means "no restriction", not a failure to apply one. The
+        # amp threshold has to be the configured maximum rather than a literal
+        # 32, because that is what bounds number.<cpid>_maximum_current - with
+        # a higher max_current every request in between was turned into a bare
+        # profile clear, so the charger ran unrestricted while the slider
+        # showed the figure the user had asked for.
         if limit_watts is not None:
             if float(limit_watts) >= 22000:
-                await self.clear_profile()
-                return
+                return await self.clear_profile()
             period_limit = int(limit_watts)
             unit_value = ChargingRateUnitEnumType.watts.value
 
         elif limit_amps is not None:
-            if float(limit_amps) >= 32:
-                await self.clear_profile()
-                return
+            if float(limit_amps) >= float(self.settings.max_current):
+                return await self.clear_profile()
             period_limit = (
                 int(limit_amps) if float(limit_amps).is_integer() else float(limit_amps)
             )
             unit_value = ChargingRateUnitEnumType.amps.value
 
         else:
-            await self.clear_profile()
-            return
+            return await self.clear_profile()
 
         schedule: dict = {
             "id": 1,
@@ -720,6 +742,7 @@ class ChargePoint(cp):
                     "message": f"{str(resp.status)}: {str(resp.status_info)}"
                 },
             )
+        return True
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
