@@ -698,6 +698,11 @@ class ChargePoint(cp):
             nonzero = [v for v in values if v != 0.0]
             return (sum(nonzero) / len(nonzero)) if nonzero else 0.0
 
+        def average_valid_voltages(values: list[float]) -> float:
+            """Average voltages above the noise floor; return 0.0 if none are valid."""
+            valid = [v for v in values if abs(v) >= 1.0]
+            return (sum(valid) / len(valid)) if valid else 0.0
+            
         measurand_data: dict[str, dict[str, float]] = {}
 
         for item in data:
@@ -757,19 +762,17 @@ class ChargePoint(cp):
 
             if metric in [Measurand.voltage.value]:
                 if not phase_info.keys().isdisjoint(line_to_neutral_phases):
-                    # Line to neutral voltages are averaged
-                    metric_value = average_of_nonzero(
+                    metric_value = average_valid_voltages(
                         [phase_info.get(phase, 0.0) for phase in line_to_neutral_phases]
                     )
                 elif not phase_info.keys().isdisjoint(line_to_line_phases):
-                    # Line to line voltages are averaged and converted to line to neutral
-                    metric_value = average_of_nonzero(
+                    metric_value = average_valid_voltages(
                         [phase_info.get(phase, 0.0) for phase in line_to_line_phases]
                     ) / sqrt(3)
                 elif not phase_info.keys().isdisjoint(line_phases_all):
-                    # Workaround for chargers that don't follow engineering convention
-                    # Assumes voltages are line to neutral
-                    metric_value = _avg_l123(phase_info)
+                    metric_value = average_valid_voltages(
+                        [phase_info.get(phase, 0.0) for phase in phases_l123]
+                    )
 
             else:
                 is_current = mname.lower().startswith("current")
