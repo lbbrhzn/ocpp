@@ -303,11 +303,21 @@ class OCPPOptionsFlow(OptionsFlow):
                 points[cp_id] = settings
         return points
 
-    def _finalize(self, settings: dict[str, Any]) -> ConfigFlowResult:
-        """Write the edited charge point back into the entry."""
+    def _finalize(self) -> ConfigFlowResult:
+        """Overlay the edited fields onto the charge point and write it back.
+
+        The overlay reads the entry as it is now, not as it was when the
+        first form was submitted: while the user sits on the measurands
+        form, a reconnecting charger's post_connect can update the entry
+        (connector count, detected measurands), and writing back a snapshot
+        taken earlier would erase that. Only the fields the user actually
+        edited are replaced.
+        """
         cpids = [
             {
-                cp_id: (settings if cp_id == self._cp_id else stored)
+                cp_id: (
+                    {**stored, **self._settings} if cp_id == self._cp_id else stored
+                )
                 for cp_id, stored in item.items()
             }
             for item in self.config_entry.data.get(CONF_CPIDS, [])
@@ -351,16 +361,16 @@ class OCPPOptionsFlow(OptionsFlow):
         current = self._charge_points()[self._cp_id]
 
         if user_input is not None:
-            # cpid, the connector count and the measurand list ride along
-            # unchanged; only what the form shows is replaced. In particular
-            # the stored measurand list is NOT reseeded when autoconfig is
-            # left on - it holds what detection accepted, and re-detection
-            # refreshes it on the next connect anyway, so rewriting it here
-            # would create sensors for every measurand as a side effect of
+            # Hold only what the form edited; _finalize overlays it onto the
+            # stored record. cpid, the connector count and the measurand
+            # list are untouched by construction - in particular the
+            # measurand list is NOT reseeded when autoconfig is left on: it
+            # holds what detection accepted, and rewriting it here would
+            # create sensors for every measurand as a side effect of
             # editing an unrelated setting.
-            self._settings = {**current, **user_input}
+            self._settings = dict(user_input)
             if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                return self._finalize(self._settings)
+                return self._finalize()
             return await self.async_step_measurands()
 
         schema = vol.Schema(
@@ -417,7 +427,7 @@ class OCPPOptionsFlow(OptionsFlow):
             selected = [m for m, value in user_input.items() if value]
             if selected:
                 self._settings[CONF_MONITORED_VARIABLES] = ",".join(selected)
-                return self._finalize(self._settings)
+                return self._finalize()
             errors["base"] = "no_measurands_selected"
 
         current = self._charge_points()[self._cp_id]

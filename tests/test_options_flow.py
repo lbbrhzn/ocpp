@@ -271,7 +271,7 @@ async def test_selecting_no_measurands_is_rejected(hass):
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={m: False for m in _form_fields(result)},
+        user_input=dict.fromkeys(_form_fields(result), False),
     )
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
@@ -318,6 +318,57 @@ async def test_multiple_chargers_get_a_picker_and_only_the_picked_one_changes(ha
     assert _stored(entry, "CP_2")[CONF_MAX_CURRENT] == 25
     assert _stored(entry, "CP_2")[CONF_CPID] == "second_cpid"
     assert _stored(entry, "CP_1") == _cp_settings()
+
+
+async def test_updates_landing_between_steps_are_not_clobbered(hass):
+    """A snapshot taken at the first form must not be written back later.
+
+    While the user sits on the measurands form, a reconnecting charger's
+    post_connect can update the entry - the connector count, the detected
+    measurand list. Finalize has to overlay only the edited fields onto
+    the entry as it is at write time, so those updates survive; a full
+    snapshot taken at the first submit would erase them.
+    """
+    entry = _entry(hass, [{"CP_1": _cp_settings()}])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 63,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: False,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+        },
+    )
+    assert result["step_id"] == "measurands"
+
+    # post_connect lands while the measurands form is open.
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_CPIDS: [{"CP_1": _cp_settings(**{CONF_NUM_CONNECTORS: 3})}],
+        },
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            str(key): (str(key) == "Voltage") for key in result["data_schema"].schema
+        },
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    stored = _stored(entry, "CP_1")
+    # The detector's update survives...
+    assert stored[CONF_NUM_CONNECTORS] == 3
+    # ...while the user's explicit edits still win for the edited fields.
+    assert stored[CONF_MAX_CURRENT] == 63
+    assert stored[CONF_MONITORED_VARIABLES] == "Voltage"
+    assert stored[CONF_MONITORED_VARIABLES_AUTOCONFIG] is False
 
 
 async def test_no_chargers_means_nothing_to_configure(hass):
