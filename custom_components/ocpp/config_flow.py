@@ -204,6 +204,31 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         return await self.async_step_cp_user()
 
+    def _other_cpids_in_use(self) -> set[str]:
+        """Return every cpid already configured for a charge point other than the current one.
+
+        cpid (as opposed to cp_id, the OCPP-level charge point identity) is
+        user-chosen and is what entities' unique_id is built from
+        (DOMAIN.cpid.key...), so it must stay unique across every charge
+        point of every OCPP config entry, not just within the current
+        central system. Only the charge point currently being (re)configured
+        -- matched on both its entry and its cp_id -- is excluded, so
+        re-submitting its own cpid is not flagged as a duplicate of itself.
+        """
+        # Match on the entry as well as the charge point: cp_id is the
+        # OCPP-level identity, so two central systems can each have one with
+        # the same name. Skipping on cp_id alone would also skip the *other*
+        # system's record and let a genuine duplicate through.
+        own_entry_id = getattr(getattr(self, "_entry", None), "entry_id", None)
+        cpids: set[str] = set()
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            for cp_data in entry.data.get(CONF_CPIDS, []):
+                for cp_id, cp_settings in cp_data.items():
+                    if entry.entry_id == own_entry_id and cp_id == self._cp_id:
+                        continue
+                    cpids.add(cp_settings[CONF_CPID])
+        return cpids
+
     async def async_step_cp_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -211,8 +236,6 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Don't allow duplicate cpids to be used
-            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             # Validate cpid format against entity id requirements (lowercase letters, digits and _)
             schema = vol.Schema(
                 {vol.Required(CONF_CPID): cv.matches_regex(r"^[\da-z_]+$")}
@@ -222,6 +245,13 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             except vol.Invalid:
                 errors["base"] = "invalid_cpid"
             else:
+                # cpid is used to build entity unique_ids (DOMAIN.cpid.key...)
+                # across every OCPP config entry, so it must be unique
+                # integration-wide, not just within this central system.
+                if user_input[CONF_CPID] in self._other_cpids_in_use():
+                    errors["base"] = "duplicate_cpid"
+
+            if not errors:
                 cp_data = {
                     **user_input,
                     CONF_NUM_CONNECTORS: self._detected_num_connectors,
@@ -267,6 +297,20 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._data[CONF_CPIDS][-1][self._cp_id][CONF_MONITORED_VARIABLES] = (
                     self._measurands
                 )
+
+                # With autoconfig off, the cpid was validated a step earlier and
+                # nothing has been written yet, so another flow could have taken
+                # it in the meantime. Re-check immediately before persisting:
+                # there is no await between this and async_update_entry, so on
+                # the single-threaded event loop nothing can slip in between.
+                pending_cpid = self._data[CONF_CPIDS][-1][self._cp_id][CONF_CPID]
+                if pending_cpid in self._other_cpids_in_use():
+                    errors["base"] = "duplicate_cpid"
+                    return self.async_show_form(
+                        step_id="measurands",
+                        data_schema=STEP_USER_MEASURANDS_SCHEMA,
+                        errors=errors,
+                    )
 
                 self.hass.config_entries.async_update_entry(
                     self._entry, data=self._data
