@@ -219,7 +219,9 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
         connector_id=2,
     )
     assert cp._pending_status_notifications == []
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Occupied"
+    # The per-connector metric speaks the OCPP 1.6 vocabulary, as the
+    # charging-station-level one already did: Occupied maps to Preparing.
+    assert cp._metrics[(1, cstat.status_connector.value)].value == "Preparing"
 
 
 @pytest.mark.asyncio
