@@ -13,6 +13,7 @@ is now put back and the failure raised, so the frontend surfaces it and the
 charger's own reason survives.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -22,8 +23,12 @@ from custom_components.ocpp.const import DOMAIN
 from custom_components.ocpp.number import NUMBERS, ChargePointNumber
 
 
-def _mk_number(hass, result=None, error=None, on_write=None):
-    """Build the maximum-current entity with a scripted central system."""
+def _mk_number(hass, result=None, error=None, on_write=None, confirmed=32.0):
+    """Build the maximum-current entity with a scripted central system.
+
+    `confirmed` seeds both the displayed and the last-accepted value, as a
+    charger that has taken one limit this session would leave them.
+    """
     calls = []
 
     async def set_max_charge_rate_amps(cpid, value, connector_id=0):
@@ -50,6 +55,8 @@ def _mk_number(hass, result=None, error=None, on_write=None):
     entity.async_write_ha_state = lambda: written.append(
         on_write() if on_write else entity._attr_native_value
     )
+    entity._attr_native_value = confirmed
+    entity._confirmed_value = confirmed
     entity.calls = calls
     entity.written = written
     return entity
@@ -59,7 +66,6 @@ def _mk_number(hass, result=None, error=None, on_write=None):
 async def test_an_accepted_limit_is_kept(hass):
     """Control: the success path must be untouched by the revert logic."""
     entity = _mk_number(hass, result=True)
-    entity._attr_native_value = 32.0
 
     await entity.async_set_native_value(16)
 
@@ -71,7 +77,6 @@ async def test_an_accepted_limit_is_kept(hass):
 async def test_a_refused_limit_is_reverted_and_raised(hass):
     """A falsy result means the charger did not take it."""
     entity = _mk_number(hass, result=False)
-    entity._attr_native_value = 32.0
 
     with pytest.raises(HomeAssistantError) as excinfo:
         await entity.async_set_native_value(16)
@@ -93,7 +98,6 @@ async def test_the_charger_s_own_reason_is_preserved(hass):
         translation_placeholders={"message": "Rejected: over site limit"},
     )
     entity = _mk_number(hass, error=refusal)
-    entity._attr_native_value = 32.0
 
     with pytest.raises(HomeAssistantError) as excinfo:
         await entity.async_set_native_value(16)
@@ -110,7 +114,6 @@ async def test_an_unexpected_failure_is_also_reverted(hass):
     than as a False return, so both shapes have to revert.
     """
     entity = _mk_number(hass, error=TimeoutError("no reply"))
-    entity._attr_native_value = 32.0
 
     with pytest.raises(HomeAssistantError) as excinfo:
         await entity.async_set_native_value(16)
@@ -128,7 +131,6 @@ async def test_the_revert_is_written_to_the_ui(hass):
     bug this fixes, just with an error toast on top.
     """
     entity = _mk_number(hass, result=False)
-    entity._attr_native_value = 32.0
 
     with pytest.raises(HomeAssistantError):
         await entity.async_set_native_value(16)
@@ -152,7 +154,6 @@ async def test_the_slider_moves_before_the_call(hass):
         return True
 
     entity = _mk_number(hass, result=True)
-    entity._attr_native_value = 32.0
     entity.central_system.set_max_charge_rate_amps = observe
 
     await entity.async_set_native_value(24)
@@ -170,8 +171,7 @@ async def test_a_restored_none_value_reverts_to_none(hass):
     fresh install: reverting must not invent a number the charger never
     confirmed.
     """
-    entity = _mk_number(hass, result=False)
-    entity._attr_native_value = None
+    entity = _mk_number(hass, result=False, confirmed=None)
 
     with pytest.raises(HomeAssistantError):
         await entity.async_set_native_value(16)
@@ -187,10 +187,76 @@ async def test_an_offline_charger_reverts_too(hass):
     must not silently show a limit either.
     """
     entity = _mk_number(hass, result=False)
-    entity._attr_native_value = 32.0
 
     with pytest.raises(HomeAssistantError):
         await entity.async_set_native_value(6)
 
     assert entity._attr_native_value == 32.0
     assert entity.calls == [("test_cpid", 6.0, 0)]
+
+
+@pytest.mark.asyncio
+async def test_a_late_rollback_does_not_clobber_an_accepted_limit(hass):
+    """Two requests can overlap; the loser must not undo the winner.
+
+    Rolling back to whatever was displayed when a request started meant a
+    slow failing request, landing after a quick successful one, restored a
+    value the charger was no longer holding - reintroducing the exact
+    divergence this fix exists to remove. Rollback goes to the last
+    accepted limit instead, so a superseded request has nothing to undo.
+    """
+    gate = asyncio.Event()
+
+    async def charger(cpid, value, connector_id=0):
+        if value == 16.0:
+            await gate.wait()
+            return False
+        return True
+
+    entity = _mk_number(hass, result=True)
+    entity.central_system.set_max_charge_rate_amps = charger
+
+    slow = asyncio.create_task(entity.async_set_native_value(16))
+    await asyncio.sleep(0)
+    await entity.async_set_native_value(24)
+
+    assert entity._attr_native_value == 24.0
+
+    gate.set()
+    with pytest.raises(HomeAssistantError):
+        await slow
+
+    assert entity._attr_native_value == 24.0
+    assert entity._confirmed_value == 24.0
+
+
+@pytest.mark.asyncio
+async def test_a_late_success_reclaims_the_display(hass):
+    """The mirror case: the winner lands after the loser rolled back.
+
+    A failing request that finishes first must not leave the slider on the
+    old value while the charger goes on to accept a newer one.
+    """
+    gate = asyncio.Event()
+
+    async def charger(cpid, value, connector_id=0):
+        if value == 24.0:
+            await gate.wait()
+            return True
+        return False
+
+    entity = _mk_number(hass, result=True)
+    entity.central_system.set_max_charge_rate_amps = charger
+
+    slow = asyncio.create_task(entity.async_set_native_value(24))
+    await asyncio.sleep(0)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(16)
+
+    assert entity._attr_native_value == 32.0
+
+    gate.set()
+    await slow
+
+    assert entity._attr_native_value == 24.0
+    assert entity._confirmed_value == 24.0

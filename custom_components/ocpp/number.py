@@ -192,6 +192,10 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             object_id = f"{self.cpid}_{self.entity_description.key}"
         self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
         self._attr_native_value = self.entity_description.initial_value
+        # The last limit the charger accepted, and so the only value a
+        # failed request may fall back to. None until something is
+        # confirmed, so a rollback cannot invent a limit.
+        self._confirmed_value: float | None = None
         self._attr_should_poll = False
 
     async def async_added_to_hass(self) -> None:
@@ -199,6 +203,9 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         await super().async_added_to_hass()
         if restored := await self.async_get_last_number_data():
             self._attr_native_value = restored.native_value
+            # Confirmed in a previous session; better than nothing to
+            # fall back to, and it is what the charger was last told.
+            self._confirmed_value = restored.native_value
 
         @callback
         def _maybe_update(*args):
@@ -235,22 +242,22 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
           error, because the number is the only thing telling the user what
           the circuit is doing. Keeping the value only logged the problem.
         """
-        previous = self._attr_native_value
-        self._attr_native_value = float(value)
+        target = float(value)
+        self._attr_native_value = target
         self.async_write_ha_state()
 
         try:
             ok = await self.central_system.set_max_charge_rate_amps(
-                self.cpid, self._attr_native_value, connector_id=self._op_connector_id
+                self.cpid, target, connector_id=self._op_connector_id
             )
         except HomeAssistantError:
             # set_charge_rate raises this for a rejected profile, and its
             # message carries the charger's own status_info - the only
             # explanation of why. Surface it rather than restating it.
-            self._restore_native_value(previous)
+            self._revert_to_confirmed()
             raise
         except Exception as ex:
-            self._restore_native_value(previous)
+            self._revert_to_confirmed()
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="set_charge_rate_error",
@@ -258,16 +265,33 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             ) from ex
 
         if not ok:
-            self._restore_native_value(previous)
+            self._revert_to_confirmed()
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="set_charge_rate_error",
                 translation_placeholders={
-                    "message": f"charger did not accept {float(value):.1f} A"
+                    "message": f"charger did not accept {target:.1f} A"
                 },
             )
 
-    def _restore_native_value(self, previous: float | None) -> None:
-        """Put the slider back to what the charger is actually holding."""
-        self._attr_native_value = previous
+        self._confirmed_value = target
+        if self._attr_native_value != target:
+            # A request that started earlier failed while this one was in
+            # flight and rolled the slider back. This limit is the one the
+            # charger is holding, so it owns what is displayed.
+            self._attr_native_value = target
+            self.async_write_ha_state()
+
+    def _revert_to_confirmed(self) -> None:
+        """Put the slider back to the last limit the charger accepted.
+
+        Reverting to whatever was displayed when this request started would
+        clobber a concurrent request that has since been accepted - two
+        quick drags, or an automation racing the UI - and leave the slider
+        disagreeing with the charger, which is the thing this is meant to
+        prevent rather than cause.
+        """
+        if self._attr_native_value == self._confirmed_value:
+            return
+        self._attr_native_value = self._confirmed_value
         self.async_write_ha_state()
