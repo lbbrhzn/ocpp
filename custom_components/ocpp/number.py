@@ -14,6 +14,7 @@ from homeassistant.components.number import (
 )
 from homeassistant.const import UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -228,8 +229,13 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
     async def async_set_native_value(self, value):
         """Set new value for max current (station-wide when _op_connector_id==0, otherwise per-connector).
 
-        - Optimistic UI: move the slider immediately; attempt backend; never raise.
+        - Optimistic UI: move the slider immediately so it tracks the drag.
+        - On refusal, put it back and raise: a current limit that reads as
+          applied while the charger runs unrestricted is worse than an
+          error, because the number is the only thing telling the user what
+          the circuit is doing. Keeping the value only logged the problem.
         """
+        previous = self._attr_native_value
         self._attr_native_value = float(value)
         self.async_write_ha_state()
 
@@ -237,14 +243,31 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             ok = await self.central_system.set_max_charge_rate_amps(
                 self.cpid, self._attr_native_value, connector_id=self._op_connector_id
             )
-            if not ok:
-                _LOGGER.warning(
-                    "Set current limit rejected by CP (kept optimistic UI at %.1f A).",
-                    value,
-                )
+        except HomeAssistantError:
+            # set_charge_rate raises this for a rejected profile, and its
+            # message carries the charger's own status_info - the only
+            # explanation of why. Surface it rather than restating it.
+            self._restore_native_value(previous)
+            raise
         except Exception as ex:
-            _LOGGER.warning(
-                "Set current limit failed: %s (kept optimistic UI at %.1f A).",
-                ex,
-                value,
+            self._restore_native_value(previous)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={"message": str(ex)},
+            ) from ex
+
+        if not ok:
+            self._restore_native_value(previous)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": f"charger did not accept {float(value):.1f} A"
+                },
             )
+
+    def _restore_native_value(self, previous: float | None) -> None:
+        """Put the slider back to what the charger is actually holding."""
+        self._attr_native_value = previous
+        self.async_write_ha_state()
