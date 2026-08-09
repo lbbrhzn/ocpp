@@ -1063,10 +1063,15 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     )
 
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
-    datetime.fromisoformat(heartbeat_resp.current_time)
+    heartbeat_time = datetime.fromisoformat(heartbeat_resp.current_time)
 
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
+
+    # Checking only the reply let a metric-less handler pass for the bug's
+    # whole life: the sensor's backing metric must hold the same instant
+    # the charger was told.
+    assert cs.get_metric(cpid, cstat.heartbeat.value) == heartbeat_time
 
     await wait_ready(cs.charge_points[cp_id])
 

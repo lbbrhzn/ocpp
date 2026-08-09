@@ -8,7 +8,7 @@ and pushes the entities; 2.0.1 now mirrors it.
 """
 
 import asyncio
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -71,13 +71,16 @@ async def test_a_heartbeat_writes_the_metric(hass):
     stale = datetime(2026, 8, 8, 0, 41, 40, tzinfo=UTC)
     cp._metrics[(0, cstat.heartbeat.value)].value = stale
 
+    before = datetime.now(tz=UTC)
     with patch.object(ChargePoint, "update", AsyncMock()):
         cp.on_heartbeat()
         await hass.async_block_till_done()
+    after = datetime.now(tz=UTC)
 
     recorded = cp._metrics[(0, cstat.heartbeat.value)].value
     assert recorded != stale
-    assert datetime.now(tz=UTC) - recorded < timedelta(seconds=5)
+    # Bounded by the test's own clock reads - no wall-clock window to flake.
+    assert before <= recorded <= after
 
 
 @pytest.mark.asyncio
