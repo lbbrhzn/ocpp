@@ -110,6 +110,9 @@
         },
         "unavailable": {
             "message": "Charger is unavailable: {message}"
+        },
+        "set_charge_rate_error": {
+            "message": "Failed to set charging current limit: {message}"
         }
     },
     "options": {
