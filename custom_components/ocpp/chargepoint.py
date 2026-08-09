@@ -65,6 +65,7 @@ from .const import (
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
+    sensor_unique_id,
 )
 
 TIME_MINUTES = UnitOfTime.MINUTES
@@ -509,6 +510,11 @@ class ChargePoint(cp):
                 )
                 self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
                 self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                # This loop is these sensors' only publisher: nothing
+                # message-driven republishes them on an idle charger.
+                self._async_refresh_metric_entities(
+                    [cstat.latency_ping.value, cstat.latency_pong.value]
+                )
 
             except TimeoutError as timeout_exception:
                 timeout_counter += 1
@@ -518,6 +524,9 @@ class ChargePoint(cp):
                 )
                 self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
                 self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                self._async_refresh_metric_entities(
+                    [cstat.latency_ping.value, cstat.latency_pong.value]
+                )
 
                 if timeout_counter > self.cs_settings.websocket_ping_tries:
                     _LOGGER.debug(
@@ -610,29 +619,30 @@ class ChargePoint(cp):
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
 
-    def _async_refresh_heartbeat_entity(self) -> None:
-        """Refresh only the heartbeat sensor.
+    def _async_refresh_metric_entities(self, metrics: list[str]) -> None:
+        """Refresh only the sensors backing the given charger-level metrics.
 
-        A heartbeat changes exactly one metric, at whatever rate the
-        charger chooses; the full update() walks the device registry and
-        force-refreshes every entity of this charger, which is a lot of
-        work for one timestamp on an otherwise idle system. Resolve the
-        heartbeat sensor through the entity registry - rename-proof, the
-        dispatcher filter matches on current entity_id - and dispatch it
-        alone. Falls back to the full update when the entity is not
-        registered yet, as the first heartbeat can arrive before the
-        platforms finish adding entities.
+        High-rate writers - heartbeats arriving at whatever rate the
+        charger chooses, the latency ping loop every ping interval - must
+        not pay for the full update(), which walks the device registry and
+        force-refreshes every entity of this charger for a change to one
+        or two values. Each sensor is resolved through the entity registry
+        by its canonical unique_id - rename-proof, since the dispatcher
+        filter matches on current entity_id - and only those entities are
+        dispatched. Falls back to the full update when any sensor is not
+        registered yet, as the first write can arrive before the platforms
+        finish adding entities.
         """
         er = entity_registry.async_get(self.hass)
-        # Mirrors the sensor's unique_id construction: the description key
-        # is the metric name lowercased with dots replaced.
-        key = cstat.heartbeat.value.lower().replace(".", "_")
-        uid = ".".join([DOMAIN, self.settings.cpid, key, SENSOR_DOMAIN])
-        entity_id = er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
-        if entity_id is None:
-            self.hass.async_create_task(self.update(self.settings.cpid))
-            return
-        async_dispatcher_send(self.hass, DATA_UPDATED, {entity_id})
+        entity_ids: set[str] = set()
+        for metric in metrics:
+            uid = sensor_unique_id(self.settings.cpid, metric)
+            entity_id = er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
+            if entity_id is None:
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return
+            entity_ids.add(entity_id)
+        async_dispatcher_send(self.hass, DATA_UPDATED, entity_ids)
 
     async def update(self, cpid: str):
         """Update sensors values in HA (charger + connector child devices)."""

@@ -1230,5 +1230,5 @@ class ChargePoint(cp):
         """Handle a Heartbeat."""
         now = datetime.now(tz=UTC)
         self._metrics[0][cstat.heartbeat.value].value = now
-        self._async_refresh_heartbeat_entity()
+        self._async_refresh_metric_entities([cstat.heartbeat.value])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))

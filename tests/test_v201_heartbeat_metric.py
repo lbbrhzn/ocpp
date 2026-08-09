@@ -23,6 +23,7 @@ from custom_components.ocpp.const import (
     DOMAIN,
     CentralSystemSettings,
     ChargerSystemSettings,
+    sensor_unique_id,
 )
 from custom_components.ocpp.enums import HAChargerStatuses as cstat
 from custom_components.ocpp.ocppv16 import ChargePoint as ChargePoint16
@@ -137,21 +138,29 @@ async def test_the_reply_and_the_metric_agree(hass):
     assert result.current_time == recorded.isoformat()
 
 
-def _register_heartbeat_sensor(hass, cpid="test_cpid"):
-    """Register the heartbeat sensor as the platform would, renamed even.
+def _register_metric_sensor(hass, metric, cpid="test_cpid", suffix="renamed"):
+    """Register a metric sensor as the platform would, renamed even.
 
-    The renamed entity_id pins that the dispatch resolves through the
-    registry rather than reconstructing sensor.<cpid>_heartbeat by slug -
-    users rename entities, unique_ids are forever.
+    The unique_id comes from the same canonical helper production uses,
+    so this fixture moves with the format instead of hiding drift - a
+    hand-written literal here would keep passing while the resolution
+    silently fell back to the full update. The renamed entity_id pins
+    that the dispatch resolves through the registry rather than
+    reconstructing sensor.<cpid>_<metric> by slug.
     """
     registry = er.async_get(hass)
     entry = registry.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{DOMAIN}.{cpid}.heartbeat.sensor",
-        suggested_object_id=f"{cpid}_pulse_renamed",
+        sensor_unique_id(cpid, metric),
+        suggested_object_id=f"{cpid}_{metric.lower().replace('.', '_')}_{suffix}",
     )
     return entry.entity_id
+
+
+def _register_heartbeat_sensor(hass, cpid="test_cpid"):
+    """Register the heartbeat sensor under a deliberately renamed id."""
+    return _register_metric_sensor(hass, cstat.heartbeat.value, cpid, "pulse")
 
 
 def _capture_dispatches(hass):
@@ -212,3 +221,104 @@ async def test_the_v16_handler_refreshes_the_same_way(hass):
     update.assert_not_awaited()
     assert seen == [({entity_id},)]
     assert cp16._metrics[0][cstat.heartbeat.value].value is not None
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_is_temporary(hass):
+    """Once the sensor registers, the helper must switch to targeted.
+
+    The fallback exists for the startup window only; a helper that kept
+    falling back would silently reinstate the full-refresh cost forever.
+    """
+    cp = _mk_cp(hass)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        cp.on_heartbeat()
+        await hass.async_block_till_done()
+        update.assert_awaited_once_with("test_cpid")
+
+        entity_id = _register_heartbeat_sensor(hass)
+        cp.on_heartbeat()
+        await hass.async_block_till_done()
+
+        update.assert_awaited_once_with("test_cpid")
+        assert seen == [({entity_id},)]
+
+
+def _drive_monitor_once(monkeypatch, cp, fail_first_iteration=False):
+    """Prepare monitor_connection to run exactly one measuring iteration."""
+    from custom_components.ocpp import chargepoint as cp_mod
+
+    cp.post_connect_success = True
+    cp._connection.state = State.OPEN
+    cp._connection.ping = lambda: asyncio.sleep(0)
+    cp.cs_settings.websocket_ping_interval = 0.0
+    cp.cs_settings.websocket_ping_timeout = 0.01
+    cp.cs_settings.websocket_ping_tries = 1
+
+    async def fast_sleep(_):
+        return None
+
+    monkeypatch.setattr(cp_mod.asyncio, "sleep", fast_sleep, raising=True)
+
+    calls = {"n": 0}
+
+    async def fake_wait_for(awaitable, timeout):
+        calls["n"] += 1
+        if asyncio.iscoroutine(awaitable):
+            awaitable.close()
+        if fail_first_iteration:
+            # One TimeoutError, then close the loop out.
+            cp._connection.state = State.CLOSED
+            raise TimeoutError
+        if calls["n"] == 2:
+            # Pong received; end the loop after this iteration.
+            cp._connection.state = State.CLOSED
+        return None
+
+    monkeypatch.setattr(cp_mod.asyncio, "wait_for", fake_wait_for, raising=True)
+
+
+@pytest.mark.asyncio
+async def test_the_ping_loop_publishes_the_latency_sensors(hass, monkeypatch):
+    """The loop is these sensors' only publisher; it must dispatch them.
+
+    The heartbeat handler's full update() used to republish them as a
+    side effect - on an idle charger, removing it silently froze both
+    latency sensors, which feed long-term statistics. The loop now
+    pushes exactly the two entities it wrote.
+    """
+    cp = _mk_cp(hass)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
+    eid_pong = _register_metric_sensor(hass, cstat.latency_pong.value)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        _drive_monitor_once(monkeypatch, cp)
+        await cp.monitor_connection()
+        await hass.async_block_till_done()
+
+    update.assert_not_awaited()
+    assert seen == [({eid_ping, eid_pong},)]
+
+
+@pytest.mark.asyncio
+async def test_a_ping_timeout_also_publishes_the_latency_sensors(hass, monkeypatch):
+    """The timeout branch records the timeout value; it must publish too.
+
+    A charger falling off the network is exactly when the user looks at
+    the latency sensors, so the degraded reading matters most.
+    """
+    cp = _mk_cp(hass)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
+    eid_pong = _register_metric_sensor(hass, cstat.latency_pong.value)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        _drive_monitor_once(monkeypatch, cp, fail_first_iteration=True)
+        await cp.monitor_connection()
+        await hass.async_block_till_done()
+
+    update.assert_not_awaited()
+    assert seen == [({eid_ping, eid_pong},)]

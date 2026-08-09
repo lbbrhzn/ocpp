@@ -30,6 +30,7 @@ from .const import (
     DOMAIN,
     ICON,
     Measurand,
+    sensor_unique_id,
 )
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
 
@@ -113,12 +114,14 @@ async def async_setup_entry(hass, entry, async_add_devices):
             )
 
         def _uid(cpid: str, key: str, connector_id: int | None) -> str:
-            """Mirror ChargePointMetric unique_id construction."""
-            key = key.lower()
-            parts = [DOMAIN, cpid, key, SENSOR_DOMAIN]
-            if connector_id is not None:
-                parts.insert(2, f"conn{connector_id}")
-            return ".".join(parts)
+            """Mirror ChargePointMetric unique_id construction.
+
+            Delegates to the canonical helper. The previous local copy
+            lowercased without replacing dots, so the stale-entity cleanup
+            below never matched any dotted metric (Status.Connector and
+            friends) - single-sourcing the format is what fixes that.
+            """
+            return sensor_unique_id(cpid, key, connector_id)
 
         if num_connectors > 1:
             for metric in CONNECTOR_ONLY:
@@ -204,10 +207,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         self._hass = hass
         self._extra_attr = {}
         self._last_reset = homeassistant.util.dt.utc_from_timestamp(0)
-        parts = [DOMAIN, self.cpid, self.entity_description.key, SENSOR_DOMAIN]
-        if self.connector_id is not None:
-            parts.insert(2, f"conn{self.connector_id}")
-        self._attr_unique_id = ".".join(parts)
+        self._attr_unique_id = sensor_unique_id(
+            self.cpid, self.entity_description.metric, self.connector_id
+        )
         self._attr_name = self.entity_description.name
         if self.connector_id is not None:
             self._attr_device_info = DeviceInfo(
