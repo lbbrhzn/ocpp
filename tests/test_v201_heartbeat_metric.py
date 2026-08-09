@@ -247,37 +247,32 @@ async def test_the_fallback_is_temporary(hass):
 
 
 def _drive_monitor_once(monkeypatch, cp, fail_first_iteration=False):
-    """Prepare monitor_connection to run exactly one measuring iteration."""
+    """Prepare monitor_connection to run exactly one measuring iteration.
+
+    Everything runs on real asyncio - the only monkeypatch is our own
+    module's backstop delay. The scripted ping resolves immediately for
+    the success path, or never for the timeout path so the real
+    wait_for(timeout=0.01) raises a genuine TimeoutError, and it closes
+    the connection so the loop exits after one iteration.
+    """
     from custom_components.ocpp import chargepoint as cp_mod
 
+    monkeypatch.setattr(cp_mod, "MONITOR_BACKSTOP_DELAY", 0, raising=True)
     cp.post_connect_success = True
     cp._connection.state = State.OPEN
-    cp._connection.ping = lambda: asyncio.sleep(0)
     cp.cs_settings.websocket_ping_interval = 0.0
     cp.cs_settings.websocket_ping_timeout = 0.01
     cp.cs_settings.websocket_ping_tries = 1
 
-    async def fast_sleep(_):
-        return None
-
-    monkeypatch.setattr(cp_mod.asyncio, "sleep", fast_sleep, raising=True)
-
-    calls = {"n": 0}
-
-    async def fake_wait_for(awaitable, timeout):
-        calls["n"] += 1
-        if asyncio.iscoroutine(awaitable):
-            awaitable.close()
+    async def scripted_ping():
+        cp._connection.state = State.CLOSED
         if fail_first_iteration:
-            # One TimeoutError, then close the loop out.
-            cp._connection.state = State.CLOSED
-            raise TimeoutError
-        if calls["n"] == 2:
-            # Pong received; end the loop after this iteration.
-            cp._connection.state = State.CLOSED
-        return None
+            await asyncio.get_running_loop().create_future()  # never resolves
+        fut = asyncio.get_running_loop().create_future()
+        fut.set_result(None)
+        return fut
 
-    monkeypatch.setattr(cp_mod.asyncio, "wait_for", fake_wait_for, raising=True)
+    cp._connection.ping = scripted_ping
 
 
 @pytest.mark.asyncio
@@ -322,3 +317,46 @@ async def test_a_ping_timeout_also_publishes_the_latency_sensors(hass, monkeypat
 
     update.assert_not_awaited()
     assert seen == [({eid_ping, eid_pong},)]
+
+
+@pytest.mark.asyncio
+async def test_unregistered_latency_sensors_skip_rather_than_fall_back(
+    hass, monkeypatch
+):
+    """The periodic caller must not buy the full walk at ping rate.
+
+    During the startup window the heartbeat's fallback runs at most at
+    heartbeat rate; a ping-loop fallback would run the full registry walk
+    every ping interval, more often than the behaviour this optimisation
+    replaced. Skipping is safe - the next tick republishes.
+    """
+    cp = _mk_cp(hass)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        _drive_monitor_once(monkeypatch, cp)
+        await cp.monitor_connection()
+        await hass.async_block_till_done()
+
+    update.assert_not_awaited()
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_a_partially_registered_pair_dispatches_what_resolved(hass, monkeypatch):
+    """Skipping must not discard the sensor that did resolve.
+
+    One registered sensor and one missing is the transient shape while
+    platforms add entities; the resolved one still deserves its refresh.
+    """
+    cp = _mk_cp(hass)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        _drive_monitor_once(monkeypatch, cp)
+        await cp.monitor_connection()
+        await hass.async_block_till_done()
+
+    update.assert_not_awaited()
+    assert seen == [({eid_ping},)]

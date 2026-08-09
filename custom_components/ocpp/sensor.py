@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+
 import homeassistant
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
@@ -33,6 +35,8 @@ from .const import (
     sensor_unique_id,
 )
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
+
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
 @dataclass
@@ -128,7 +132,20 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 uid = _uid(cpid, metric, connector_id=None)
                 stale_eid = ent_reg.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
                 if stale_eid:
-                    # Remove the old entity so it doesn't linger as 'unavailable'
+                    # Remove the old entity so it doesn't linger as
+                    # 'unavailable': with more than one connector these
+                    # metrics exist per-connector only, so the flat variant
+                    # is a genuine orphan. Removal destroys any rename or
+                    # customisation with it, so say what happened - for
+                    # dotted metrics this lookup never matched before the
+                    # unique_id format was single-sourced, meaning upgrades
+                    # can hit this for the first time long after setup.
+                    _LOGGER.info(
+                        "Removing stale charger-level entity %s; "
+                        "%s is per-connector on this charger",
+                        stale_eid,
+                        metric,
+                    )
                     ent_reg.async_remove(stale_eid)
 
         # Root/charger-entities
