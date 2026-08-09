@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from websockets.asyncio.server import ServerConnection
@@ -608,6 +609,30 @@ class ChargePoint(cp):
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
+
+    def _async_refresh_heartbeat_entity(self) -> None:
+        """Refresh only the heartbeat sensor.
+
+        A heartbeat changes exactly one metric, at whatever rate the
+        charger chooses; the full update() walks the device registry and
+        force-refreshes every entity of this charger, which is a lot of
+        work for one timestamp on an otherwise idle system. Resolve the
+        heartbeat sensor through the entity registry - rename-proof, the
+        dispatcher filter matches on current entity_id - and dispatch it
+        alone. Falls back to the full update when the entity is not
+        registered yet, as the first heartbeat can arrive before the
+        platforms finish adding entities.
+        """
+        er = entity_registry.async_get(self.hass)
+        # Mirrors the sensor's unique_id construction: the description key
+        # is the metric name lowercased with dots replaced.
+        key = cstat.heartbeat.value.lower().replace(".", "_")
+        uid = ".".join([DOMAIN, self.settings.cpid, key, SENSOR_DOMAIN])
+        entity_id = er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
+        if entity_id is None:
+            self.hass.async_create_task(self.update(self.settings.cpid))
+            return
+        async_dispatcher_send(self.hass, DATA_UPDATED, {entity_id})
 
     async def update(self, cpid: str):
         """Update sensors values in HA (charger + connector child devices)."""
