@@ -192,10 +192,22 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             object_id = f"{self.cpid}_{self.entity_description.key}"
         self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
         self._attr_native_value = self.entity_description.initial_value
-        # The last limit the charger accepted, and so the only value a
-        # failed request may fall back to. None until something is
-        # confirmed, so a rollback cannot invent a limit.
+        # The last limit this integration believes the charger is holding:
+        # confirmed by an accepted request this session, or restored from
+        # the previous one (the charger keeps its profile across our
+        # restarts). None on a fresh install, so a rollback cannot invent
+        # a limit. Requests the charger performs without this entity - the
+        # ocpp.clear_profile / ocpp.set_charge_rate services - are not
+        # reflected here, the same blind spot the pre-#2049 code had.
         self._confirmed_value: float | None = None
+        # Monotonic ticket per request, and the ticket of the newest
+        # accepted one. The transport serialises calls today (the ocpp
+        # library holds its call lock across send and response), so
+        # completions cannot cross - but that is a property of a library
+        # two layers down, not of this entity. The guard keeps the
+        # display-owns-latest-accepted invariant provable right here.
+        self._request_seq: int = 0
+        self._accepted_seq: int = 0
         self._attr_should_poll = False
 
     async def async_added_to_hass(self) -> None:
@@ -203,8 +215,11 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         await super().async_added_to_hass()
         if restored := await self.async_get_last_number_data():
             self._attr_native_value = restored.native_value
-            # Confirmed in a previous session; better than nothing to
-            # fall back to, and it is what the charger was last told.
+            # What the previous session last settled on. The charger keeps
+            # its charging profile across our restarts, so this is the best
+            # available proxy for what it is holding - stale only if the
+            # charger was reset or cleared in between, and corrected by the
+            # next accepted request either way.
             self._confirmed_value = restored.native_value
 
         @callback
@@ -243,6 +258,8 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
           the circuit is doing. Keeping the value only logged the problem.
         """
         target = float(value)
+        self._request_seq += 1
+        seq = self._request_seq
         self._attr_native_value = target
         self.async_write_ha_state()
 
@@ -274,9 +291,20 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
                 },
             )
 
+        if seq <= self._accepted_seq:
+            # A newer request was already accepted while this one was in
+            # flight; its limit superseded this one on the charger, so it
+            # owns the display and the confirmed value.
+            _LOGGER.debug(
+                "Accepted limit %.1f A superseded in flight; display stays at %s",
+                target,
+                self._attr_native_value,
+            )
+            return
+        self._accepted_seq = seq
         self._confirmed_value = target
         if self._attr_native_value != target:
-            # A request that started earlier failed while this one was in
+            # A request that started later failed while this one was in
             # flight and rolled the slider back. This limit is the one the
             # charger is holding, so it owns what is displayed.
             self._attr_native_value = target
@@ -291,7 +319,15 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         disagreeing with the charger, which is the thing this is meant to
         prevent rather than cause.
         """
+        # Whole-amp values, so equality is exact (native_step=1). A
+        # fractional step would need a tolerance here and in the
+        # superseded check above.
         if self._attr_native_value == self._confirmed_value:
             return
+        _LOGGER.debug(
+            "Reverting current limit display from %s to last accepted %s",
+            self._attr_native_value,
+            self._confirmed_value,
+        )
         self._attr_native_value = self._confirmed_value
         self.async_write_ha_state()

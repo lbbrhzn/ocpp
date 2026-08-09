@@ -206,9 +206,11 @@ async def test_a_late_rollback_does_not_clobber_an_accepted_limit(hass):
     accepted limit instead, so a superseded request has nothing to undo.
     """
     gate = asyncio.Event()
+    entered = asyncio.Event()
 
     async def charger(cpid, value, connector_id=0):
         if value == 16.0:
+            entered.set()
             await gate.wait()
             return False
         return True
@@ -217,7 +219,7 @@ async def test_a_late_rollback_does_not_clobber_an_accepted_limit(hass):
     entity.central_system.set_max_charge_rate_amps = charger
 
     slow = asyncio.create_task(entity.async_set_native_value(16))
-    await asyncio.sleep(0)
+    await entered.wait()
     await entity.async_set_native_value(24)
 
     assert entity._attr_native_value == 24.0
@@ -228,6 +230,9 @@ async def test_a_late_rollback_does_not_clobber_an_accepted_limit(hass):
 
     assert entity._attr_native_value == 24.0
     assert entity._confirmed_value == 24.0
+    # The write sequence is the user-visible story: two optimistic moves,
+    # and no third write, because the loser had nothing to undo.
+    assert entity.written == [16.0, 24.0]
 
 
 @pytest.mark.asyncio
@@ -238,9 +243,11 @@ async def test_a_late_success_reclaims_the_display(hass):
     old value while the charger goes on to accept a newer one.
     """
     gate = asyncio.Event()
+    entered = asyncio.Event()
 
     async def charger(cpid, value, connector_id=0):
         if value == 24.0:
+            entered.set()
             await gate.wait()
             return True
         return False
@@ -249,7 +256,7 @@ async def test_a_late_success_reclaims_the_display(hass):
     entity.central_system.set_max_charge_rate_amps = charger
 
     slow = asyncio.create_task(entity.async_set_native_value(24))
-    await asyncio.sleep(0)
+    await entered.wait()
     with pytest.raises(HomeAssistantError):
         await entity.async_set_native_value(16)
 
@@ -260,3 +267,42 @@ async def test_a_late_success_reclaims_the_display(hass):
 
     assert entity._attr_native_value == 24.0
     assert entity._confirmed_value == 24.0
+    # Optimistic 24, optimistic 16, revert to 32, then the late winner.
+    assert entity.written == [24.0, 16.0, 32.0, 24.0]
+
+
+@pytest.mark.asyncio
+async def test_two_accepted_requests_settle_on_the_newest(hass):
+    """Both accepted, completions crossed: the newest request must win.
+
+    The transport serialises calls today, so accepted completions cannot
+    actually cross - but that guarantee lives in the ocpp library's call
+    lock, not here. This pins the entity's own invariant: even if the
+    older request's success lands last, it must not drag the display or
+    the confirmed value backwards to a limit the charger is no longer
+    holding.
+    """
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def charger(cpid, value, connector_id=0):
+        if value == 16.0:
+            entered.set()
+            await gate.wait()
+        return True
+
+    entity = _mk_number(hass, result=True)
+    entity.central_system.set_max_charge_rate_amps = charger
+
+    old = asyncio.create_task(entity.async_set_native_value(16))
+    await entered.wait()
+    await entity.async_set_native_value(24)
+
+    gate.set()
+    await old
+
+    assert entity._attr_native_value == 24.0
+    assert entity._confirmed_value == 24.0
+    # Two optimistic moves and nothing else: the stale success is
+    # suppressed entirely rather than writing 16 back.
+    assert entity.written == [16.0, 24.0]
