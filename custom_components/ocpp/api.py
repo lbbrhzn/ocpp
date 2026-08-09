@@ -110,6 +110,11 @@ class CentralSystem:
         self.charge_points = {}  # uses cp_id as reference to charger instance
         self.cpids = {}  # dict of {cpid:cp_id}
         self.connections = 0
+        # Whether async_setup_entry forwarded the entity platforms. Unload
+        # has to mirror that exact decision - deriving it from anything
+        # live (connection count, current entry data) diverges from what
+        # setup actually did whenever state changed in between.
+        self.platforms_forwarded = False
 
         # Register custom services with home assistant
         self.hass.services.async_register(

@@ -130,7 +130,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     if entry.data[CONF_CPIDS]:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        central_sys.platforms_forwarded = True
 
+    # Registered after the forward deliberately: a discovery-driven
+    # entry update must not be able to trigger a reload in the window
+    # between the platforms being forwarded and the flag being set.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
@@ -245,13 +249,29 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # print(hass.services.async_services_for_domain(DOMAIN))
             for service in hass.services.async_services_for_domain(DOMAIN):
                 hass.services.async_remove(DOMAIN, service)
-            # Unload platforms if a charger connected
-            if central_sys.connections == 0:
-                unloaded = True
-            else:
+            # Unload the platforms if - and only if - setup forwarded them.
+            # Deciding from the live connection count skipped the unload
+            # whenever every configured charger happened to be offline, and
+            # the next setup's forward then collided ("has already been
+            # setup!"), killing every entity platform until Core restarted.
+            # A reload with the charger offline is exactly the reconfigure-
+            # to-fix-the-connection case, so the two met constantly.
+            if central_sys.platforms_forwarded:
                 unloaded = await hass.config_entries.async_unload_platforms(
                     entry, PLATFORMS
                 )
+                _LOGGER.debug(
+                    "Unloaded entity platforms for %s: %s", entry.title, unloaded
+                )
+            else:
+                # Setup never forwarded them (no charger was configured),
+                # so there is nothing to tear down - and asking Home
+                # Assistant to unload never-forwarded platforms fails.
+                _LOGGER.debug(
+                    "No entity platforms were forwarded for %s; skipping unload",
+                    entry.title,
+                )
+                unloaded = True
             # Remove entry
             if unloaded:
                 hass.data[DOMAIN].pop(entry.entry_id)
