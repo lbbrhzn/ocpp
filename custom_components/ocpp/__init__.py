@@ -132,6 +132,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         central_sys.platforms_forwarded = True
 
+    # Registered after the forward deliberately: a discovery-driven
+    # entry update must not be able to trigger a reload in the window
+    # between the platforms being forwarded and the flag being set.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
@@ -257,7 +260,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 unloaded = await hass.config_entries.async_unload_platforms(
                     entry, PLATFORMS
                 )
+                _LOGGER.debug(
+                    "Unloaded entity platforms for %s: %s", entry.title, unloaded
+                )
             else:
+                # Setup never forwarded them (no charger was configured),
+                # so there is nothing to tear down - and asking Home
+                # Assistant to unload never-forwarded platforms fails.
+                _LOGGER.debug(
+                    "No entity platforms were forwarded for %s; skipping unload",
+                    entry.title,
+                )
                 unloaded = True
             # Remove entry
             if unloaded:
