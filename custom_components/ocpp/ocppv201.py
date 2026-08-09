@@ -958,7 +958,14 @@ class ChargePoint(cp):
     @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Perform OCPP callback."""
-        return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
+        # Mirrors the OCPP 1.6 handler: record the heartbeat and push the
+        # entities, so sensor.<cpid>_heartbeat tracks the charger. Without
+        # the write the sensor keeps whatever an earlier session left -
+        # heartbeats were answered here but recorded nowhere.
+        now = datetime.now(tz=UTC)
+        self._metrics[(0, cstat.heartbeat.value)].value = now
+        self.hass.async_create_task(self.update(self.settings.cpid))
+        return call_result.Heartbeat(current_time=now.isoformat())
 
     def _report_evse_status(
         self,
