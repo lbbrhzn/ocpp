@@ -958,7 +958,17 @@ class ChargePoint(cp):
     @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Perform OCPP callback."""
-        return call_result.Heartbeat(current_time=datetime.now(tz=UTC).isoformat())
+        # Mirrors the OCPP 1.6 handler: record the heartbeat and push the
+        # entities, so sensor.<cpid>_heartbeat tracks the charger. Without
+        # the write the sensor keeps whatever an earlier session left -
+        # heartbeats were answered here but recorded nowhere.
+        now = datetime.now(tz=UTC)
+        self._metrics[(0, cstat.heartbeat.value)].value = now
+        self.hass.async_create_task(self.update(self.settings.cpid))
+        # Deliberately not mirrored: 1.6 replies with whole seconds
+        # (strftime %H:%M:%SZ); 2.0.1 keeps its pre-existing isoformat
+        # reply, microseconds and all - both are valid RFC 3339.
+        return call_result.Heartbeat(current_time=now.isoformat())
 
     def _report_evse_status(
         self,
