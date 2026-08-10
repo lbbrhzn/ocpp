@@ -4,6 +4,8 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.util import slugify
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import device_registry
 import homeassistant.helpers.config_validation as cv
@@ -185,13 +187,28 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             csid_data.update({key: old_data.get(key, value)})
 
         new_data = csid_data
-        cp_id = hass.states.get(f"sensor.{cpid_data[CONF_CPID].lower()}_id")
-        if cp_id is None:
+        # slugify, not lower(): the sensor platform slugifies its object
+        # ids, so any cpid that is not already a slug ("Garage Charger",
+        # "charger-1") would never resolve here.
+        cp_id_state = hass.states.get(f"sensor.{slugify(cpid_data[CONF_CPID])}_id")
+        if cp_id_state is None or cp_id_state.state in (
+            STATE_UNKNOWN,
+            STATE_UNAVAILABLE,
+        ):
+            # A sentinel state is a plain string, so without this guard it
+            # would be stored as the charge point key - serialisable, but
+            # matching no charger, the same broken entry by another route.
             _LOGGER.warning(
                 "Could not find charger id during migration, try a clean install"
             )
             return False
-        new_data.update({CONF_CPIDS: [{cp_id: cpid_data}]})
+        # The charge point id is the sensor's VALUE. Storing the State
+        # object itself - as this did until now - produces entry data that
+        # cannot be JSON-serialised and a key no connecting charger can
+        # ever match, so every v1 migration was broken. The test suite
+        # could not see it: a global StateMachine.get patch fed it a
+        # synthetic State, and the assertion checked top-level keys only.
+        new_data.update({CONF_CPIDS: [{cp_id_state.state: cpid_data}]})
 
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, minor_version=0, version=2

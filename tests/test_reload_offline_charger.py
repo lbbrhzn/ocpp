@@ -42,13 +42,13 @@ PLATFORM_DOMAINS = ("sensor", "switch", "number", "button")
 
 @pytest.fixture(name="bypass_websockets")
 def bypass_websockets_fixture():
-    """Stub only the websocket server, unlike conftest's bypass_get_data.
+    """Stub only the websocket server.
 
-    That fixture also patches StateMachine.get to always return a State,
-    which poisons core's duplicate-entity check on reload: every re-added
-    entity looks like a live duplicate and is silently discarded, so a
-    genuinely clean reload appears broken. These tests are about reload
-    correctness, so they must run against the real state machine.
+    conftest's bypass_get_data historically also patched StateMachine.get
+    to return a synthetic State for every lookup, which poisoned core's
+    duplicate-entity check on reload; that patch is gone, but these tests
+    keep their own minimal stub so reload correctness never depends on
+    what the shared fixture carries.
     """
     future = asyncio.Future()
     future.set_result(websockets.asyncio.server.Server)
@@ -186,11 +186,11 @@ async def test_reload_of_a_chargerless_entry_stays_clean(
     await _load_platform_components(hass)
     entry = MockConfigEntry(
         domain=DOMAIN,
-        # CONF_CPIDS pinned to empty explicitly: conftest's
-        # setup_config_entry fixture shallow-copies MOCK_CONFIG_DATA and
-        # appends to the shared CONF_CPIDS list, so by this point in a full
-        # run the module-level constant is no longer chargerless.
-        data={**MOCK_CONFIG_DATA, CONF_CPIDS: []},
+        # MOCK_CONFIG_DATA used directly, deliberately: these chargerless
+        # tests are the natural regression tests for conftest's deepcopy -
+        # if setup_config_entry ever goes back to mutating the shared
+        # constant, this stops being chargerless mid-suite and fails here.
+        data=MOCK_CONFIG_DATA,
         entry_id="test_fresh_reload",
         title="test_fresh_reload",
         version=2,
@@ -225,7 +225,7 @@ async def test_first_charger_discovery_reload_transitions_cleanly(
     await _load_platform_components(hass)
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={**MOCK_CONFIG_DATA, CONF_CPIDS: []},
+        data=MOCK_CONFIG_DATA,
         entry_id="test_growth_reload",
         title="test_growth_reload",
         version=2,

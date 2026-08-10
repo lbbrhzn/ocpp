@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, timedelta, UTC
 
 from homeassistant.const import UnitOfTime
@@ -1468,8 +1469,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     # test cannot
     # config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
     cp_id = "CP_2"
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9080
@@ -1513,8 +1514,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     await remove_configuration(hass, config_entry)
 
     cp_id = "CP_2_noreport"
-    config_data = MOCK_CONFIG_DATA_3.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA_3)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9011
