@@ -218,16 +218,18 @@ async def test_update_returns_early_when_root_device_missing(
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
 
-            # Fake registries: no device returned.
+            # Fake registries: no device returned. The fakes implement only
+            # what update() itself touches - patching the shared helper
+            # modules swaps the registries for ALL of Home Assistant, so the
+            # patches must not outlive this block. Left installed (as they
+            # were until HA 2026.8), core's config-entry teardown hits the
+            # fakes and fails on registry surface they don't implement.
             import custom_components.ocpp.chargepoint as mod
 
             class FakeDR:
-                """Fake DR."""
+                """Fake DR: only what update()'s early-return path touches."""
 
                 def async_get_device(self, identifiers):
-                    return None
-
-                def async_clear_config_entry(self, config_entry_id):
                     return None
 
                 @property
@@ -235,42 +237,51 @@ async def test_update_returns_early_when_root_device_missing(
                     """Fake devices."""
                     return {}
 
-                def async_update_device(self, *args, **kwargs):
-                    return None
-
-                def async_get_or_create(self, *args, **kwargs):
-                    return SimpleNamespace(id="dummy")
-
             class FakeER:
-                """Fake ER."""
-
-                def async_clear_config_entry(self, config_entry_id):
-                    return None
+                """Fake ER: only ever passed to the patched entries_for_device."""
 
             def fake_entries_for_device(_er, _dev_id):
                 # No entities to update; the loop is exercised anyway.
                 return []
 
-            # Patch HA helpers & dispatcher.
-            monkeypatch.setattr(
-                mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+            # Patch HA helpers & dispatcher for the update() call only.
+            # Still a module-global patch while it lasts: any concurrent HA
+            # task that resolves a registry inside this await sees the fakes.
+            originals = (
+                mod.device_registry.async_get,
+                mod.entity_registry.async_get,
+                mod.entity_registry.async_entries_for_device,
+                mod.async_dispatcher_send,
             )
-            monkeypatch.setattr(
-                mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
-            )
+            with monkeypatch.context() as mp:
+                mp.setattr(
+                    mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+                )
+                mp.setattr(
+                    mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
+                )
+                mp.setattr(
+                    mod.entity_registry,
+                    "async_entries_for_device",
+                    fake_entries_for_device,
+                    raising=True,
+                )
+                mp.setattr(
+                    mod, "async_dispatcher_send", lambda *args, **kw: None, raising=True
+                )
 
-            monkeypatch.setattr(
-                mod.entity_registry,
-                "async_entries_for_device",
-                fake_entries_for_device,
-                raising=True,
-            )
-            monkeypatch.setattr(
-                mod, "async_dispatcher_send", lambda *args, **kw: None, raising=True
-            )
+                # Should exit early without error (L602).
+                await srv.update(srv.settings.cpid)
 
-            # Should exit early without error (L602).
-            await srv.update(srv.settings.cpid)
+            # The leak guard: on the pinned harness the fakes are harmless at
+            # teardown, so nothing else fails if this scoping regresses. The
+            # helpers being restored right here is the actual contract.
+            assert originals == (
+                mod.device_registry.async_get,
+                mod.entity_registry.async_get,
+                mod.entity_registry.async_entries_for_device,
+                mod.async_dispatcher_send,
+            )
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -316,16 +327,7 @@ async def test_update_traverses_children_and_skips_visited(
             child = Dev("child", via="root")
 
             class FakeDR:
-                """Fake DR."""
-
-                def async_clear_config_entry(self, config_entry_id):
-                    return None
-
-                def async_update_device(self, *args, **kwargs):
-                    return None
-
-                def async_get_or_create(self, *args, **kwargs):
-                    return SimpleNamespace(id="dummy")
+                """Fake DR: only what update()'s traversal touches (see above)."""
 
                 def async_get_device(self, identifiers):
                     return root
@@ -340,35 +342,52 @@ async def test_update_traverses_children_and_skips_visited(
                     return Container()
 
             class FakeER:
-                """Fake ER."""
-
-                def async_clear_config_entry(self, config_entry_id):
-                    return None
+                """Fake ER: only ever passed to the patched entries_for_device."""
 
             def fake_entries_for_device(_er, _dev_id):
                 # No entities to update; the loop is exercised anyway.
                 return []
 
-            # Patch HA helpers & dispatcher.
-            monkeypatch.setattr(
-                mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+            # Patch HA helpers & dispatcher for the update() call only -
+            # the module-level patch must not leak into entry teardown.
+            # Still a module-global patch while it lasts: any concurrent HA
+            # task that resolves a registry inside this await sees the fakes.
+            originals = (
+                mod.device_registry.async_get,
+                mod.entity_registry.async_get,
+                mod.entity_registry.async_entries_for_device,
+                mod.async_dispatcher_send,
             )
-            monkeypatch.setattr(
-                mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
-            )
-            monkeypatch.setattr(
-                mod.entity_registry,
-                "async_entries_for_device",
-                fake_entries_for_device,
-                raising=True,
-            )
-            monkeypatch.setattr(
-                mod, "async_dispatcher_send", lambda *args, **kw: None, raising=True
-            )
+            with monkeypatch.context() as mp:
+                mp.setattr(
+                    mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+                )
+                mp.setattr(
+                    mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
+                )
+                mp.setattr(
+                    mod.entity_registry,
+                    "async_entries_for_device",
+                    fake_entries_for_device,
+                    raising=True,
+                )
+                mp.setattr(
+                    mod, "async_dispatcher_send", lambda *args, **kw: None, raising=True
+                )
 
-            # No exceptions expected; internal traversal will append 'child' twice,
-            # so on second pop it will be in 'visited' and trigger L612 'continue'.
-            await srv.update(srv.settings.cpid)
+                # No exceptions expected; internal traversal will append 'child' twice,
+                # so on second pop it will be in 'visited' and trigger L612 'continue'.
+                await srv.update(srv.settings.cpid)
+
+            # The leak guard: on the pinned harness the fakes are harmless at
+            # teardown, so nothing else fails if this scoping regresses. The
+            # helpers being restored right here is the actual contract.
+            assert originals == (
+                mod.device_registry.async_get,
+                mod.entity_registry.async_get,
+                mod.entity_registry.async_entries_for_device,
+                mod.async_dispatcher_send,
+            )
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
