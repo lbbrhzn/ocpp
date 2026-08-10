@@ -964,7 +964,7 @@ class ChargePoint(cp):
         # heartbeats were answered here but recorded nowhere.
         now = datetime.now(tz=UTC)
         self._metrics[(0, cstat.heartbeat.value)].value = now
-        self.hass.async_create_task(self.update(self.settings.cpid))
+        self._async_refresh_metric_entities([cstat.heartbeat.value])
         # Deliberately not mirrored: 1.6 replies with whole seconds
         # (strftime %H:%M:%SZ); 2.0.1 keeps its pre-existing isoformat
         # reply, microseconds and all - both are valid RFC 3339.
