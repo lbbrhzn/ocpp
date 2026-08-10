@@ -111,10 +111,15 @@ async def test_migration_entry(
     config_entry.add_to_hass(hass)
     await hass.async_block_till_done()
 
-    # Ensure cp id is present in state machine to trigger migration flow. This simulates the condition where a user has a sensor entity in HA with the cp_id as the state value, which is used to identify the entry to migrate. If this value is not present, the migration flow will not be triggered and the test will fail.
+    # Ensure cp id is present in state machine to trigger migration flow.
+    # This simulates a user with the id sensor still in HA, holding the
+    # charger's OCPP cp_id as its VALUE. The value is deliberately
+    # different from the cpid: they are different things in production
+    # (OCPP identity vs friendly name), and seeding them equal would let
+    # a migration that stored the cpid pass the key assertion below.
     hass.states.async_set(
         f"sensor.{MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID].lower()}_id",
-        MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID],
+        "CP_migration_1",
     )
 
     # Set up the entry and assert that the values set during setup are where we expect
@@ -135,7 +140,7 @@ async def test_migration_entry(
     # synthetic one and only the top-level keys were checked.
     migrated_key = next(iter(config_entry.data[CONF_CPIDS][0]))
     assert isinstance(migrated_key, str)
-    assert migrated_key == MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID]
+    assert migrated_key == "CP_migration_1"
     # check versions match
     assert config_entry.version == 2
     assert config_entry.minor_version == 1
@@ -158,3 +163,65 @@ async def test_migration_entry(
 #     # an error.
 #     with pytest.raises(ConfigEntryNotReady):
 #         assert await async_setup_entry(hass, config_entry)
+
+
+async def test_migration_refuses_a_sentinel_charger_id(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+):
+    """An 'unavailable' id sensor must fail migration, not become the key.
+
+    Sentinel states are plain strings, so without the guard they pass an
+    isinstance check and get stored as the charge point key - JSON-clean,
+    but matching no charger ever: the same broken entry the State-object
+    bug produced, by a quieter route.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=MOCK_CONFIG_MIGRATION_FLOW,
+        entry_id="test_migration_sentinel",
+        title="test_migration_sentinel",
+        version=1,
+        minor_version=1,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    hass.states.async_set(
+        f"sensor.{MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID].lower()}_id",
+        "unavailable",
+    )
+
+    assert not await hass.config_entries.async_setup(config_entry.entry_id)
+    assert config_entry.version == 1
+
+
+async def test_migration_finds_a_non_slug_cpid(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+):
+    """A cpid like 'Garage Charger' must still resolve its id sensor.
+
+    The sensor platform slugifies object ids, so the entity really lives
+    at sensor.garage_charger_id - a migration lookup built with .lower()
+    would ask for 'sensor.garage charger_id' and always miss, sending the
+    user to a clean install for no reason.
+    """
+    data = {**MOCK_CONFIG_MIGRATION_FLOW, CONF_CPID: "Garage Charger"}
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        entry_id="test_migration_slug",
+        title="test_migration_slug",
+        version=1,
+        minor_version=1,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    hass.states.async_set("sensor.garage_charger_id", "CP_migration_2")
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    migrated_key = next(iter(config_entry.data[CONF_CPIDS][0]))
+    assert migrated_key == "CP_migration_2"
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)

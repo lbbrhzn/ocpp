@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, UTC
 
 import pytest
@@ -287,8 +288,8 @@ async def test_v201_multi_connectors_per_evse(hass, socket_enabled):
     """Test multi connector per EVSE functionality."""
     cp_id = "CP_v201_multi"
 
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_entry = MockConfigEntry(
