@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp import CentralSystem
-from custom_components.ocpp.const import DOMAIN, CONF_CPID
+from custom_components.ocpp.const import DOMAIN, CONF_CPID, CONF_CPIDS
 
 from .const import (
     MOCK_CONFIG_DATA,
@@ -127,6 +127,15 @@ async def test_migration_entry(
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
     # check migration has created new entry with correct keys
     assert config_entry.data.keys() == MOCK_CONFIG_DATA.keys()
+    # The charge point key must be the seeded sensor's VALUE, as a plain
+    # string. The migration stored the whole State object until 2026-08 -
+    # unserialisable entry data and a key no connecting charger could
+    # match - and this test could not see it, because a global
+    # StateMachine.get patch replaced the state seeded above with a
+    # synthetic one and only the top-level keys were checked.
+    migrated_key = next(iter(config_entry.data[CONF_CPIDS][0]))
+    assert isinstance(migrated_key, str)
+    assert migrated_key == MOCK_CONFIG_MIGRATION_FLOW[CONF_CPID]
     # check versions match
     assert config_entry.version == 2
     assert config_entry.minor_version == 1
