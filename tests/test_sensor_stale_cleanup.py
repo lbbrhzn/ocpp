@@ -97,9 +97,20 @@ async def test_single_connector_setup_removes_nothing(hass, bypass_websockets, c
 
     The cleanup must never fire there - removing the flat entity on a
     single-connector charger would delete the entity actually in use.
+    Seeding the flat entity first makes this assert something real: an
+    over-eager cleanup would remove it, where an empty registry would
+    let even a broken guard pass.
     """
     from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_CP_APPEND
     from custom_components.ocpp.const import CONF_CPIDS
+
+    registry = er.async_get(hass)
+    live = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        sensor_unique_id("test_cpid", cstat.status_connector.value),
+        suggested_object_id="test_cpid_status_connector",
+    )
 
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -117,6 +128,7 @@ async def test_single_connector_setup_removes_nothing(hass, bypass_websockets, c
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
+    assert registry.async_get(live.entity_id) is not None
     assert not [
         r
         for r in caplog.records

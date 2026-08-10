@@ -360,3 +360,28 @@ async def test_a_partially_registered_pair_dispatches_what_resolved(hass, monkey
 
     update.assert_not_awaited()
     assert seen == [({eid_ping},)]
+
+
+@pytest.mark.asyncio
+async def test_a_sensor_deleted_after_startup_does_not_revive_the_full_walk(hass):
+    """The fallback is for the startup window, not for deleted entities.
+
+    Once the sensor has resolved, a later registry miss means the user
+    removed the entity - there is nothing to refresh, and falling back
+    would silently reinstate the full update at heartbeat rate, forever.
+    """
+    cp = _mk_cp(hass)
+    entity_id = _register_heartbeat_sensor(hass)
+    seen = _capture_dispatches(hass)
+
+    with patch.object(ChargePoint, "update", AsyncMock()) as update:
+        cp.on_heartbeat()
+        await hass.async_block_till_done()
+        assert seen == [({entity_id},)]
+
+        er.async_get(hass).async_remove(entity_id)
+        cp.on_heartbeat()
+        await hass.async_block_till_done()
+
+    update.assert_not_awaited()
+    assert seen == [({entity_id},)]

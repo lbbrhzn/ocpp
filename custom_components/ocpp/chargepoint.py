@@ -275,6 +275,9 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        # Set once every sensor requested by a targeted refresh has
+        # resolved; bounds the full-update fallback to the startup window.
+        self._targeted_refresh_ready = False
         self.tasks = None
         self._charger_reports_session_energy = False
 
@@ -647,6 +650,12 @@ class ChargePoint(cp):
         resolve - the next tick republishes anyway, and falling back at
         ping rate would run the full registry walk more often than the
         behaviour this replaces.
+
+        The fallback is bounded to that startup window: once every
+        requested sensor has resolved, a later miss means the entity was
+        removed from the registry, and there is nothing to refresh for a
+        deleted entity - falling back there would silently reinstate the
+        full walk at the writer's rate, forever.
         """
         er = entity_registry.async_get(self.hass)
         entity_ids: set[str] = set()
@@ -658,9 +667,12 @@ class ChargePoint(cp):
                 missing = True
             else:
                 entity_ids.add(entity_id)
-        if missing and fallback_to_full_update:
-            self.hass.async_create_task(self.update(self.settings.cpid))
-            return
+        if missing:
+            if fallback_to_full_update and not self._targeted_refresh_ready:
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return
+        else:
+            self._targeted_refresh_ready = True
         if entity_ids:
             async_dispatcher_send(self.hass, DATA_UPDATED, entity_ids)
 
