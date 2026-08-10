@@ -344,8 +344,11 @@ async def test_update_traverses_children_and_skips_visited(
             class FakeER:
                 """Fake ER: only ever passed to the patched entries_for_device."""
 
+            entity_lookup_device_ids = []
+
             def fake_entries_for_device(_er, _dev_id):
-                # No entities to update; the loop is exercised anyway.
+                entity_lookup_device_ids.append(_dev_id)
+                # No entities to update; the lookup order is the observable.
                 return []
 
             # Patch HA helpers & dispatcher for the update() call only -
@@ -375,9 +378,11 @@ async def test_update_traverses_children_and_skips_visited(
                     mod, "async_dispatcher_send", lambda *args, **kw: None, raising=True
                 )
 
-                # No exceptions expected; internal traversal will append 'child' twice,
-                # so on second pop it will be in 'visited' and trigger L612 'continue'.
+                # The traversal appends 'child' twice (neither copy is in
+                # 'visited' at append time); the second pop must hit the
+                # 'continue', so 'child' gets exactly one registry lookup.
                 await srv.update(srv.settings.cpid)
+                assert entity_lookup_device_ids == ["root", "child"]
 
             # The leak guard: on the pinned harness the fakes are harmless at
             # teardown, so nothing else fails if this scoping regresses. The
