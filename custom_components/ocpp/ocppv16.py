@@ -419,7 +419,9 @@ class ChargePoint(cp):
                 req = call.SetChargingProfile(
                     connector_id=int(conn_id), cs_charging_profiles=profile
                 )
-                resp = await self.call(req)
+                resp = await self._call_with_timeout_handling(
+                    req, call_type="SetChargingProfile", connector_id=int(conn_id)
+                )
                 if resp.status == ChargingProfileStatus.accepted:
                     return True
                 _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
@@ -494,7 +496,9 @@ class ChargePoint(cp):
                     om.charging_schedule.value: _mk_schedule(units_value, limit_value),
                 },
             )
-            resp = await self.call(req)
+            resp = await self._call_with_timeout_handling(
+                req, call_type="SetChargingProfile", connector_id=0
+            )
             if resp.status == ChargingProfileStatus.accepted:
                 return True
             _LOGGER.debug(
@@ -536,7 +540,9 @@ class ChargePoint(cp):
                         om.transaction_id.value: active_tx_id,
                     },
                 )
-                resp = await self.call(req)
+                resp = await self._call_with_timeout_handling(
+                    req, call_type="SetChargingProfile", connector_id=target_cid
+                )
                 if resp.status == ChargingProfileStatus.accepted:
                     txp_ok = True
                 else:
@@ -561,7 +567,9 @@ class ChargePoint(cp):
                     om.charging_schedule.value: _mk_schedule(units_value, limit_value),
                 },
             )
-            resp = await self.call(req)
+            resp = await self._call_with_timeout_handling(
+                req, call_type="SetChargingProfile", connector_id=target_cid
+            )
             if resp.status == ChargingProfileStatus.accepted:
                 txd_ok = True
             else:
@@ -590,7 +598,9 @@ class ChargePoint(cp):
         req = call.ChangeAvailability(connector_id=conn, type=typ)
 
         try:
-            resp = await self.call(req)
+            resp = await self._call_with_timeout_handling(
+                req, call_type="ChangeAvailability", connector_id=conn
+            )
         except TimeoutError as ex:
             _LOGGER.debug("ChangeAvailability timed out (conn=%s): %s", conn, ex)
             return False
@@ -654,7 +664,9 @@ class ChargePoint(cp):
         req = call.RemoteStartTransaction(
             connector_id=connector_id, id_tag=self._remote_id_tag
         )
-        resp = await self.call(req)
+        resp = await self._call_with_timeout_handling(
+            req, call_type="RemoteStartTransaction", connector_id=connector_id
+        )
         if resp.status == RemoteStartStopStatus.accepted:
             return True
         else:
@@ -697,7 +709,9 @@ class ChargePoint(cp):
             return True
 
         req = call.RemoteStopTransaction(transaction_id=tx_id)
-        resp = await self.call(req)
+        resp = await self._call_with_timeout_handling(
+            req, call_type="RemoteStopTransaction", connector_id=connector_id or 0
+        )
         if resp.status == RemoteStartStopStatus.accepted:
             return True
 
