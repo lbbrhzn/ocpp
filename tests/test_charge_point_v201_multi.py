@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, UTC
 
 import pytest
@@ -287,8 +288,8 @@ async def test_v201_multi_connectors_per_evse(hass, socket_enabled):
     """Test multi connector per EVSE functionality."""
     cp_id = "CP_v201_multi"
 
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_entry = MockConfigEntry(
@@ -336,7 +337,8 @@ async def test_v201_multi_connectors_per_evse(hass, socket_enabled):
         await asyncio.sleep(0.05)
 
         assert cs.get_metric(cpid, "Status.Connector", connector_id=1) == "Available"
-        assert cs.get_metric(cpid, "Status.Connector", connector_id=2) == "Occupied"
+        # Occupied has no 1.6 equivalent of its own and maps to Preparing.
+        assert cs.get_metric(cpid, "Status.Connector", connector_id=2) == "Preparing"
         assert cs.get_metric(cpid, "Status.Connector", connector_id=3) == "Unavailable"
 
         await cp.send_tx_started_eair_wh(1, 2, "TX-1", 10_000)

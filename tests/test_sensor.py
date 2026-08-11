@@ -1,6 +1,7 @@
 """Test sensor for ocpp integration."""
 
 import asyncio
+import copy
 import websockets
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -28,7 +29,7 @@ async def test_sensor(hass, socket_enabled):
 
     cp_id = "CP_1_sens"
     cpid = "test_cpid_sens"
-    data = MOCK_CONFIG_DATA.copy()
+    data = copy.deepcopy(MOCK_CONFIG_DATA)
     cp_data = MOCK_CONFIG_CP_APPEND.copy()
     cp_data[CONF_CPID] = cpid
     data[CONF_CPIDS].append({cp_id: cp_data})
@@ -74,7 +75,7 @@ async def test_sensor_entities_per_connector_created(hass, socket_enabled):
     cp_id = "CP_1_sens_mc"
     cpid = "test_cpid_sens_mc"
 
-    data = MOCK_CONFIG_DATA.copy()
+    data = copy.deepcopy(MOCK_CONFIG_DATA)
     cp_data = MOCK_CONFIG_CP_APPEND.copy()
     cp_data[CONF_CPID] = cpid
     cp_data[CONF_NUM_CONNECTORS] = 2  # ensure two connectors up front

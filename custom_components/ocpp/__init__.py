@@ -4,6 +4,8 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.util import slugify
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import device_registry
 import homeassistant.helpers.config_validation as cv
@@ -134,7 +136,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     if entry.data[CONF_CPIDS]:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        central_sys.platforms_forwarded = True
 
+    # Registered after the forward deliberately: a discovery-driven
+    # entry update must not be able to trigger a reload in the window
+    # between the platforms being forwarded and the flag being set.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
@@ -187,12 +193,27 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             csid_data.update({key: old_data.get(key, value)})
 
         new_data = csid_data
-        cp_id_state = hass.states.get(f"sensor.{cpid_data[CONF_CPID].lower()}_id")
-        if cp_id_state is None:
+        # slugify, not lower(): the sensor platform slugifies its object
+        # ids, so any cpid that is not already a slug ("Garage Charger",
+        # "charger-1") would never resolve here.
+        cp_id_state = hass.states.get(f"sensor.{slugify(cpid_data[CONF_CPID])}_id")
+        if cp_id_state is None or cp_id_state.state in (
+            STATE_UNKNOWN,
+            STATE_UNAVAILABLE,
+        ):
+            # A sentinel state is a plain string, so without this guard it
+            # would be stored as the charge point key - serialisable, but
+            # matching no charger, the same broken entry by another route.
             _LOGGER.warning(
                 "Could not find charger id during migration, try a clean install"
             )
             return False
+        # The charge point id is the sensor's VALUE. Storing the State
+        # object itself - as this did until now - produces entry data that
+        # cannot be JSON-serialised and a key no connecting charger can
+        # ever match, so every v1 migration was broken. The test suite
+        # could not see it: a global StateMachine.get patch fed it a
+        # synthetic State, and the assertion checked top-level keys only.
         new_data.update({CONF_CPIDS: [{cp_id_state.state: cpid_data}]})
 
         hass.config_entries.async_update_entry(
@@ -256,13 +277,29 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # print(hass.services.async_services_for_domain(DOMAIN))
             for service in hass.services.async_services_for_domain(DOMAIN):
                 hass.services.async_remove(DOMAIN, service)
-            # Unload platforms if a charger connected
-            if central_sys.connections == 0:
-                unloaded = True
-            else:
+            # Unload the platforms if - and only if - setup forwarded them.
+            # Deciding from the live connection count skipped the unload
+            # whenever every configured charger happened to be offline, and
+            # the next setup's forward then collided ("has already been
+            # setup!"), killing every entity platform until Core restarted.
+            # A reload with the charger offline is exactly the reconfigure-
+            # to-fix-the-connection case, so the two met constantly.
+            if central_sys.platforms_forwarded:
                 unloaded = await hass.config_entries.async_unload_platforms(
                     entry, PLATFORMS
                 )
+                _LOGGER.debug(
+                    "Unloaded entity platforms for %s: %s", entry.title, unloaded
+                )
+            else:
+                # Setup never forwarded them (no charger was configured),
+                # so there is nothing to tear down - and asking Home
+                # Assistant to unload never-forwarded platforms fails.
+                _LOGGER.debug(
+                    "No entity platforms were forwarded for %s; skipping unload",
+                    entry.title,
+                )
+                unloaded = True
             # Remove entry
             if unloaded:
                 hass.data[DOMAIN].pop(entry.entry_id)

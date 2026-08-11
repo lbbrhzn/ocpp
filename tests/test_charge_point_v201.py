@@ -1,6 +1,7 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, timedelta, UTC
 
 from homeassistant.const import UnitOfTime
@@ -1063,10 +1064,15 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     )
 
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
-    datetime.fromisoformat(heartbeat_resp.current_time)
+    heartbeat_time = datetime.fromisoformat(heartbeat_resp.current_time)
 
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
+
+    # Checking only the reply let a metric-less handler pass for the bug's
+    # whole life: the sensor's backing metric must hold the same instant
+    # the charger was told.
+    assert cs.get_metric(cpid, cstat.heartbeat.value) == heartbeat_time
 
     await wait_ready(cs.charge_points[cp_id])
 
@@ -1287,9 +1293,13 @@ async def _unsupported_base_report_test(
         )
     )
     await wait_ready(cs.charge_points[cp_id])
+    # This charger answers no GetBaseReport, so nothing is detectable from an
+    # inventory and SMART can only come from force_smart_charging, which the
+    # test charger enables (tests/const.py). Before the override was honoured
+    # on 2.0.1 this expectation omitted SMART.
     assert (
         cs.get_metric(cpid, cdet.features.value, connector_id=0)
-        == Profiles.CORE | Profiles.REM | Profiles.FW
+        == Profiles.CORE | Profiles.REM | Profiles.FW | Profiles.SMART
     )
 
     # Regression: a charger whose GetBaseReport yields no connectors (either
@@ -1319,7 +1329,7 @@ async def _unsupported_base_report_test(
     )
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._pending_status_notifications == []
@@ -1381,7 +1391,7 @@ async def _incomplete_inventory_test(
     # (1, 1).
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._pending_status_notifications == []
@@ -1442,7 +1452,7 @@ async def _incomplete_inventory_late_evidence_test(
     )
     while (
         cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
-        != ConnectorStatusEnumType.occupied.value
+        != ChargePointStatusv16.preparing.value
     ):
         await asyncio.sleep(0.1)
     assert server_cp._evse_to_global == {(2, 2): 1}
@@ -1459,8 +1469,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     # test cannot
     # config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
     cp_id = "CP_2"
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9080
@@ -1504,8 +1514,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     await remove_configuration(hass, config_entry)
 
     cp_id = "CP_2_noreport"
-    config_data = MOCK_CONFIG_DATA_3.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA_3)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9011

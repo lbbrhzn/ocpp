@@ -1,6 +1,5 @@
 """Adds config flow for ocpp."""
 
-from copy import deepcopy
 from typing import Any
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -9,6 +8,7 @@ from homeassistant.config_entries import (
     CONN_CLASS_LOCAL_PUSH,
     OptionsFlow,
 )
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
@@ -163,11 +163,6 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 3
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
-    @staticmethod
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the options flow for this config entry."""
-        return OcppOptionsFlowHandler(config_entry)
-
     def __init__(self):
         """Initialize."""
         self._data: dict[str, Any] = {}
@@ -175,6 +170,12 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._entry: ConfigEntry
         self._measurands: str = ""
         self._detected_num_connectors: int = DEFAULT_NUM_CONNECTORS
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> "OCPPOptionsFlow":
+        """Let the settings of an already-configured charge point be edited."""
+        return OCPPOptionsFlow()
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         """Handle user central system initiated configuration."""
@@ -247,6 +248,31 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         return await self.async_step_cp_user()
 
+    def _other_cpids_in_use(self) -> set[str]:
+        """Return every cpid already configured for a charge point other than the current one.
+
+        cpid (as opposed to cp_id, the OCPP-level charge point identity) is
+        user-chosen and is what entities' unique_id is built from
+        (DOMAIN.cpid.key...), so it must stay unique across every charge
+        point of every OCPP config entry, not just within the current
+        central system. Only the charge point currently being (re)configured
+        -- matched on both its entry and its cp_id -- is excluded, so
+        re-submitting its own cpid is not flagged as a duplicate of itself.
+        """
+        # Match on the entry as well as the charge point: cp_id is the
+        # OCPP-level identity, so two central systems can each have one with
+        # the same name. Skipping on cp_id alone would also skip the *other*
+        # system's record and let a genuine duplicate through.
+        own_entry_id = getattr(getattr(self, "_entry", None), "entry_id", None)
+        cpids: set[str] = set()
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            for cp_data in entry.data.get(CONF_CPIDS, []):
+                for cp_id, cp_settings in cp_data.items():
+                    if entry.entry_id == own_entry_id and cp_id == self._cp_id:
+                        continue
+                    cpids.add(cp_settings[CONF_CPID])
+        return cpids
+
     async def async_step_cp_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -254,8 +280,6 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Don't allow duplicate cpids to be used
-            self._async_abort_entries_match({CONF_CPID: user_input[CONF_CPID]})
             # Validate cpid format against entity id requirements (lowercase letters, digits and _)
             schema = vol.Schema(
                 {vol.Required(CONF_CPID): cv.matches_regex(r"^[\da-z_]+$")}
@@ -265,6 +289,13 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             except vol.Invalid:
                 errors["base"] = "invalid_cpid"
             else:
+                # cpid is used to build entity unique_ids (DOMAIN.cpid.key...)
+                # across every OCPP config entry, so it must be unique
+                # integration-wide, not just within this central system.
+                if user_input[CONF_CPID] in self._other_cpids_in_use():
+                    errors["base"] = "duplicate_cpid"
+
+            if not errors:
                 cp_data = {
                     **user_input,
                     CONF_NUM_CONNECTORS: self._detected_num_connectors,
@@ -311,6 +342,20 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                     self._measurands
                 )
 
+                # With autoconfig off, the cpid was validated a step earlier and
+                # nothing has been written yet, so another flow could have taken
+                # it in the meantime. Re-check immediately before persisting:
+                # there is no await between this and async_update_entry, so on
+                # the single-threaded event loop nothing can slip in between.
+                pending_cpid = self._data[CONF_CPIDS][-1][self._cp_id][CONF_CPID]
+                if pending_cpid in self._other_cpids_in_use():
+                    errors["base"] = "duplicate_cpid"
+                    return self.async_show_form(
+                        step_id="measurands",
+                        data_schema=STEP_USER_MEASURANDS_SCHEMA,
+                        errors=errors,
+                    )
+
                 self.hass.config_entries.async_update_entry(
                     self._entry, data=self._data
                 )
@@ -323,80 +368,170 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class OcppOptionsFlowHandler(OptionsFlow):
-    """Handle OCPP options shown from the integration page gear button."""
+class OCPPOptionsFlow(OptionsFlow):
+    """Edit the settings of an already-configured charge point.
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self._config_entry = config_entry
-        self._pending_data: dict[str, Any] | None = None
+    The initial charger form (async_step_cp_user) is reachable only from
+    integration discovery, which aborts for a charger that is already
+    configured - so without this flow every per-charger setting was
+    write-once (#2047). cpid stays read-only here: entity unique_ids
+    derive from it, so changing it would orphan every existing entity.
+    """
+
+    def __init__(self) -> None:
+        """Initialize."""
+        self._cp_id: str = ""
+        self._settings: dict[str, Any] = {}
+
+    def _charge_points(self) -> dict[str, dict[str, Any]]:
+        """Map cp_id to its stored settings for this entry."""
+        points: dict[str, dict[str, Any]] = {}
+        for item in self.config_entry.data.get(CONF_CPIDS, []):
+            for cp_id, settings in item.items():
+                points[cp_id] = settings
+        return points
+
+    def _finalize(self) -> ConfigFlowResult:
+        """Overlay the edited fields onto the charge point and write it back.
+
+        The overlay reads the entry as it is now, not as it was when the
+        first form was submitted: while the user sits on the measurands
+        form, a reconnecting charger's post_connect can update the entry
+        (connector count, detected measurands), and writing back a snapshot
+        taken earlier would erase that. Only the fields the user actually
+        edited are replaced.
+        """
+        cpids = [
+            {
+                cp_id: (
+                    {**stored, **self._settings} if cp_id == self._cp_id else stored
+                )
+                for cp_id, stored in item.items()
+            }
+            for item in self.config_entry.data.get(CONF_CPIDS, [])
+        ]
+        # Updating the entry already triggers a reload via the
+        # add_update_listener(async_reload_entry) registered in
+        # async_setup_entry - the same single-reload rule the reconfigure
+        # step follows. The create_entry below writes entry.options, which
+        # stays {} and therefore fires nothing on top of it.
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={**self.config_entry.data, CONF_CPIDS: cpids},
+        )
+        return self.async_create_entry(data={})
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the OCPP integration settings."""
-
-        errors: dict[str, str] = {}
+        """Pick which charge point to edit, when there is a choice."""
+        points = self._charge_points()
+        if not points:
+            return self.async_abort(reason="no_charge_points")
 
         if user_input is not None:
-            if user_input[CONF_PORT] != self._config_entry.data[CONF_PORT]:
-                for entry in self.hass.config_entries.async_entries(
-                    self._config_entry.domain
-                ):
-                    if (
-                        entry.entry_id != self._config_entry.entry_id
-                        and entry.data.get(CONF_PORT) == user_input[CONF_PORT]
-                    ):
-                        return self.async_abort(reason="already_configured")
+            self._cp_id = user_input["cp_id"]
+            return await self.async_step_cp_settings()
 
-            self._pending_data = {**self._config_entry.data, **user_input}
-            if self._pending_data[CONF_CPIDS]:
-                return await self.async_step_notifications()
-            return self._save_options()
+        if len(points) == 1:
+            self._cp_id = next(iter(points))
+            return await self.async_step_cp_settings()
 
         return self.async_show_form(
             step_id="init",
-            data_schema=_get_cs_data_schema(self._config_entry.data),
-            errors=errors,
-            description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
+            data_schema=vol.Schema({vol.Required("cp_id"): vol.In(sorted(points))}),
         )
 
-    async def async_step_notifications(
-        self, user_input: dict[str, bool] | None = None
+    async def async_step_cp_settings(
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure Home Assistant notifications for each charger."""
-        if self._pending_data is None:
-            return self.async_abort(reason="unknown")
+        """Edit the behavioural settings of the chosen charge point."""
+        current = self._charge_points()[self._cp_id]
 
-        cpids = deepcopy(self._pending_data[CONF_CPIDS])
         if user_input is not None:
-            for cp_map in cpids:
-                for cp_id, cp_data in cp_map.items():
-                    cp_data[CONF_ENABLE_HA_NOTIFICATIONS] = user_input[cp_id]
-            self._pending_data[CONF_CPIDS] = cpids
-            return self._save_options()
+            # Hold only what the form edited; _finalize overlays it onto the
+            # stored record. cpid, the connector count and the measurand
+            # list are untouched by construction - in particular the
+            # measurand list is NOT reseeded when autoconfig is left on: it
+            # holds what detection accepted, and rewriting it here would
+            # create sensors for every measurand as a side effect of
+            # editing an unrelated setting.
+            self._settings = dict(user_input)
+            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                return self._finalize()
+            return await self.async_step_measurands()
 
         schema = vol.Schema(
             {
                 vol.Required(
-                    cp_id,
-                    default=cp_data.get(
+                    CONF_MAX_CURRENT,
+                    default=current.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT),
+                ): int,
+                vol.Required(
+                    CONF_MONITORED_VARIABLES_AUTOCONFIG,
+                    default=current.get(
+                        CONF_MONITORED_VARIABLES_AUTOCONFIG,
+                        DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_METER_INTERVAL,
+                    default=current.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL),
+                ): int,
+                vol.Required(
+                    CONF_IDLE_INTERVAL,
+                    default=current.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL),
+                ): int,
+                vol.Required(
+                    CONF_SKIP_SCHEMA_VALIDATION,
+                    default=current.get(
+                        CONF_SKIP_SCHEMA_VALIDATION, DEFAULT_SKIP_SCHEMA_VALIDATION
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_FORCE_SMART_CHARGING,
+                    default=current.get(
+                        CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_HA_NOTIFICATIONS,
+                    default=current.get(
                         CONF_ENABLE_HA_NOTIFICATIONS,
                         DEFAULT_ENABLE_HA_NOTIFICATIONS,
                     ),
-                ): bool
-                for cp_map in cpids
-                for cp_id, cp_data in cp_map.items()
+                ): bool,
             }
         )
-        return self.async_show_form(step_id="notifications", data_schema=schema)
-
-    def _save_options(self) -> ConfigFlowResult:
-        """Persist the pending central-system and charger settings."""
-        assert self._pending_data is not None
-        self.hass.config_entries.async_update_entry(
-            self._config_entry,
-            title=self._pending_data[CONF_CSID],
-            data=self._pending_data,
+        return self.async_show_form(
+            step_id="cp_settings",
+            data_schema=schema,
+            description_placeholders={
+                "cp_id": self._cp_id,
+                "cpid": current.get(CONF_CPID, ""),
+            },
         )
-        return self.async_create_entry(title="", data=self._config_entry.options)
+
+    async def async_step_measurands(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select measurands manually, pre-filled with the stored set."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            selected = [m for m, value in user_input.items() if value]
+            if selected:
+                self._settings[CONF_MONITORED_VARIABLES] = ",".join(selected)
+                return self._finalize()
+            errors["base"] = "no_measurands_selected"
+
+        current = self._charge_points()[self._cp_id]
+        stored = {
+            m for m in current.get(CONF_MONITORED_VARIABLES, "").split(",") if m
+        } or {DEFAULT_MEASURAND}
+        schema = vol.Schema(
+            {vol.Required(m, default=(m in stored)): bool for m in MEASURANDS}
+        )
+        return self.async_show_form(
+            step_id="measurands", data_schema=schema, errors=errors
+        )
