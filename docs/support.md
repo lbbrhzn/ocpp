@@ -13,7 +13,11 @@ If you need help, check out our [forum](https://github.com/lbbrhzn/ocpp/discussi
 
 ### too many notifications in home assistant
 
-The OCPP sends a notification when the charger is rebooted. This can be due to a bad network connection. The notifications can be managed with automations in home assistant. (see https://github.com/lbbrhzn/ocpp/discussions/938)
+The OCPP integration can send notifications about charger events, including when a charger reboots due to a bad network connection.
+
+If you do not want notifications from a charger, turn off Home Assistant notifications when configuring that charger.
+
+If you prefer to keep notifications enabled but automatically dismiss them (for example, to silence only nightly reboots), they can also be managed with automations in Home Assistant. (see https://github.com/lbbrhzn/ocpp/discussions/938)
 
 Example:
 

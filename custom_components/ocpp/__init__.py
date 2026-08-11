@@ -19,6 +19,7 @@ from .const import (
     CONF_AUTH_STATUS,
     CONF_CPIDS,
     CONF_DEFAULT_AUTH_STATUS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_ID_TAG,
     CONF_NAME,
     CONF_CPID,
@@ -42,6 +43,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONFIG,
     DEFAULT_CPID,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
     DEFAULT_METER_INTERVAL,
@@ -167,6 +169,7 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             CONF_MONITORED_VARIABLES_AUTOCONFIG: DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
             CONF_SKIP_SCHEMA_VALIDATION: DEFAULT_SKIP_SCHEMA_VALIDATION,
             CONF_FORCE_SMART_CHARGING: DEFAULT_FORCE_SMART_CHARGING,
+            CONF_ENABLE_HA_NOTIFICATIONS: DEFAULT_ENABLE_HA_NOTIFICATIONS,
         }
         csid_keys = {
             CONF_HOST: DEFAULT_HOST,
@@ -214,35 +217,33 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             config_entry, data=new_data, minor_version=0, version=2
         )
 
-    if config_entry.version == 2 and config_entry.minor_version == 0:
+    if config_entry.version == 2 and config_entry.minor_version < 2:
         data = {**config_entry.data}
-        cpids = data.get(CONF_CPIDS, [])
-
-        changed = False
+        cpids = list(data.get(CONF_CPIDS, []))
         for idx, cp_map in enumerate(cpids):
             if not isinstance(cp_map, dict) or not cp_map:
                 continue
-            cp_id, cp_data = next(iter(cp_map.items()))
-            if CONF_NUM_CONNECTORS not in cp_data:
-                cp_data = {**cp_data, CONF_NUM_CONNECTORS: DEFAULT_NUM_CONNECTORS}
-                cpids[idx] = {cp_id: cp_data}
-                changed = True
 
-        if changed:
-            data[CONF_CPIDS] = cpids
-            hass.config_entries.async_update_entry(
-                config_entry,
-                data=data,
-                version=2,
-                minor_version=1,
+            cp_id, cp_data = next(iter(cp_map.items()))
+            if not isinstance(cp_data, dict):
+                continue
+
+            migrated_cp_data = {**cp_data}
+            if config_entry.minor_version == 0:
+                migrated_cp_data.setdefault(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
+            migrated_cp_data.setdefault(
+                CONF_ENABLE_HA_NOTIFICATIONS,
+                DEFAULT_ENABLE_HA_NOTIFICATIONS,
             )
-        else:
-            hass.config_entries.async_update_entry(
-                config_entry,
-                data=data,
-                version=2,
-                minor_version=1,
-            )
+            cpids[idx] = {cp_id: migrated_cp_data}
+
+        data[CONF_CPIDS] = cpids
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=data,
+            version=2,
+            minor_version=2,
+        )
 
     _LOGGER.info(
         "Migration to configuration version %s.%s successful",

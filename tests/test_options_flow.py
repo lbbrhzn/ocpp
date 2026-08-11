@@ -21,6 +21,7 @@ from homeassistant import data_entry_flow
 from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CPIDS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_FORCE_SMART_CHARGING,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -128,6 +129,7 @@ async def test_editing_settings_preserves_what_the_form_does_not_show(hass):
             CONF_IDLE_INTERVAL: 600,
             CONF_SKIP_SCHEMA_VALIDATION: True,
             CONF_FORCE_SMART_CHARGING: False,
+            CONF_ENABLE_HA_NOTIFICATIONS: False,
         },
     )
 
@@ -136,6 +138,7 @@ async def test_editing_settings_preserves_what_the_form_does_not_show(hass):
     assert stored[CONF_MAX_CURRENT] == 63
     assert stored[CONF_SKIP_SCHEMA_VALIDATION] is True
     assert stored[CONF_FORCE_SMART_CHARGING] is False
+    assert stored[CONF_ENABLE_HA_NOTIFICATIONS] is False
     assert stored[CONF_METER_INTERVAL] == 30
     assert stored[CONF_IDLE_INTERVAL] == 600
     # Not shown by the form, must survive:
