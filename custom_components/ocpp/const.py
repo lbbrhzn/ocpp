@@ -14,7 +14,7 @@ CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CPIDS = "cpids"
 CONF_CSID = "csid"
-CONF_ENABLE_REBOOT_NOTIFICATIONS = "enable_reboot_notifications"
+CONF_ENABLE_HA_NOTIFICATIONS = "enable_ha_notifications"
 CONF_DEFAULT_AUTH_STATUS = "default_authorization_status"
 CONF_HOST = ha.CONF_HOST
 CONF_ID_TAG = "id_tag"
@@ -46,7 +46,7 @@ CONF_WEBSOCKET_PING_TIMEOUT = "websocket_ping_timeout"
 DATA_UPDATED = "ocpp_data_updated"
 DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
-DEFAULT_ENABLE_REBOOT_NOTIFICATIONS = True
+DEFAULT_ENABLE_HA_NOTIFICATIONS = True
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_CURRENT = 32
 DEFAULT_NUM_CONNECTORS = 1
@@ -164,6 +164,7 @@ class ChargerSystemSettings:
     monitored_variables_autoconfig: bool
     skip_schema_validation: bool
     force_smart_charging: bool
+    enable_ha_notifications: bool = DEFAULT_ENABLE_HA_NOTIFICATIONS
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
 
@@ -182,7 +183,6 @@ class CentralSystemSettings:
     websocket_ping_interval: int
     websocket_ping_timeout: int
     websocket_ping_tries: int
-    enable_reboot_notifications: bool = DEFAULT_ENABLE_REBOOT_NOTIFICATIONS
     cpids: list = field(default_factory=list)  # holds cpid config flow settings
     subprotocols: list = field(default_factory=lambda: DEFAULT_SUBPROTOCOLS)
     # "auto" (advertise all) or a specific OCPP version to pin negotiation to.

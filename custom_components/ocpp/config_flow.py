@@ -1,5 +1,6 @@
 """Adds config flow for ocpp."""
 
+from copy import deepcopy
 from typing import Any
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -15,7 +16,7 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_CSID,
-    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
@@ -36,7 +37,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_CPID,
     DEFAULT_CSID,
-    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
@@ -76,6 +77,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         ): bool,
         vol.Required(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
+        ): bool,
+        vol.Required(
+            CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
     }
 )
@@ -117,13 +121,6 @@ def _get_cs_data_schema(config: dict[str, Any] | None = None) -> vol.Schema:
                 default=config.get(CONF_CSID, DEFAULT_CSID),
             ): vol.All(str, vol.Length(max=20)),
             vol.Required(
-                CONF_ENABLE_REBOOT_NOTIFICATIONS,
-                default=config.get(
-                    CONF_ENABLE_REBOOT_NOTIFICATIONS,
-                    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
-                ),
-            ): bool,
-            vol.Required(
                 CONF_OCPP_VERSION,
                 default=config.get(CONF_OCPP_VERSION, DEFAULT_OCPP_VERSION),
             ): vol.In(OCPP_VERSIONS),
@@ -163,7 +160,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     @staticmethod
@@ -332,6 +329,7 @@ class OcppOptionsFlowHandler(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._pending_data: dict[str, Any] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -351,12 +349,10 @@ class OcppOptionsFlowHandler(OptionsFlow):
                     ):
                         return self.async_abort(reason="already_configured")
 
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                title=user_input[CONF_CSID],
-                data={**self._config_entry.data, **user_input},
-            )
-            return self.async_create_entry(title="", data=self._config_entry.options)
+            self._pending_data = {**self._config_entry.data, **user_input}
+            if self._pending_data[CONF_CPIDS]:
+                return await self.async_step_notifications()
+            return self._save_options()
 
         return self.async_show_form(
             step_id="init",
@@ -364,3 +360,43 @@ class OcppOptionsFlowHandler(OptionsFlow):
             errors=errors,
             description_placeholders={"docs_url": "https://github.com/lbbrhzn/ocpp"},
         )
+
+    async def async_step_notifications(
+        self, user_input: dict[str, bool] | None = None
+    ) -> ConfigFlowResult:
+        """Configure Home Assistant notifications for each charger."""
+        if self._pending_data is None:
+            return self.async_abort(reason="unknown")
+
+        cpids = deepcopy(self._pending_data[CONF_CPIDS])
+        if user_input is not None:
+            for cp_map in cpids:
+                for cp_id, cp_data in cp_map.items():
+                    cp_data[CONF_ENABLE_HA_NOTIFICATIONS] = user_input[cp_id]
+            self._pending_data[CONF_CPIDS] = cpids
+            return self._save_options()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    cp_id,
+                    default=cp_data.get(
+                        CONF_ENABLE_HA_NOTIFICATIONS,
+                        DEFAULT_ENABLE_HA_NOTIFICATIONS,
+                    ),
+                ): bool
+                for cp_map in cpids
+                for cp_id, cp_data in cp_map.items()
+            }
+        )
+        return self.async_show_form(step_id="notifications", data_schema=schema)
+
+    def _save_options(self) -> ConfigFlowResult:
+        """Persist the pending central-system and charger settings."""
+        assert self._pending_data is not None
+        self.hass.config_entries.async_update_entry(
+            self._config_entry,
+            title=self._pending_data[CONF_CSID],
+            data=self._pending_data,
+        )
+        return self.async_create_entry(title="", data=self._config_entry.options)

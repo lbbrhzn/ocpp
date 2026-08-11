@@ -605,10 +605,7 @@ class ChargePoint(cp):
 
     def _register_boot_notification(self):
         if self.triggered_boot_notification is False:
-            if self.cs_settings.enable_reboot_notifications:
-                self.hass.async_create_task(
-                    self.notify_ha(f"Charger {self.id} rebooted")
-                )
+            self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
 
@@ -1077,6 +1074,8 @@ class ChargePoint(cp):
 
     async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
         """Notify user via HA web frontend."""
+        if not self.settings.enable_ha_notifications:
+            return False
         await self.hass.services.async_call(
             PN_DOMAIN,
             "create",

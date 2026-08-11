@@ -17,7 +17,7 @@ from .const import (
     CONF_AUTH_STATUS,
     CONF_CPIDS,
     CONF_DEFAULT_AUTH_STATUS,
-    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_ID_TAG,
     CONF_NAME,
     CONF_CPID,
@@ -42,7 +42,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONFIG,
     DEFAULT_CPID,
-    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_MAX_CURRENT,
     DEFAULT_METER_INTERVAL,
@@ -165,12 +165,12 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             CONF_MONITORED_VARIABLES_AUTOCONFIG: DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
             CONF_SKIP_SCHEMA_VALIDATION: DEFAULT_SKIP_SCHEMA_VALIDATION,
             CONF_FORCE_SMART_CHARGING: DEFAULT_FORCE_SMART_CHARGING,
+            CONF_ENABLE_HA_NOTIFICATIONS: DEFAULT_ENABLE_HA_NOTIFICATIONS,
         }
         csid_keys = {
             CONF_HOST: DEFAULT_HOST,
             CONF_PORT: DEFAULT_PORT,
             CONF_CSID: DEFAULT_CSID,
-            CONF_ENABLE_REBOOT_NOTIFICATIONS: DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
             CONF_OCPP_VERSION: DEFAULT_OCPP_VERSION,
             CONF_SSL: DEFAULT_SSL,
             CONF_SSL_CERTFILE_PATH: DEFAULT_SSL_CERTFILE_PATH,
@@ -199,7 +199,7 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             config_entry, data=new_data, minor_version=0, version=2
         )
 
-    if config_entry.version == 2 and config_entry.minor_version < 2:
+    if config_entry.version == 2 and config_entry.minor_version < 3:
         data = {**config_entry.data}
         cpids = data.get(CONF_CPIDS, [])
 
@@ -212,16 +212,26 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
                     cp_data = {**cp_data, CONF_NUM_CONNECTORS: DEFAULT_NUM_CONNECTORS}
                     cpids[idx] = {cp_id: cp_data}
 
+        # PR builds briefly stored a reboot-only preference at the central-system
+        # level. Preserve that choice while generalizing it to all notifications
+        # and storing it independently for each charger.
+        notification_default = data.pop("enable_reboot_notifications", True)
+        for cp_map in cpids:
+            if not isinstance(cp_map, dict):
+                continue
+            for cp_data in cp_map.values():
+                cp_data.setdefault(
+                    CONF_ENABLE_HA_NOTIFICATIONS,
+                    notification_default,
+                )
+
         data[CONF_CPIDS] = cpids
-        data.setdefault(
-            CONF_ENABLE_REBOOT_NOTIFICATIONS, DEFAULT_ENABLE_REBOOT_NOTIFICATIONS
-        )
         data.setdefault(CONF_OCPP_VERSION, DEFAULT_OCPP_VERSION)
         hass.config_entries.async_update_entry(
             config_entry,
             data=data,
             version=2,
-            minor_version=2,
+            minor_version=3,
         )
 
     _LOGGER.info(

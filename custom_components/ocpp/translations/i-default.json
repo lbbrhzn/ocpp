@@ -11,7 +11,6 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
-                    "enable_reboot_notifications": "Enable charger reboot notifications",
                     "ocpp_version": "OCPP version",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
@@ -32,7 +31,8 @@
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Force Smart Charging feature profile"
+                    "force_smart_charging": "Force Smart Charging feature profile",
+                    "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },
             "measurands": {
@@ -73,7 +73,6 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
-                    "enable_reboot_notifications": "Enable charger reboot notifications",
                     "ocpp_version": "OCPP version",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
@@ -108,7 +107,6 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
-                    "enable_reboot_notifications": "Enable charger reboot notifications",
                     "ocpp_version": "OCPP version",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
@@ -118,6 +116,10 @@
                 "data_description": {
                     "ocpp_version": "Auto negotiates with the charger using the integration's default order (OCPP 1.6 first). Choose a specific version to restrict negotiation to it, so a charger that advertises several versions is held to the one you pick."
                 }
+            },
+            "notifications": {
+                "title": "Home Assistant notifications",
+                "description": "Choose which chargers may create persistent notifications in Home Assistant."
             }
         }
     },

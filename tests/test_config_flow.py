@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.ocpp.const import (
     CONF_CSID,
-    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_HOST,
     CONF_NUM_CONNECTORS,
     CONF_PORT,
@@ -75,24 +75,6 @@ async def test_successful_config_flow(hass, bypass_get_data):
     assert result["result"]
 
 
-async def test_config_flow_stores_reboot_notification_preference(hass, bypass_get_data):
-    """Test the central config flag is stored in the created entry."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-
-    config = MOCK_CONFIG_CS.copy()
-    config.pop(CONF_CPIDS)
-    config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=config
-    )
-
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
-
-
 async def test_reconfigure_existing_entry(hass, bypass_get_data):
     """Test reconfiguring an existing central system entry."""
     config_entry = MockConfigEntry(
@@ -123,7 +105,6 @@ async def test_reconfigure_existing_entry(hass, bypass_get_data):
     updated_config.pop(CONF_CPIDS)
     updated_config[CONF_CSID] = "updated_csid"
     updated_config[CONF_HOST] = "127.0.0.2"
-    updated_config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input=updated_config
@@ -134,7 +115,6 @@ async def test_reconfigure_existing_entry(hass, bypass_get_data):
     assert config_entry.title == "updated_csid"
     assert config_entry.data[CONF_CSID] == "updated_csid"
     assert config_entry.data[CONF_HOST] == "127.0.0.2"
-    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
     assert config_entry.data[CONF_CPIDS] == MOCK_CONFIG_FLOW[CONF_CPIDS]
 
 
@@ -163,18 +143,25 @@ async def test_options_flow_updates_existing_entry(hass, bypass_get_data):
     updated_config.pop(CONF_CPIDS)
     updated_config[CONF_CSID] = "options_updated_csid"
     updated_config[CONF_HOST] = "127.0.0.3"
-    updated_config[CONF_ENABLE_REBOOT_NOTIFICATIONS] = False
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input=updated_config
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "notifications"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"test_cp_id": False}
     )
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert config_entry.title == "options_updated_csid"
     assert config_entry.data[CONF_CSID] == "options_updated_csid"
     assert config_entry.data[CONF_HOST] == "127.0.0.3"
-    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is False
-    assert config_entry.data[CONF_CPIDS] == MOCK_CONFIG_FLOW[CONF_CPIDS]
+    assert (
+        config_entry.data[CONF_CPIDS][0]["test_cp_id"][CONF_ENABLE_HA_NOTIFICATIONS]
+        is False
+    )
 
 
 async def test_options_flow_rejects_port_used_by_another_entry(hass):
@@ -239,6 +226,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     # Switch to manual measurand selection to test full flow
     cp_input = MOCK_CONFIG_CP.copy()
     cp_input[CONF_MONITORED_VARIABLES_AUTOCONFIG] = False
+    cp_input[CONF_ENABLE_HA_NOTIFICATIONS] = False
     result_cp = await hass.config_entries.flow.async_configure(
         result_disc["flow_id"], user_input=cp_input
     )
@@ -257,6 +245,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_NUM_CONNECTORS] = (
         DEFAULT_NUM_CONNECTORS
     )
+    flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_ENABLE_HA_NOTIFICATIONS] = False
 
     assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]

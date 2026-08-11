@@ -19,7 +19,7 @@ from custom_components.ocpp.chargepoint import (
     MeasurandValue,
 )
 from custom_components.ocpp.const import (
-    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DOMAIN,
     CentralSystemSettings,
     ChargerSystemSettings,
@@ -39,6 +39,9 @@ from ocpp.exceptions import NotImplementedError as OcppNotImplementedError
 from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
 
 
+ORIGINAL_NOTIFY_HA = ChargePoint.notify_ha
+
+
 # -----------------------------
 # Helpers to build a CP instance
 # -----------------------------
@@ -47,7 +50,6 @@ def _mk_entry_data():
         "host": "127.0.0.1",
         "port": 0,
         "csid": "cs",
-        "enable_reboot_notifications": DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
         "cpids": [{"CP_A": {"cpid": "test_cpid"}}],
         "subprotocols": ["ocpp1.6"],
         "websocket_close_timeout": 5,
@@ -61,7 +63,12 @@ def _mk_entry_data():
     }
 
 
-def _mk_cp(hass, *, version=OcppVersion.V201):
+def _mk_cp(
+    hass,
+    *,
+    version=OcppVersion.V201,
+    enable_ha_notifications=DEFAULT_ENABLE_HA_NOTIFICATIONS,
+):
     entry = MockConfigEntry(domain=DOMAIN, data=_mk_entry_data())
     centr = CentralSystemSettings(**entry.data)
     chg = ChargerSystemSettings(
@@ -73,6 +80,7 @@ def _mk_cp(hass, *, version=OcppVersion.V201):
         monitored_variables_autoconfig=False,
         skip_schema_validation=False,
         force_smart_charging=False,
+        enable_ha_notifications=enable_ha_notifications,
     )
     # Minimal fake connection
     conn = SimpleNamespace(state=State.CLOSED, close=lambda: asyncio.sleep(0))
@@ -212,33 +220,21 @@ def test_get_ha_metric_prefers_exact_entity(hass):
 
 
 @pytest.mark.parametrize(
-    ("enable_notifications", "expected_notify_calls"),
+    ("enable_notifications", "expected_service_calls"),
     [(True, 1), (False, 0)],
 )
-def test_register_boot_notification_respects_disable_flag(
-    hass, enable_notifications, expected_notify_calls
+async def test_notify_ha_respects_per_charger_preference(
+    hass, enable_notifications, expected_service_calls
 ):
-    """Test reboot notifications can be disabled without skipping post_connect."""
-    cp = _mk_cp(hass)
-    cp.cs_settings.enable_reboot_notifications = enable_notifications
-    cp.notify_ha = AsyncMock(return_value=True)
-    cp.post_connect = AsyncMock(return_value=None)
+    """Test every HA notification respects its charger's preference."""
+    cp = _mk_cp(hass, enable_ha_notifications=enable_notifications)
+    service_call = AsyncMock()
 
-    scheduled = []
+    with patch.object(type(hass.services), "async_call", service_call):
+        result = await ORIGINAL_NOTIFY_HA(cp, "Test notification")
 
-    def fake_async_create_task(coro):
-        scheduled.append(coro)
-        close = getattr(coro, "close", None)
-        if callable(close):
-            close()
-        return None
-
-    with patch.object(hass, "async_create_task", side_effect=fake_async_create_task):
-        cp._register_boot_notification()
-
-    assert cp.notify_ha.call_count == expected_notify_calls
-    assert cp.post_connect.call_count == 1
-    assert len(scheduled) == expected_notify_calls + 1
+    assert result is enable_notifications
+    assert service_call.await_count == expected_service_calls
 
 
 def _mv(measurand, value, phase=None, unit=None, context=None, location=None):

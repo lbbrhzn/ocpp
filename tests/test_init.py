@@ -3,6 +3,7 @@
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -10,9 +11,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ocpp import CentralSystem, async_migrate_entry
 from custom_components.ocpp.const import (
     CONF_CPID,
-    CONF_ENABLE_REBOOT_NOTIFICATIONS,
+    CONF_CPIDS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_OCPP_VERSION,
-    DEFAULT_ENABLE_REBOOT_NOTIFICATIONS,
     DEFAULT_OCPP_VERSION,
     DOMAIN,
 )
@@ -136,7 +137,7 @@ async def test_migration_entry(
     assert config_entry.data.keys() == MOCK_CONFIG_DATA.keys()
     # check versions match
     assert config_entry.version == 2
-    assert config_entry.minor_version == 2
+    assert config_entry.minor_version == 3
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
@@ -145,9 +146,12 @@ async def test_migration_entry(
 
 
 async def test_migration_backfills_version_2_defaults(hass: HomeAssistant):
-    """Test version-2 entries receive defaults added in minor version 2."""
-    old_data = MOCK_CONFIG_DATA_1.copy()
-    old_data.pop(CONF_ENABLE_REBOOT_NOTIFICATIONS)
+    """Test version-2 entries migrate notification settings per charger."""
+    old_data = deepcopy(MOCK_CONFIG_DATA_1)
+    for cp_map in old_data[CONF_CPIDS]:
+        for cp_data in cp_map.values():
+            cp_data.pop(CONF_ENABLE_HA_NOTIFICATIONS, None)
+    old_data["enable_reboot_notifications"] = False
     old_data.pop(CONF_OCPP_VERSION)
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -159,12 +163,15 @@ async def test_migration_backfills_version_2_defaults(hass: HomeAssistant):
     config_entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, config_entry)
-    assert config_entry.data[CONF_ENABLE_REBOOT_NOTIFICATIONS] is (
-        DEFAULT_ENABLE_REBOOT_NOTIFICATIONS
+    assert "enable_reboot_notifications" not in config_entry.data
+    assert all(
+        cp_data[CONF_ENABLE_HA_NOTIFICATIONS] is False
+        for cp_map in config_entry.data[CONF_CPIDS]
+        for cp_data in cp_map.values()
     )
     assert config_entry.data[CONF_OCPP_VERSION] == DEFAULT_OCPP_VERSION
     assert config_entry.version == 2
-    assert config_entry.minor_version == 2
+    assert config_entry.minor_version == 3
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):
