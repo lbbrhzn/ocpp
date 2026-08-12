@@ -50,6 +50,32 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 
 ## [Alfen - Eve Single S-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 
+## [Autel MaxiCharger](https://autelenergy.us/pages/residential)
+The MaxiCharger works with the OCPP integration, but the community has run into a few quirks - see [Issue #1523](https://github.com/lbbrhzn/ocpp/issues/1523) for the full discussion.
+
+### Getting `wss://` (TLS) working behind a reverse proxy (e.g. Traefik)
+
+If you're terminating TLS with a reverse proxy such as Traefik (e.g. using Let's Encrypt), the "certificate" field in the Autel's OCPP server setup is required. The charger will silently drop the `wss://` connection if you do not provide a certificate file.
+
+You can either upload the self-generated certificate, or the root CA. An example for Let's Encrypt:
+
+1. Download the ISRG Root X1 certificate from https://letsencrypt.org/certs/isrgrootx1.pem
+2. Verify the chain validates against it before touching the charger:
+   ```bash
+   openssl s_client -connect your.ocpp.host:PORT \
+     -servername your.ocpp.host \
+     -CAfile isrg-root-x1.pem
+   ```
+   If you see `Verify return code: 0 (ok)`, uploading that certificate to the Autel will work.
+3. Upload the certificate to the Autel's OCPP server configuration (the "certificate" field), along with your `wss://` server URL.
+
+### Automation quirks
+
+When writing automations against the MaxiCharger:
+
+- Start/stop charging via `switch.<cpid>_charge_control`, not a remote-start service call.
+- If a session is stopped via `switch.<cpid>_charge_control` while the car stays plugged in (e.g. leaving an off-peak window), the connector sits in `Finishing` rather than going back to `Available`. It won't accept a new session on its own when charging should resume (e.g. the next off-peak window) - press `button.<cpid>_reset` to start a new session without unplugging the car.
+
 ## [CTEK Chargestorm Connected 1, dual connectors](https://www.ctek.com/uk/ev-charging/chargestorm-connected-1)
 See CTEK Chargestorm Connected 2 below for getting started instructions.
 
