@@ -16,6 +16,17 @@ from .const import (
     MOCK_CONFIG_MIGRATION_FLOW,
     MOCK_CONFIG_DATA_1_MC,
 )
+from .lifecycle_asserts import (
+    assert_no_swallowed_lifecycle_errors,
+    assert_platforms_hold,
+    assert_rebuilt,
+    live_entity,
+)
+
+# Both single- and multi-connector mocks configure cpid "test_cpid_9001"
+# with at least one connector, so this entity exists in each lifecycle
+# test and its identity across a reload is the load-bearing assertion.
+MAX_CURRENT_EID = "number.test_cpid_9001_connector_1_maximum_current"
 
 
 # We can pass fixtures as defined in conftest.py to tell pytest to use the fixture
@@ -24,7 +35,7 @@ from .const import (
 # Assertions allow you to verify that the return value of whatever is on the left
 # side of the assertion matches with the right side.
 async def test_setup_unload_and_reload_entry(
-    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
 ):
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
@@ -47,20 +58,28 @@ async def test_setup_unload_and_reload_entry(
     assert DOMAIN in hass.data
     assert config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    # Structural: the forward actually registered every entity platform.
+    assert_platforms_hold(hass, config_entry.entry_id)
+    entity_before = live_entity(hass, MAX_CURRENT_EID, "number")
 
     # Reload the entry and assert that the data from above is still there
     assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    # Structural: fresh platforms, fresh entity - not the old ones surviving.
+    assert_platforms_hold(hass, config_entry.entry_id)
+    assert_rebuilt(entity_before, live_entity(hass, MAX_CURRENT_EID, "number"))
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert_no_swallowed_lifecycle_errors(caplog)
 
 
 async def test_setup_unload_and_reload_entry_multiple_connectors(
-    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
 ):
     """Test entry setup and unload."""
     # Create a mock entry so we don't have to go through config flow
@@ -83,20 +102,26 @@ async def test_setup_unload_and_reload_entry_multiple_connectors(
     assert DOMAIN in hass.data
     assert config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    assert_platforms_hold(hass, config_entry.entry_id)
+    entity_before = live_entity(hass, MAX_CURRENT_EID, "number")
 
     # Reload the entry and assert that the data from above is still there
     assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
     assert DOMAIN in hass.data and config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    assert_platforms_hold(hass, config_entry.entry_id)
+    assert_rebuilt(entity_before, live_entity(hass, MAX_CURRENT_EID, "number"))
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert_no_swallowed_lifecycle_errors(caplog)
 
 
 async def test_migration_entry(
-    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
 ):
     """Test entry migration."""
     # Create a mock entry so we don't have to go through config flow
@@ -130,6 +155,8 @@ async def test_migration_entry(
     assert DOMAIN in hass.data
     assert config_entry.entry_id in hass.data[DOMAIN]
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    # The migrated entry's setup must have forwarded the platforms too.
+    assert_platforms_hold(hass, config_entry.entry_id)
     # check migration has created new entry with correct keys
     assert config_entry.data.keys() == MOCK_CONFIG_DATA.keys()
     # The charge point key must be the seeded sensor's VALUE, as a plain
@@ -149,6 +176,7 @@ async def test_migration_entry(
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert_no_swallowed_lifecycle_errors(caplog)
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):
@@ -166,7 +194,7 @@ async def test_migration_entry(
 
 
 async def test_migration_refuses_a_sentinel_charger_id(
-    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
 ):
     """An 'unavailable' id sensor must fail migration, not become the key.
 
@@ -193,10 +221,13 @@ async def test_migration_refuses_a_sentinel_charger_id(
 
     assert not await hass.config_entries.async_setup(config_entry.entry_id)
     assert config_entry.version == 1
+    # The refusal is a clean, deliberate failure ("Error migrating entry"
+    # from core) - none of the swallowed-failure signatures may appear.
+    assert_no_swallowed_lifecycle_errors(caplog)
 
 
 async def test_migration_finds_a_non_slug_cpid(
-    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
 ):
     """A cpid like 'Garage Charger' must still resolve its id sensor.
 
@@ -221,7 +252,10 @@ async def test_migration_finds_a_non_slug_cpid(
 
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
+    assert_platforms_hold(hass, config_entry.entry_id)
     migrated_key = next(iter(config_entry.data[CONF_CPIDS][0]))
     assert migrated_key == "CP_migration_2"
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
