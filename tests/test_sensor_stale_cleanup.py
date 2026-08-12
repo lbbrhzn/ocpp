@@ -29,6 +29,7 @@ from custom_components.ocpp.const import DOMAIN, sensor_unique_id
 from custom_components.ocpp.enums import HAChargerStatuses as cstat
 
 from .const import MOCK_CONFIG_DATA_1
+from .lifecycle_asserts import assert_no_swallowed_lifecycle_errors
 
 
 @pytest.fixture(name="bypass_websockets")
@@ -80,8 +81,8 @@ async def test_setup_removes_the_stale_flat_entity_and_logs_it(
     await hass.async_block_till_done()
 
     # The platform came up cleanly - a failure inside the cleanup would
-    # have been swallowed into this log line rather than raising.
-    assert not [r for r in caplog.records if "Error setting up entry" in r.getMessage()]
+    # have been swallowed into a lifecycle log line rather than raising.
+    assert_no_swallowed_lifecycle_errors(caplog)
     assert registry.async_get(stale.entity_id) is None
     removal_logs = [
         r
@@ -134,3 +135,4 @@ async def test_single_connector_setup_removes_nothing(hass, bypass_websockets, c
         for r in caplog.records
         if "Removing stale charger-level entity" in r.getMessage()
     ]
+    assert_no_swallowed_lifecycle_errors(caplog)

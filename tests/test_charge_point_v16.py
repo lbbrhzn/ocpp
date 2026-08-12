@@ -2071,28 +2071,23 @@ async def test_on_diagnostics_status_notification(
             captured = {"called": 0, "msg": None}
 
             async def fake_notify(msg: str, title: str = "Ocpp integration"):
-                # record the message; return True like the real notifier
+                # Count the actual notification. The previous version
+                # counted hass.async_create_task calls as a proxy, which
+                # broke on HA 2026.8: entity updates now route through
+                # the same method, so unrelated tasks landed in the count.
+                captured["called"] += 1
                 captured["msg"] = msg
                 return True
 
-            def fake_async_create_task(coro):
-                # actually schedule the coroutine so fake_notify runs
-                captured["called"] += 1
-                return asyncio.create_task(coro)
-
             monkeypatch.setattr(srv_cp, "notify_ha", fake_notify, raising=True)
-            monkeypatch.setattr(
-                srv_cp.hass, "async_create_task", fake_async_create_task, raising=True
-            )
 
             # trigger server handler
             req = call.DiagnosticsStatusNotification(status="Uploaded")
             resp = await cp.call(req)
             assert resp is not None  # server replied
 
-            # ensure notify_ha ran and message content is correct
-            # give the task a tick to run
-            await asyncio.sleep(0)
+            # let the scheduled notify task actually run
+            await hass.async_block_till_done()
             assert captured["called"] == 1
             assert captured["msg"] == "Diagnostics upload status: Uploaded"
 
