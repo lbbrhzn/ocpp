@@ -31,7 +31,8 @@
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Force Smart Charging feature profile"
+                    "force_smart_charging": "Force Smart Charging feature profile",
+                    "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },
             "measurands": {
@@ -133,7 +134,8 @@
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Force Smart Charging feature profile"
+                    "force_smart_charging": "Force Smart Charging feature profile",
+                    "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },
             "measurands": {

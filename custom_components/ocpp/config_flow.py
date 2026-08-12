@@ -16,6 +16,7 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_CSID,
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_FORCE_SMART_CHARGING,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
@@ -36,6 +37,7 @@ from .const import (
     CONF_WEBSOCKET_PING_TRIES,
     DEFAULT_CPID,
     DEFAULT_CSID,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
@@ -102,6 +104,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
+        vol.Required(
+            CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
+        ): bool,
     }
 )
 
@@ -117,7 +122,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 1
+    MINOR_VERSION = 2
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
@@ -448,6 +453,13 @@ class OCPPOptionsFlow(OptionsFlow):
                     CONF_FORCE_SMART_CHARGING,
                     default=current.get(
                         CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_ENABLE_HA_NOTIFICATIONS,
+                    default=current.get(
+                        CONF_ENABLE_HA_NOTIFICATIONS,
+                        DEFAULT_ENABLE_HA_NOTIFICATIONS,
                     ),
                 ): bool,
             }

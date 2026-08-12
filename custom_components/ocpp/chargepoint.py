@@ -1141,6 +1141,8 @@ class ChargePoint(cp):
 
     async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
         """Notify user via HA web frontend."""
+        if not self.settings.enable_ha_notifications:
+            return False
         await self.hass.services.async_call(
             PN_DOMAIN,
             "create",

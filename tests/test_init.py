@@ -3,12 +3,19 @@
 # from homeassistant.exceptions import ConfigEntryNotReady
 # import pytest
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocpp import CentralSystem
-from custom_components.ocpp.const import DOMAIN, CONF_CPID, CONF_CPIDS
+from custom_components.ocpp import CentralSystem, async_migrate_entry
+from custom_components.ocpp.const import (
+    CONF_CPID,
+    CONF_CPIDS,
+    CONF_ENABLE_HA_NOTIFICATIONS,
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
+    DOMAIN,
+)
 
 from .const import (
     MOCK_CONFIG_DATA,
@@ -170,13 +177,50 @@ async def test_migration_entry(
     assert migrated_key == "CP_migration_1"
     # check versions match
     assert config_entry.version == 2
-    assert config_entry.minor_version == 1
+    assert config_entry.minor_version == 2
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
     assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_migration_adds_notification_preference_to_existing_chargers(
+    hass: HomeAssistant,
+):
+    """Version 2.1 entries get the per-charger notification default."""
+    old_data = deepcopy(MOCK_CONFIG_DATA_1)
+    for cp_map in old_data[CONF_CPIDS]:
+        for cp_data in cp_map.values():
+            cp_data.pop(CONF_ENABLE_HA_NOTIFICATIONS, None)
+
+    cp_map = old_data[CONF_CPIDS][0]
+    second_cp_data = deepcopy(next(iter(cp_map.values())))
+    second_cp_data[CONF_CPID] = "test_cpid_9002"
+    cp_map["CP_2"] = second_cp_data
+    cp_map["legacy_value"] = "preserved"
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=old_data,
+        entry_id="test_notification_migration",
+        version=2,
+        minor_version=1,
+    )
+    config_entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, config_entry)
+    migrated_cp_map = config_entry.data[CONF_CPIDS][0]
+    assert migrated_cp_map.keys() == cp_map.keys()
+    assert all(
+        cp_data[CONF_ENABLE_HA_NOTIFICATIONS] is DEFAULT_ENABLE_HA_NOTIFICATIONS
+        for cp_data in migrated_cp_map.values()
+        if isinstance(cp_data, dict)
+    )
+    assert migrated_cp_map["legacy_value"] == "preserved"
+    assert config_entry.version == 2
+    assert config_entry.minor_version == 2
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):

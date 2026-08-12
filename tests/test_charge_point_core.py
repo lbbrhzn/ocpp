@@ -3,7 +3,7 @@
 import asyncio
 import math
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from websockets.protocol import State
@@ -19,6 +19,7 @@ from custom_components.ocpp.chargepoint import (
     MeasurandValue,
 )
 from custom_components.ocpp.const import (
+    DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DOMAIN,
     CentralSystemSettings,
     ChargerSystemSettings,
@@ -36,6 +37,9 @@ from ocpp.charge_point import ChargePoint as LibCP
 from ocpp.exceptions import NotImplementedError as OcppNotImplementedError
 
 from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
+
+
+ORIGINAL_NOTIFY_HA = ChargePoint.notify_ha
 
 
 # -----------------------------
@@ -59,7 +63,12 @@ def _mk_entry_data():
     }
 
 
-def _mk_cp(hass, *, version=OcppVersion.V201):
+def _mk_cp(
+    hass,
+    *,
+    version=OcppVersion.V201,
+    enable_ha_notifications=DEFAULT_ENABLE_HA_NOTIFICATIONS,
+):
     entry = MockConfigEntry(domain=DOMAIN, data=_mk_entry_data())
     centr = CentralSystemSettings(**entry.data)
     chg = ChargerSystemSettings(
@@ -71,6 +80,7 @@ def _mk_cp(hass, *, version=OcppVersion.V201):
         monitored_variables_autoconfig=False,
         skip_schema_validation=False,
         force_smart_charging=False,
+        enable_ha_notifications=enable_ha_notifications,
     )
     # Minimal fake connection
     conn = SimpleNamespace(state=State.CLOSED, close=lambda: asyncio.sleep(0))
@@ -207,6 +217,24 @@ def test_get_ha_metric_prefers_exact_entity(hass):
     assert cp.get_ha_metric("Voltage", connector_id=1) == "229.5"
     # With connector_id=None -> root entity
     assert cp.get_ha_metric("Voltage", connector_id=None) == "n/a"
+
+
+@pytest.mark.parametrize(
+    ("enable_notifications", "expected_service_calls"),
+    [(True, 1), (False, 0)],
+)
+async def test_notify_ha_respects_per_charger_preference(
+    hass, enable_notifications, expected_service_calls
+):
+    """Test every HA notification respects its charger's preference."""
+    cp = _mk_cp(hass, enable_ha_notifications=enable_notifications)
+    service_call = AsyncMock()
+
+    with patch.object(type(hass.services), "async_call", service_call):
+        result = await ORIGINAL_NOTIFY_HA(cp, "Test notification")
+
+    assert result is enable_notifications
+    assert service_call.await_count == expected_service_calls
 
 
 def _mv(measurand, value, phase=None, unit=None, context=None, location=None):

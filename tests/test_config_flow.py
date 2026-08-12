@@ -1,5 +1,6 @@
 """Test ocpp config flow."""
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -8,6 +9,7 @@ from homeassistant.data_entry_flow import InvalidData
 import pytest
 
 from custom_components.ocpp.const import (
+    CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_NUM_CONNECTORS,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
@@ -106,6 +108,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     # Switch to manual measurand selection to test full flow
     cp_input = MOCK_CONFIG_CP.copy()
     cp_input[CONF_MONITORED_VARIABLES_AUTOCONFIG] = False
+    cp_input[CONF_ENABLE_HA_NOTIFICATIONS] = False
     result_cp = await hass.config_entries.flow.async_configure(
         result_disc["flow_id"], user_input=cp_input
     )
@@ -117,13 +120,14 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    flow_output = MOCK_CONFIG_FLOW.copy()
+    flow_output = deepcopy(MOCK_CONFIG_FLOW)
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = (
         False
     )
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_NUM_CONNECTORS] = (
         DEFAULT_NUM_CONNECTORS
     )
+    flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_ENABLE_HA_NOTIFICATIONS] = False
 
     assert result_meas["type"] == data_entry_flow.FlowResultType.ABORT
     entry = hass.config_entries._entries.get_entries_for_domain(DOMAIN)[0]
