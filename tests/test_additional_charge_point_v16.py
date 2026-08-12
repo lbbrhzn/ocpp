@@ -876,72 +876,24 @@ async def test_mirror_single_connector_handles_int_exception(
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",
-    [{"port": 9328, "cp_id": "CP_cov_sess_energy_cast_exc", "cms": "cms_services"}],
+    [{"port": 9328, "cp_id": "CP_val_coerce", "cms": "cms_services"}],
     indirect=True,
 )
-@pytest.mark.parametrize("cp_id", ["CP_cov_sess_energy_cast_exc"])
+@pytest.mark.parametrize("cp_id", ["CP_val_coerce"])
 @pytest.mark.parametrize("port", [9328])
-async def test_session_energy_get_energy_kwh_exception_ignored(
-    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
-):
-    """Test session energy calculation ignores EAIR entries raising conversion errors."""
-    cs = setup_config_entry
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
-    ) as ws:
-        cp = ChargePoint(f"{cp_id}_client", ws)
-        task = asyncio.create_task(cp.start())
-        try:
-            await cp.send_boot_notification()
-            await wait_ready(cs.charge_points[cp_id])
-
-            from custom_components.ocpp.ocppv16 import cp as cp_mod
-
-            monkeypatch.setattr(
-                cp_mod,
-                "get_energy_kwh",
-                lambda item: (_ for _ in ()).throw(RuntimeError("bad")),
-            )
-
-            mv = call.MeterValues(
-                connector_id=1,
-                meter_value=[
-                    {
-                        "timestamp": datetime.now(tz=UTC).isoformat(),
-                        "sampledValue": [
-                            {
-                                "value": "1000",
-                                "measurand": "Energy.Active.Import.Register",
-                                "unit": "Wh",
-                                "context": "Sample.Clock",
-                            }
-                        ],
-                    }
-                ],
-                transaction_id=3,
-            )
-            _ = await cp.call(mv)
-            # No crash == lines 1005-1006 exercised
-            assert True
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            await ws.close()
-
-
-@pytest.mark.timeout(10)
-@pytest.mark.parametrize(
-    "setup_config_entry",
-    [{"port": 9329, "cp_id": "CP_cov_sess_ms_cast_exc", "cms": "cms_services"}],
-    indirect=True,
-)
-@pytest.mark.parametrize("cp_id", ["CP_cov_sess_ms_cast_exc"])
-@pytest.mark.parametrize("port", [9329])
-async def test_session_energy_meter_start_cast_exception(
+async def test_non_numeric_sampled_value_coerces_to_zero(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
-    """Test session energy path when meter_start cannot be cast to float."""
+    """A sampled value that cannot parse must coerce to 0.0, not kill the call.
+
+    Drives the guard at ocppv16 on_meter_values (value = float(value)
+    except -> 0.0) with the input it exists for. The previous version of
+    this test monkeypatched get_energy_kwh on what it believed was a
+    module (actually the ChargePoint class), drove an unguarded raise the
+    library swallowed into a CALLError the suppressing client never saw,
+    and asserted True - it could not fail. suppress=False makes any
+    unhandled server-side exception fail this test loudly.
+    """
     cs = setup_config_entry
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
@@ -952,8 +904,81 @@ async def test_session_energy_meter_start_cast_exception(
             await cp.send_boot_notification()
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
-            # Poison meter_start with a non-float so that float() raises
-            srv._metrics[(1, "Energy.Meter.Start")].value = object()
+
+            mv = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "garbage",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "context": "Sample.Clock",
+                            }
+                        ],
+                    }
+                ],
+                transaction_id=3,
+            )
+            resp = await cp.call(mv, suppress=False)
+            assert resp is not None
+
+            # The guard coerced the unparseable reading to 0.0 and the
+            # session machinery seeded its baseline from it. A numeric
+            # input here ("1000") lands 1.0 instead - the assert is
+            # input-sensitive, so the coercion is what it verifies.
+            assert srv._metrics[(1, "Energy.Active.Import.Register")].value == 0.0
+            assert srv._metrics[(1, "Energy.Meter.Start")].value == 0.0
+            assert srv._metrics[(1, "Energy.Session")].value == 0.0
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9329, "cp_id": "CP_ms_restore", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_ms_restore"])
+@pytest.mark.parametrize("port", [9329])
+async def test_meter_start_restores_from_ha_state(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """A numeric restored state becomes the session baseline after restart.
+
+    Seeds the meter-start sensor's HA state the way a real restart leaves
+    it and asserts the restore path consumed it: session energy is the
+    reading minus the RESTORED baseline. Removing the seeded state flips
+    the outcome (baseline re-seeds from the reading, session becomes 0.0),
+    so the assertion is input-sensitive - this test is the discriminating
+    twin of the non-numeric case below, which converges with the no-state
+    path by design.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            # Drain boot-era update tasks before seeding: a straggler
+            # dispatch would republish the sensor as unknown over the seed.
+            await hass.async_block_till_done()
+            assert srv._metrics[(1, "Energy.Meter.Start")].value is None
+            # The entity id get_ha_metric builds for connector 1 of cpid
+            # "test_cpid"; the value is what RestoreSensor would republish.
+            hass.states.async_set(
+                "sensor.test_cpid_connector_1_energy_meter_start", "0.5"
+            )
 
             mv = call.MeterValues(
                 connector_id=1,
@@ -972,9 +997,87 @@ async def test_session_energy_meter_start_cast_exception(
                 ],
                 transaction_id=4,
             )
-            _ = await cp.call(mv)
-            # No crash is sufficient to cover lines 1023-1024
-            assert True
+            resp = await cp.call(mv, suppress=False)
+            assert resp is not None
+
+            assert srv._metrics[(1, "Energy.Meter.Start")].value == 0.5
+            # 1000 Wh reading (1.0 kWh) minus the restored 0.5 baseline -
+            # the healthy subtraction branch, driven with real inputs.
+            assert srv._metrics[(1, "Energy.Session")].value == 0.5
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9417, "cp_id": "CP_ms_restore_bad", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_ms_restore_bad"])
+@pytest.mark.parametrize("port", [9417])
+async def test_meter_start_restore_rejects_non_numeric_state(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """A garbage restored state is rejected by the cast guard, not stored.
+
+    Drives the float() guard in on_meter_values' restore block with the
+    input it exists for. The guard swallows the ValueError, the metric
+    stays None, and the session machinery re-seeds its baseline from the
+    reading. Removing the guard makes float() raise unhandled, the server
+    answers a CALLError, and suppress=False fails this test loudly.
+
+    This replaces a test that wrote a raw object() sentinel into the
+    metric: the sentinel crashed an UNGUARDED line the test never claimed
+    to cover, the suppressing client discarded the resulting CALLError so
+    assert True passed anyway, and the poison outlived the test into the
+    sensor's teardown render, detonating environment-dependently as
+    "Task exception was never retrieved".
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            # Drain boot-era update tasks before seeding (see twin above).
+            await hass.async_block_till_done()
+            assert srv._metrics[(1, "Energy.Meter.Start")].value is None
+            hass.states.async_set(
+                "sensor.test_cpid_connector_1_energy_meter_start", "not-a-number"
+            )
+
+            mv = call.MeterValues(
+                connector_id=1,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "1000",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "context": "Sample.Clock",
+                            }
+                        ],
+                    }
+                ],
+                transaction_id=4,
+            )
+            resp = await cp.call(mv, suppress=False)
+            assert resp is not None
+
+            # Guard rejected the garbage: baseline re-seeded from the
+            # reading, session starts at zero.
+            assert srv._metrics[(1, "Energy.Meter.Start")].value == 1.0
+            assert srv._metrics[(1, "Energy.Session")].value == 0.0
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

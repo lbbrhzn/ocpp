@@ -22,7 +22,7 @@ on every run. The load-bearing assertion here is therefore structural -
 the entity object must be a fresh instance created by the post-reload
 platforms, because the bug's signature is the OLD platforms surviving
 with their old entities. The log check is a secondary signal only, and
-tracks Home Assistant core wording.
+tracks Home Assistant core wording via lifecycle_asserts.
 """
 
 import asyncio
@@ -30,14 +30,18 @@ from unittest.mock import patch
 
 import pytest
 import websockets.asyncio.server
-from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ocpp.const import CONF_CPIDS, DOMAIN
 
 from .const import MOCK_CONFIG_DATA, MOCK_CONFIG_DATA_1, MOCK_CONFIG_CP_APPEND
-
-PLATFORM_DOMAINS = ("sensor", "switch", "number", "button")
+from .lifecycle_asserts import (
+    assert_no_swallowed_lifecycle_errors,
+    assert_platforms_hold,
+    assert_rebuilt,
+    live_entity,
+    load_platform_components,
+)
 
 
 @pytest.fixture(name="bypass_websockets")
@@ -60,49 +64,6 @@ def bypass_websockets_fixture():
         yield
 
 
-async def _load_platform_components(hass):
-    """Load the platform integrations globally, as any real install has.
-
-    Without this the harness lets an over-eager unload off the hook: core
-    short-circuits unloading a platform whose component is not loaded at
-    all, a state that does not exist on a live system.
-    """
-    for domain in PLATFORM_DOMAINS:
-        assert await async_setup_component(hass, domain, {})
-    await hass.async_block_till_done()
-
-
-def _setup_errors(caplog):
-    """Return the swallowed platform-collision log records."""
-    return [
-        record
-        for record in caplog.records
-        if "Error setting up entry" in record.getMessage()
-        or "has already been setup" in record.getMessage()
-    ]
-
-
-def _platforms_holding(hass, entry_id):
-    """Return which entity platforms currently hold this entry.
-
-    Reads EntityComponent._platforms, which is core-private: a rename
-    breaks this helper loudly (KeyError), not silently. Accepted because
-    the public surface has no way to ask "who holds this entry", and the
-    freshness assertions below do not depend on it.
-    """
-    components = hass.data.get("entity_components", {})
-    return {
-        domain
-        for domain in PLATFORM_DOMAINS
-        if domain in components and entry_id in components[domain]._platforms
-    }
-
-
-def _live_entity(hass, entity_id):
-    """Return the entity object the number platform currently owns."""
-    return hass.data["entity_components"]["number"].get_entity(entity_id)
-
-
 async def test_reload_with_charger_offline_keeps_every_platform(
     hass, bypass_websockets, caplog
 ):
@@ -119,23 +80,20 @@ async def test_reload_with_charger_offline_keeps_every_platform(
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert _platforms_holding(hass, entry.entry_id) == set(PLATFORM_DOMAINS)
+    assert_platforms_hold(hass, entry.entry_id)
     eid = "number.test_cpid_9001_connector_1_maximum_current"
-    entity_before = _live_entity(hass, eid)
+    entity_before = live_entity(hass, eid, "number")
     assert entity_before is not None
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
 
     # The structural check: a clean reload tears the platforms down and
-    # builds new ones, so the entity must be a fresh object. The broken
-    # path leaves the pre-reload platforms - and this exact entity
-    # instance - in place, whatever the logs say.
-    entity_after = _live_entity(hass, eid)
-    assert entity_after is not None
-    assert entity_after is not entity_before
-    assert _setup_errors(caplog) == []
-    assert _platforms_holding(hass, entry.entry_id) == set(PLATFORM_DOMAINS)
+    # builds new ones, so the entity must be a fresh object.
+    entity_after = live_entity(hass, eid, "number")
+    assert_rebuilt(entity_before, entity_after)
+    assert_no_swallowed_lifecycle_errors(caplog)
+    assert_platforms_hold(hass, entry.entry_id)
 
 
 async def test_a_second_offline_reload_is_also_clean(hass, bypass_websockets, caplog):
@@ -158,19 +116,19 @@ async def test_a_second_offline_reload_is_also_clean(hass, bypass_websockets, ca
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     eid = "number.test_cpid_9001_connector_1_maximum_current"
-    entity_start = _live_entity(hass, eid)
+    entity_start = live_entity(hass, eid, "number")
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    entity_mid = _live_entity(hass, eid)
+    entity_mid = live_entity(hass, eid, "number")
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    entity_end = _live_entity(hass, eid)
+    entity_end = live_entity(hass, eid, "number")
 
-    assert entity_start is not entity_mid
-    assert entity_mid is not entity_end
-    assert _setup_errors(caplog) == []
-    assert _platforms_holding(hass, entry.entry_id) == set(PLATFORM_DOMAINS)
+    assert_rebuilt(entity_start, entity_mid)
+    assert_rebuilt(entity_mid, entity_end)
+    assert_no_swallowed_lifecycle_errors(caplog)
+    assert_platforms_hold(hass, entry.entry_id)
 
 
 async def test_reload_of_a_chargerless_entry_stays_clean(
@@ -183,7 +141,7 @@ async def test_reload_of_a_chargerless_entry_stays_clean(
     skip them here - the flag has to track what setup did, in both
     directions.
     """
-    await _load_platform_components(hass)
+    await load_platform_components(hass)
     entry = MockConfigEntry(
         domain=DOMAIN,
         # MOCK_CONFIG_DATA used directly, deliberately: these chargerless
@@ -200,15 +158,12 @@ async def test_reload_of_a_chargerless_entry_stays_clean(
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert _platforms_holding(hass, entry.entry_id) == set()
+    assert_platforms_hold(hass, entry.entry_id, platforms=())
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert _setup_errors(caplog) == []
-    assert not [
-        r for r in caplog.records if "Config entry was never loaded" in r.getMessage()
-    ]
+    assert_no_swallowed_lifecycle_errors(caplog)
 
 
 async def test_first_charger_discovery_reload_transitions_cleanly(
@@ -222,7 +177,7 @@ async def test_first_charger_discovery_reload_transitions_cleanly(
     reading the entry data would try to unload platforms that do not
     exist. The flag records what this setup actually did instead.
     """
-    await _load_platform_components(hass)
+    await load_platform_components(hass)
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=MOCK_CONFIG_DATA,
@@ -242,9 +197,6 @@ async def test_first_charger_discovery_reload_transitions_cleanly(
     )
     await hass.async_block_till_done()
 
-    assert _setup_errors(caplog) == []
-    assert not [
-        r for r in caplog.records if "Config entry was never loaded" in r.getMessage()
-    ]
+    assert_no_swallowed_lifecycle_errors(caplog)
     # The reload's fresh setup saw the charger and forwarded the platforms.
-    assert _platforms_holding(hass, entry.entry_id) == set(PLATFORM_DOMAINS)
+    assert_platforms_hold(hass, entry.entry_id)
