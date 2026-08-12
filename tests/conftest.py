@@ -16,6 +16,8 @@ from .charge_point_test import (
     remove_configuration,
 )
 
+from .lifecycle_asserts import assert_no_swallowed_lifecycle_errors
+
 pytest_plugins = "pytest_homeassistant_custom_component"
 
 
@@ -23,6 +25,27 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations defined in the test dir."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def fail_on_swallowed_lifecycle_errors(request, caplog):
+    """Fail any test whose log carries a swallowed lifecycle failure.
+
+    Home Assistant turns platform-setup exceptions, forward collisions
+    and bad unloads into log lines while the calls report success, so a
+    regression fails no assertion anywhere - this tripwire makes the
+    nearest test fail instead. Tests that provoke these deliberately
+    opt out with @pytest.mark.allow_lifecycle_errors.
+
+    Only the synchronous signatures are enforced here: "Task exception
+    was never retrieved" surfaces at GC/loop-drain time, so it can miss
+    or cross test boundaries depending on environment - dedicated
+    lifecycle tests assert it inside controlled windows instead.
+    """
+    yield
+    if request.node.get_closest_marker("allow_lifecycle_errors"):
+        return
+    assert_no_swallowed_lifecycle_errors(caplog, include_async=False)
 
 
 # This fixture is used to prevent HomeAssistant from attempting to create and dismiss persistent

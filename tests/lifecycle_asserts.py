@@ -45,13 +45,22 @@ ASYNC_SWALLOWED_SIGNATURES = ("Task exception was never retrieved",)
 
 
 def swallowed_lifecycle_errors(caplog, include_async=True):
-    """Return the swallowed-failure records captured by caplog."""
+    """Return the swallowed-failure records captured by caplog.
+
+    Reads all three capture phases explicitly: caplog.records is scoped
+    to the CURRENT phase, so a fixture-teardown check reading it would
+    see only teardown records and miss everything the test body logged -
+    a tripwire that can never fire (caught by its synthetic mutant).
+    """
     signatures = SYNC_SWALLOWED_SIGNATURES
     if include_async:
         signatures = signatures + ASYNC_SWALLOWED_SIGNATURES
+    records = []
+    for phase in ("setup", "call", "teardown"):
+        records.extend(caplog.get_records(phase))
     return [
         record
-        for record in caplog.records
+        for record in records
         if any(sig in record.getMessage() for sig in signatures)
     ]
 
