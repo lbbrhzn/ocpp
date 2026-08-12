@@ -224,18 +224,23 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
             if not isinstance(cp_map, dict) or not cp_map:
                 continue
 
-            cp_id, cp_data = next(iter(cp_map.items()))
-            if not isinstance(cp_data, dict):
-                continue
+            migrated_cp_map = {}
+            for cp_id, cp_data in cp_map.items():
+                if not isinstance(cp_data, dict):
+                    migrated_cp_map[cp_id] = cp_data
+                    continue
 
-            migrated_cp_data = {**cp_data}
-            if config_entry.minor_version == 0:
-                migrated_cp_data.setdefault(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
-            migrated_cp_data.setdefault(
-                CONF_ENABLE_HA_NOTIFICATIONS,
-                DEFAULT_ENABLE_HA_NOTIFICATIONS,
-            )
-            cpids[idx] = {cp_id: migrated_cp_data}
+                migrated_cp_data = {**cp_data}
+                if config_entry.minor_version == 0:
+                    migrated_cp_data.setdefault(
+                        CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS
+                    )
+                migrated_cp_data.setdefault(
+                    CONF_ENABLE_HA_NOTIFICATIONS,
+                    DEFAULT_ENABLE_HA_NOTIFICATIONS,
+                )
+                migrated_cp_map[cp_id] = migrated_cp_data
+            cpids[idx] = migrated_cp_map
 
         data[CONF_CPIDS] = cpids
         hass.config_entries.async_update_entry(

@@ -195,6 +195,12 @@ async def test_migration_adds_notification_preference_to_existing_chargers(
         for cp_data in cp_map.values():
             cp_data.pop(CONF_ENABLE_HA_NOTIFICATIONS, None)
 
+    cp_map = old_data[CONF_CPIDS][0]
+    second_cp_data = deepcopy(next(iter(cp_map.values())))
+    second_cp_data[CONF_CPID] = "test_cpid_9002"
+    cp_map["CP_2"] = second_cp_data
+    cp_map["legacy_value"] = "preserved"
+
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         data=old_data,
@@ -205,11 +211,14 @@ async def test_migration_adds_notification_preference_to_existing_chargers(
     config_entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, config_entry)
+    migrated_cp_map = config_entry.data[CONF_CPIDS][0]
+    assert migrated_cp_map.keys() == cp_map.keys()
     assert all(
         cp_data[CONF_ENABLE_HA_NOTIFICATIONS] is DEFAULT_ENABLE_HA_NOTIFICATIONS
-        for cp_map in config_entry.data[CONF_CPIDS]
-        for cp_data in cp_map.values()
+        for cp_data in migrated_cp_map.values()
+        if isinstance(cp_data, dict)
     )
+    assert migrated_cp_map["legacy_value"] == "preserved"
     assert config_entry.version == 2
     assert config_entry.minor_version == 2
 

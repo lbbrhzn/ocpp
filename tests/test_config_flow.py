@@ -1,5 +1,6 @@
 """Test ocpp config flow."""
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -119,7 +120,7 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
 
     # Check that the config flow is complete and a new entry is created with
     # the input data
-    flow_output = MOCK_CONFIG_FLOW.copy()
+    flow_output = deepcopy(MOCK_CONFIG_FLOW)
     flow_output[CONF_CPIDS][-1]["test_cp_id"][CONF_MONITORED_VARIABLES_AUTOCONFIG] = (
         False
     )
