@@ -970,6 +970,9 @@ async def test_meter_start_restores_from_ha_state(
             await cp.send_boot_notification()
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
+            # Drain boot-era update tasks before seeding: a straggler
+            # dispatch would republish the sensor as unknown over the seed.
+            await hass.async_block_till_done()
             assert srv._metrics[(1, "Energy.Meter.Start")].value is None
             # The entity id get_ha_metric builds for connector 1 of cpid
             # "test_cpid"; the value is what RestoreSensor would republish.
@@ -1044,6 +1047,8 @@ async def test_meter_start_restore_rejects_non_numeric_state(
             await cp.send_boot_notification()
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
+            # Drain boot-era update tasks before seeding (see twin above).
+            await hass.async_block_till_done()
             assert srv._metrics[(1, "Energy.Meter.Start")].value is None
             hass.states.async_set(
                 "sensor.test_cpid_connector_1_energy_meter_start", "not-a-number"

@@ -21,15 +21,23 @@ PLATFORM_DOMAINS = ("sensor", "switch", "number", "button")
 
 # Logged synchronously, in-band, by the setup/reload/unload call the test
 # itself makes - deterministic, and safe for the autouse tripwire.
+# Note: a mid-test caplog.clear() empties the live phase list, so records
+# logged before the clear are invisible to these checks - clear sparingly.
 SYNC_SWALLOWED_SIGNATURES = (
     # HA wraps a platform's setup exception into this line and the entry
     # still reports loaded (#2053: every platform dead, nothing failed).
     "Error setting up entry",
+    # HA swallows any exception from an integration's unload the same
+    # way (config_entries "Error unloading entry %s for %s") - the
+    # deterministic fingerprint of a broken unload during teardown.
+    "Error unloading entry",
     # A forward colliding with still-registered platforms - the unload
-    # that claimed success but never ran (#2054).
+    # that claimed success but never ran (#2054). This text is raised,
+    # not logged: it reaches a record via the exception attached to
+    # "Error setting up entry" (scanned below) or a task-death repr.
     "has already been setup",
     # The mirror image: unloading platforms that were never forwarded
-    # (#2054's first-discovery edge).
+    # (#2054's first-discovery edge). Raised, not logged, like the above.
     "Config entry was never loaded",
 )
 
@@ -44,8 +52,24 @@ SYNC_SWALLOWED_SIGNATURES = (
 ASYNC_SWALLOWED_SIGNATURES = ("Task exception was never retrieved",)
 
 
-def swallowed_lifecycle_errors(caplog, include_async=True):
-    """Return the swallowed-failure records captured by caplog.
+def _searchable_text(record):
+    """Message plus any attached exception text.
+
+    The collision/never-loaded signatures are RAISE sites: their text
+    never appears in a log message, only in the exception Home Assistant
+    attaches to its own "Error setting up entry" line - so the traceback
+    must be scanned for them to match on the deterministic path.
+    """
+    parts = [record.getMessage()]
+    if record.exc_text:
+        parts.append(record.exc_text)
+    elif record.exc_info and record.exc_info[1] is not None:
+        parts.append(str(record.exc_info[1]))
+    return "\n".join(parts)
+
+
+def _offending(caplog, include_async):
+    """Yield (phase, record) pairs matching the swallowed signatures.
 
     Reads all three capture phases explicitly: caplog.records is scoped
     to the CURRENT phase, so a fixture-teardown check reading it would
@@ -55,21 +79,25 @@ def swallowed_lifecycle_errors(caplog, include_async=True):
     signatures = SYNC_SWALLOWED_SIGNATURES
     if include_async:
         signatures = signatures + ASYNC_SWALLOWED_SIGNATURES
-    records = []
-    for phase in ("setup", "call", "teardown"):
-        records.extend(caplog.get_records(phase))
     return [
-        record
-        for record in records
-        if any(sig in record.getMessage() for sig in signatures)
+        (phase, record)
+        for phase in ("setup", "call", "teardown")
+        for record in caplog.get_records(phase)
+        if any(sig in _searchable_text(record) for sig in signatures)
     ]
+
+
+def swallowed_lifecycle_errors(caplog, include_async=True):
+    """Return the swallowed-failure records captured by caplog."""
+    return [record for _, record in _offending(caplog, include_async)]
 
 
 def assert_no_swallowed_lifecycle_errors(caplog, include_async=True):
     """Fail if the log carries any swallowed lifecycle-failure signature."""
-    offenders = swallowed_lifecycle_errors(caplog, include_async)
+    offenders = _offending(caplog, include_async)
     assert not offenders, "Swallowed lifecycle errors in log:\n" + "\n".join(
-        f"  {record.levelname}: {record.getMessage()}" for record in offenders
+        f"  [{phase}] {record.levelname}: {record.getMessage()}"
+        for phase, record in offenders
     )
 
 
