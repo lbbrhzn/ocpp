@@ -102,6 +102,18 @@ match transactions and it won't report some meter values such as session time.
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/)
 (Ability to configure a custom OCPP server such as HA is being discontinued)
 
+## [FoxESS A-series](https://www.fox-ess.com/) (tested: A022KP1, firmware 1.10/1.06)
+
+Works well on OCPP 1.6J: remote start/stop, status, metering and the `Maximum Current` control all behave. The firmware's OCPP 2.0.1 support has several defects, all reproduced on the wire and confirmed by FoxESS support as protocol-level firmware defects, logged with their engineering team (no fix timeline yet). **Until fixed firmware ships, FoxESS's own guidance matches ours: run this charger on 1.6J.** On 2.0.1:
+
+* `Maximum Current` does not work. The firmware validates 2.0.1 requests against its 1.6 schema and rejects every spec-valid `SetChargingProfile` with `PropertyConstraintViolation: csChargingProfiles validation failed` (a 1.6 field name), so the slider has no effect on the charger.
+* Restarting a stopped charge can knock the charger offline. A `RequestStartTransaction` sent within a few minutes of a `RequestStopTransaction` is accepted and opens a transaction, but no power is ever offered to the vehicle (the charger reports `SuspendedEV`), and the charger then drops offline entirely. Automations that stop and later restart charging - tariff windows, state-of-charge limits - hit this path.
+* Only session energy is reported by default (`TxUpdatedMeasurands = Energy.Active.Import.Register`), so Power/Current/Voltage sensors stay unavailable unless additional measurands are configured on the charger itself.
+* `connectorStatus: Available` is reported after every transaction ends even with the cable still plugged in (on 1.6 the same firmware correctly reports `Finishing`/`Preparing`), so plug detection via the status sensor is unreliable.
+* If the charger's app is left on protocol *auto* while the integration pins 2.0.1, the firmware sends 1.6-shaped messages over the negotiated `ocpp2.0.1` connection.
+
+Reconnection (either protocol): the charger's OCPP client does not reliably redial after an established connection drops. After a Home Assistant restart or an integration reload, silent gaps of ~6 to 19+ minutes before the next connection attempt have been observed (occasionally it reconnects immediately), while a *refused* handshake - e.g. a protocol mismatch - is retried every ~10 seconds indefinitely. If the charger's entities stay unavailable after an HA restart, re-apply the protocol setting in the FoxESS app: that forces a reconnect within ~90 seconds.
+
 ## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
 
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
