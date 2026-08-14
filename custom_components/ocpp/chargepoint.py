@@ -290,7 +290,12 @@ class ChargePoint(cp):
 
         self._attr_supported_features = prof.NONE
         alphabet = string.ascii_uppercase + string.digits
-        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
+        # Stay short of the 20 character IdToken limit, for non-compliant
+        # chargers that read past their own tag buffer when it is filled
+        # exactly: they echo a longer tag back in StopTransaction than the spec
+        # allows, which the payload validator rejects, so the stop never
+        # completes and charging continues.
+        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
 
     def _init_connector_slots(self, conn_id: int) -> None:
