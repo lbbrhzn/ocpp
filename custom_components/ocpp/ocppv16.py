@@ -1041,6 +1041,12 @@ class ChargePoint(cp):
 
         self.process_measurands(meter_values, transaction_matches, connector_id)
 
+        # The closing values are the last thing a charger sends for a session and
+        # they still carry the final current and power, so they would otherwise
+        # leave those sensors reading as though charging never stopped.
+        if tx_ended:
+            self._zero_flow_measurands(connector_id)
+
         if tx_has_id and transaction_matches:
             try:
                 tx_start_epoch = float(self._metrics[tx_key].value)
@@ -1091,16 +1097,7 @@ class ChargePoint(cp):
                 ChargePointStatus.suspended_ev.value,
                 ChargePointStatus.suspended_evse.value,
             ):
-                for meas in [
-                    Measurand.current_import.value,
-                    Measurand.power_active_import.value,
-                    Measurand.power_reactive_import.value,
-                    Measurand.current_export.value,
-                    Measurand.power_active_export.value,
-                    Measurand.power_reactive_export.value,
-                ]:
-                    if meas in self._metrics[connector_id]:
-                        self._metrics[(connector_id, meas)].value = 0
+                self._zero_flow_measurands(connector_id)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
@@ -1225,17 +1222,7 @@ class ChargePoint(cp):
                 session_kwh = 0.0
             self._metrics[(conn, csess.session_energy.value)].value = session_kwh
 
-        for meas in [
-            Measurand.current_import.value,
-            Measurand.power_active_import.value,
-            Measurand.power_reactive_import.value,
-            Measurand.current_export.value,
-            Measurand.power_active_export.value,
-            Measurand.power_reactive_export.value,
-        ]:
-            key = (conn, meas)
-            if key in self._metrics:
-                self._metrics[key].value = 0
+        self._zero_flow_measurands(conn)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
@@ -1257,3 +1244,17 @@ class ChargePoint(cp):
         self._metrics[0][cstat.heartbeat.value].value = now
         self._async_refresh_metric_entities([cstat.heartbeat.value])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def _zero_flow_measurands(self, connector_id: int) -> None:
+        """Clear the readings that only have meaning while current is flowing."""
+        for meas in [
+            Measurand.current_import.value,
+            Measurand.power_active_import.value,
+            Measurand.power_reactive_import.value,
+            Measurand.current_export.value,
+            Measurand.power_active_export.value,
+            Measurand.power_reactive_export.value,
+        ]:
+            key = (connector_id, meas)
+            if key in self._metrics:
+                self._metrics[key].value = 0
