@@ -383,6 +383,7 @@ class ChargePoint(cp):
 
         req = call.TriggerMessage(requested_message=trig)
         resp = await self.call(req)
+        _LOGGER.debug("TriggerMessage %s to %s answered: %s", trig, self.id, resp)
         if resp.status != TriggerMessageStatus.accepted:
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
@@ -657,6 +658,12 @@ class ChargePoint(cp):
             connector_id=connector_id, id_tag=self._remote_id_tag
         )
         resp = await self.call(req)
+        _LOGGER.debug(
+            "RemoteStartTransaction to %s connector=%s answered: %s",
+            self.id,
+            connector_id,
+            resp,
+        )
         if resp.status == RemoteStartStopStatus.accepted:
             return True
         else:
@@ -1083,6 +1090,14 @@ class ChargePoint(cp):
     @on(Action.status_notification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         """Handle a status notification."""
+        _LOGGER.debug(
+            "Status notification from %s: connector=%s status=%s error_code=%s %s",
+            self.id,
+            connector_id,
+            status,
+            error_code,
+            kwargs,
+        )
 
         if connector_id == 0 or connector_id is None:
             self._metrics[(0, cstat.status.value)].value = status

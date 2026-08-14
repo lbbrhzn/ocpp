@@ -339,6 +339,7 @@ class ChargePoint(cp):
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
         try:
+            _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
             await self.fetch_supported_features()
             self.num_connectors = await self.get_number_of_connectors()
@@ -393,6 +394,12 @@ class ChargePoint(cp):
             # Ensure HA states are correct immediately after connection
             self.hass.async_create_task(self.update(self.settings.cpid))
 
+        except asyncio.CancelledError:
+            # The connection dropped mid-setup, so the task was cancelled rather
+            # than failed. CancelledError is not an Exception, so it passes the
+            # handler below and setup ends without a word about why.
+            _LOGGER.debug("'%s' post connection setup cancelled part way", self.id)
+            raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 
