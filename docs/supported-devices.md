@@ -53,6 +53,10 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 ## [Autel MaxiCharger](https://autelenergy.us/pages/residential)
 The MaxiCharger works with the OCPP integration, but the community has run into a few quirks - see [Issue #1523](https://github.com/lbbrhzn/ocpp/issues/1523) for the full discussion.
 
+Confirmed working on units reporting `MaxiChargerAC` as their model over `BootNotification` (vendor `Autel`, firmware `PFA0102|V0.00.00|V1.38.00||2.4.3.0`), speaking OCPP 1.6-J. Worth stating explicitly because Autel support has told at least one owner that their unit does not support OCPP and that only the AC Smart Elite does; that is not the case.
+
+On a local network no TLS setup is needed - a plain `ws://<home-assistant-ip>:9000` server URL in the charger's OCPP settings is enough. The section below applies only if you are terminating TLS with a reverse proxy.
+
 ### Getting `wss://` (TLS) working behind a reverse proxy (e.g. Traefik)
 
 If you're terminating TLS with a reverse proxy such as Traefik (e.g. using Let's Encrypt), the "certificate" field in the Autel's OCPP server setup is required. The charger will silently drop the `wss://` connection if you do not provide a certificate file.
@@ -75,6 +79,7 @@ When writing automations against the MaxiCharger:
 
 - Start/stop charging via `switch.<cpid>_charge_control`, not a remote-start service call.
 - If a session is stopped via `switch.<cpid>_charge_control` while the car stays plugged in (e.g. leaving an off-peak window), the connector sits in `Finishing` rather than going back to `Available`. It won't accept a new session on its own when charging should resume (e.g. the next off-peak window) - press `button.<cpid>_reset` to start a new session without unplugging the car.
+- Gate on `sensor.<cpid>_status_connector`, not `sensor.<cpid>_status`. The latter can read `Available` while a car is plugged in and simply not drawing current; the connector sensor reported `SuspendedEV` for the same charger at the same moment.
 
 ## [CTEK Chargestorm Connected 1, dual connectors](https://www.ctek.com/uk/ev-charging/chargestorm-connected-1)
 See CTEK Chargestorm Connected 2 below for getting started instructions.
