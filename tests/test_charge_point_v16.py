@@ -2663,6 +2663,96 @@ async def test_on_meter_values_tx_updates_connector_and_session_energy(
             await ws.close()
 
 
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9106, "cp_id": "CP_tx_end", "cms": "cms_tx_end"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_tx_end"])
+@pytest.mark.parametrize("port", [9106])
+async def test_on_meter_values_closing_values_after_stop(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Closing values must end the session without reviving it or moving its energy.
+
+    A charger sends the Transaction.End values after StopTransaction. They still
+    belong to the transaction, so on a charger that reports session energy in the
+    energy register they must land in Energy.Session and leave the lifetime
+    register alone, and they must not restore the transaction that just ended.
+    """
+
+    cs: CentralSystem = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+
+            # meter_start of 0 marks a charger that reports session energy in the
+            # energy register rather than a lifetime total.
+            await cp.send_start_transaction(meter_start=0)
+
+            async def send_eair(context: str | None, kwh: str):
+                sampled = {
+                    "measurand": "Energy.Active.Import.Register",
+                    "unit": "kWh",
+                    "value": kwh,
+                }
+                if context is not None:
+                    sampled["context"] = context
+                await cp.call(
+                    call.MeterValues(
+                        connector_id=1,
+                        transaction_id=cp.active_transactionId,
+                        meter_value=[
+                            {
+                                "timestamp": datetime.now(tz=UTC).isoformat(),
+                                "sampledValue": [sampled],
+                            }
+                        ],
+                    )
+                )
+
+            await send_eair("Sample.Periodic", "2.0")
+            assert cs.get_metric(
+                cp_id, "Energy.Session", connector_id=1
+            ) == pytest.approx(2.0, rel=1e-6)
+            lifetime_before = cs.get_metric(
+                cp_id, "Energy.Active.Import.Register", connector_id=1
+            )
+
+            await cp.send_stop_transaction()
+            await send_eair("Transaction.End", "2.5")
+
+            assert cs.get_metric(cp_id, "Transaction.Id", connector_id=1) == 0
+            assert cs.get_metric(
+                cp_id, "Energy.Session", connector_id=1
+            ) == pytest.approx(2.5, rel=1e-6)
+            assert (
+                cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+                == lifetime_before
+            )
+
+            # The context field is optional in OCPP 1.6, so a trailing reading
+            # that omits it must be recognised by its transaction id alone.
+            await send_eair(None, "2.6")
+            assert cs.get_metric(cp_id, "Transaction.Id", connector_id=1) == 0
+            assert (
+                cs.get_metric(cp_id, "Energy.Active.Import.Register", connector_id=1)
+                == lifetime_before
+            )
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",

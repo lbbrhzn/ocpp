@@ -290,7 +290,12 @@ class ChargePoint(cp):
 
         self._attr_supported_features = prof.NONE
         alphabet = string.ascii_uppercase + string.digits
-        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(20))
+        # Stay short of the 20 character IdToken limit, for non-compliant
+        # chargers that read past their own tag buffer when it is filled
+        # exactly: they echo a longer tag back in StopTransaction than the spec
+        # allows, which the payload validator rejects, so the stop never
+        # completes and charging continues.
+        self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
 
     def _init_connector_slots(self, conn_id: int) -> None:
@@ -334,6 +339,7 @@ class ChargePoint(cp):
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
         try:
+            _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
             await self.fetch_supported_features()
             self.num_connectors = await self.get_number_of_connectors()
@@ -388,6 +394,12 @@ class ChargePoint(cp):
             # Ensure HA states are correct immediately after connection
             self.hass.async_create_task(self.update(self.settings.cpid))
 
+        except asyncio.CancelledError:
+            # The connection dropped mid-setup, so the task was cancelled rather
+            # than failed. CancelledError is not an Exception, so it passes the
+            # handler below and setup ends without a word about why.
+            _LOGGER.debug("'%s' post connection setup cancelled part way", self.id)
+            raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 

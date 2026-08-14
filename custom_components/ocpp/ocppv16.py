@@ -28,6 +28,7 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
+    ReadingContext,
     RegistrationStatus,
     RemoteStartStopStatus,
     ResetStatus,
@@ -102,6 +103,7 @@ class ChargePoint(cp):
             charger,
         )
         self._active_tx: dict[int, int] = {}  # connector_id -> transaction_id
+        self._ended_tx: dict[int, int] = {}  # connector_id -> last stopped tx
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
@@ -381,6 +383,7 @@ class ChargePoint(cp):
 
         req = call.TriggerMessage(requested_message=trig)
         resp = await self.call(req)
+        _LOGGER.debug("TriggerMessage %s to %s answered: %s", trig, self.id, resp)
         if resp.status != TriggerMessageStatus.accepted:
             _LOGGER.warning("Failed with response: %s", resp.status)
             return False
@@ -655,6 +658,12 @@ class ChargePoint(cp):
             connector_id=connector_id, id_tag=self._remote_id_tag
         )
         resp = await self.call(req)
+        _LOGGER.debug(
+            "RemoteStartTransaction to %s connector=%s answered: %s",
+            self.id,
+            connector_id,
+            resp,
+        )
         if resp.status == RemoteStartStopStatus.accepted:
             return True
         else:
@@ -958,8 +967,23 @@ class ChargePoint(cp):
         recorded_tx = int(self._metrics[tx_key].value or 0)
         active_tx = int(self._active_tx.get(connector_id, 0) or 0)
 
+        # A transaction's closing values arrive after its StopTransaction, so
+        # adopting their id below would revive the session that just ended. A
+        # charger says so with a Transaction.End context, but OCPP leaves that
+        # field optional, so fall back to the id of the transaction we last saw
+        # stop on this connector.
+        tx_ended: bool = bool(transaction_id) and (
+            transaction_id == int(self._ended_tx.get(connector_id, 0) or 0)
+            or any(
+                sampled_value.get(om.context.value)
+                == ReadingContext.transaction_end.value
+                for bucket in meter_value
+                for sampled_value in bucket.get(om.sampled_value.name, [])
+            )
+        )
+
         # Self-heal after restart: adopt incoming txId if we have none recorded yet
-        if transaction_id and (recorded_tx == 0 and active_tx == 0):
+        if transaction_id and not tx_ended and (recorded_tx == 0 and active_tx == 0):
             self._metrics[tx_key].value = transaction_id
             self._active_tx[connector_id] = transaction_id
             active_tx = transaction_id
@@ -987,6 +1011,12 @@ class ChargePoint(cp):
         transaction_matches: bool = False
         # Match is also false if no transaction is in progress, i.e. active_tx==transaction_id==0
         if transaction_id == active_tx and transaction_id != 0:
+            transaction_matches = True
+        elif transaction_id != 0 and tx_ended:
+            # The closing values arrive once the transaction has been cleared, but
+            # they belong to it and carry its final energy figures. Treating them
+            # as outside a transaction would file session energy as lifetime
+            # energy on chargers that report the two in the same measurand.
             transaction_matches = True
         elif transaction_id != 0 and active_tx != 0 and transaction_id != active_tx:
             _LOGGER.warning(
@@ -1017,6 +1047,12 @@ class ChargePoint(cp):
             meter_values.append(measurands)
 
         self.process_measurands(meter_values, transaction_matches, connector_id)
+
+        # The closing values are the last thing a charger sends for a session and
+        # they still carry the final current and power, so they would otherwise
+        # leave those sensors reading as though charging never stopped.
+        if tx_ended:
+            self._zero_flow_measurands(connector_id)
 
         if tx_has_id and transaction_matches:
             try:
@@ -1054,6 +1090,14 @@ class ChargePoint(cp):
     @on(Action.status_notification)
     def on_status_notification(self, connector_id, error_code, status, **kwargs):
         """Handle a status notification."""
+        _LOGGER.debug(
+            "Status notification from %s: connector=%s status=%s error_code=%s %s",
+            self.id,
+            connector_id,
+            status,
+            error_code,
+            kwargs,
+        )
 
         if connector_id == 0 or connector_id is None:
             self._metrics[(0, cstat.status.value)].value = status
@@ -1068,16 +1112,7 @@ class ChargePoint(cp):
                 ChargePointStatus.suspended_ev.value,
                 ChargePointStatus.suspended_evse.value,
             ):
-                for meas in [
-                    Measurand.current_import.value,
-                    Measurand.power_active_import.value,
-                    Measurand.power_reactive_import.value,
-                    Measurand.current_export.value,
-                    Measurand.power_active_export.value,
-                    Measurand.power_reactive_export.value,
-                ]:
-                    if meas in self._metrics[connector_id]:
-                        self._metrics[(connector_id, meas)].value = 0
+                self._zero_flow_measurands(connector_id)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
@@ -1127,6 +1162,7 @@ class ChargePoint(cp):
         auth_status = self.get_authorization_status(id_tag)
         if auth_status == AuthorizationStatus.accepted.value:
             tx_id = int(time.time())
+            self._ended_tx.pop(connector_id, None)
             self._active_tx[connector_id] = tx_id
             self.active_transaction_id = tx_id
             self._metrics[(connector_id, cstat.id_tag.value)].value = id_tag
@@ -1179,6 +1215,7 @@ class ChargePoint(cp):
             conn = 1  # conservative fallback
 
         # Reset active transaction (global + per-connector)
+        self._ended_tx[conn] = int(transaction_id or 0)
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
         self._metrics[(conn, cstat.id_tag.value)].value = ""
@@ -1200,17 +1237,7 @@ class ChargePoint(cp):
                 session_kwh = 0.0
             self._metrics[(conn, csess.session_energy.value)].value = session_kwh
 
-        for meas in [
-            Measurand.current_import.value,
-            Measurand.power_active_import.value,
-            Measurand.power_reactive_import.value,
-            Measurand.current_export.value,
-            Measurand.power_active_export.value,
-            Measurand.power_reactive_export.value,
-        ]:
-            key = (conn, meas)
-            if key in self._metrics:
-                self._metrics[key].value = 0
+        self._zero_flow_measurands(conn)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
@@ -1232,3 +1259,17 @@ class ChargePoint(cp):
         self._metrics[0][cstat.heartbeat.value].value = now
         self._async_refresh_metric_entities([cstat.heartbeat.value])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def _zero_flow_measurands(self, connector_id: int) -> None:
+        """Clear the readings that only have meaning while current is flowing."""
+        for meas in [
+            Measurand.current_import.value,
+            Measurand.power_active_import.value,
+            Measurand.power_reactive_import.value,
+            Measurand.current_export.value,
+            Measurand.power_active_export.value,
+            Measurand.power_reactive_export.value,
+        ]:
+            key = (connector_id, meas)
+            if key in self._metrics:
+                self._metrics[key].value = 0

@@ -156,6 +156,14 @@ Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.
 
 The "Charger idle sampling interval" is not supported. Set this to **0** to avoid a "ClockAlignedDataInterval is read-only" warning.
 
+## [Ocular LTE Plus v3](https://evse.com.au/) (tested: reports as BS-EV22, firmware 448.3251.0Q03197)
+Works, with some firmware quirks worth knowing about. The same behaviour has been seen on the BS-EV07, so it likely applies to other chargers reporting the vendor `BS AC EV Charger`.
+
+- In the charger's app, set MODE to ONLINE and enter the address without a scheme, for example `192.168.1.10:9000/central`. The examples shown in the app do not work.
+- The charger sends its closing meter reading after StopTransaction rather than before. This is handled.
+- After a remote stop the connector stays in `Finishing` until the cable is unplugged, and it rejects a remote start while it is in that state. To pause and resume a charge without unplugging, leave the session running and set the maximum current to 0 instead of stopping it.
+- Firmware 448.3251.0Q03197 returns a corrupted ID tag, truncates configuration values, and occasionally sends a malformed connection request. These have been reported to the vendor.
+
 ## [Rolec EVO](https://www.rolecserv.com/ev-products/evo)
 Tested single phase 7kW model (ROLEC5011) with firmware 1.2.7, appears to be working fine.
 
