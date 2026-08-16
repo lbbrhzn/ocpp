@@ -1,6 +1,8 @@
 {
-  "name": "Open Charge Point Protocol (OCPP) - alexisml fork",
+  "name": "Open Charge Point Protocol (OCPP)",
   "content_in_root": false,
   "homeassistant": "2022.7.0",
-  "render_readme": true
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "ocpp.zip"
 }
