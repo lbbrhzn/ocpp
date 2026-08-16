@@ -56,10 +56,96 @@
         },
         "error": {
             "auth": "Usuario/contraseña incorrecto.",
-            "measurand": "Medida desconocida"
+            "measurand": "Medida desconocida",
+            "no_measurands_selected": "No se ha seleccionado ninguna medida: seleccione al menos una",
+            "invalid_cpid": "Nombre de identidad del punto de carga no válido: use solo letras minúsculas, dígitos y _",
+            "duplicate_cpid": "Esta identidad de punto de carga ya la utiliza otro punto de carga. Elija una identidad única."
         },
         "abort": {
-            "single_instance_allowed": "Sólo se permite una única instancia."
+            "single_instance_allowed": "Sólo se permite una única instancia.",
+            "reauth_successful": "Nuevo cargador configurado",
+            "reconfigure_successful": "Configuración actualizada"
+        }
+    },
+    "exceptions": {
+        "invalid_ocpp_key": {
+            "message": "Clave OCPP no válida"
+        },
+        "ocpp_call_error": {
+            "message": "Llamada OCPP fallida: {message}"
+        },
+        "get_variables_error": {
+            "message": "No se pudo obtener la variable: {message}"
+        },
+        "set_variables_error": {
+            "message": "No se pudo establecer la variable: {message}"
+        },
+        "set_charge_rate_error": {
+            "message": "No se pudo establecer el límite de corriente de carga: {message}"
+        },
+        "unavailable": {
+            "message": "El cargador no está disponible: {message}"
+        },
+        "not_found": {
+            "message": "No se encontró ningún cargador para el id de dispositivo '{message}'. Compruebe que el devid coincide con el id del cargador en HA (cpid) o con el id del cargador OCPP."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Configuración del cargador OCPP",
+                "description": "Seleccione el punto de carga a editar.",
+                "data": {
+                    "cp_id": "Punto de carga"
+                }
+            },
+            "cp_settings": {
+                "title": "Configuración del cargador OCPP",
+                "description": "Editando el punto de carga {cp_id}. Su identidad de punto de carga (cpid: {cpid}) es fija, ya que los id de entidad se derivan de ella.",
+                "data": {
+                    "max_current": "Corriente de carga máxima",
+                    "meter_interval": "Intervalo de muestra de carga (segundos)",
+                    "monitored_variables_autoconfig": "Detección automática de medidas OCPP",
+                    "idle_interval": "Intervalo de muestreo del cargador en reposo (segundos)",
+                    "skip_schema_validation": "Omitir validación de esquema OCPP",
+                    "force_smart_charging": "Forzar perfil de función Smart Charging",
+                    "enable_ha_notifications": "Habilitar notificaciones de Home Assistant"
+                }
+            },
+            "measurands": {
+                "title": "Mediciones OCPP",
+                "description": "Seleccione qué medida(s) debe(n) utilizarse en Home Assistant.",
+                "data": {
+                    "Current.Export": "Current.Export: Flujo de corriente instantáneo del VE",
+                    "Current.Import": "Current.Import: Flujo instantáneo de corriente hacia el VE",
+                    "Current.Offered": "Current.Offered: Corriente máxima ofrecida al VE",
+                    "Energy.Active.Export.Register": "Energy.Active.Export.Register: Energía activa exportada a la red",
+                    "Energy.Active.Import.Register": "Energy.Active.Import.Register: Energía activa importada de la red",
+                    "Energy.Reactive.Export.Register": "Energy.Reactive.Export.Register: Energía reactiva exportada a la red",
+                    "Energy.Reactive.Import.Register": "Energy.Reactive.Import.Register: Energía reactiva importada de la red",
+                    "Energy.Active.Export.Interval": "Energy.Active.Export.Interval: Energía activa exportada a la red durante el último intervalo",
+                    "Energy.Active.Import.Interval": "Energy.Active.Import.Interval: Energía activa importada de la red durante el último intervalo",
+                    "Energy.Reactive.Export.Interval": "Energy.Reactive.Export.Interval: Energía reactiva exportada a la red durante el último intervalo",
+                    "Energy.Reactive.Import.Interval": "Energy.Reactive.Import.Interval: Energía reactiva importada de la red durante el último intervalo",
+                    "Frequency": "Frequency: Frecuencia de la línea eléctrica",
+                    "Power.Active.Export": "Power.Active.Export: Potencia activa instantánea exportada por el VE",
+                    "Power.Active.Import": "Power.Active.Import: Potencia activa instantánea importada por el VE",
+                    "Power.Factor": "Power.Factor: Factor de potencia instantáneo del flujo de energía total",
+                    "Power.Offered": "Power.Offered: Potencia máxima ofrecida al VE",
+                    "Power.Reactive.Export": "Power.Reactive.Export: Potencia reactiva instantánea exportada por el VE",
+                    "Power.Reactive.Import": "Power.Reactive.Import: Potencia reactiva instantánea importada por el VE",
+                    "RPM": "RPM: Velocidad del ventilador en RPM",
+                    "SoC": "SoC: Estado de carga del VE en porcentaje",
+                    "Temperature": "Temperature: Lectura de la temperatura en el interior del punto de carga",
+                    "Voltage": "Voltage: Tensión de alimentación AC RMS instantánea"
+                }
+            }
+        },
+        "error": {
+            "no_measurands_selected": "No se ha seleccionado ninguna medida: seleccione al menos una"
+        },
+        "abort": {
+            "no_charge_points": "Ningún punto de carga se ha conectado aún a este sistema central, así que no hay nada que configurar."
         }
     }
 }
