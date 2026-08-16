@@ -50,6 +50,37 @@ This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (
 
 ## [Alfen - Eve Single S-line](https://alfen.com/en/ev-charge-points/alfen-product-range)
 
+## [Autel MaxiCharger](https://autelenergy.us/pages/residential)
+The MaxiCharger works with the OCPP integration, but the community has run into a few quirks - see [Issue #1523](https://github.com/lbbrhzn/ocpp/issues/1523) for the full discussion.
+
+Confirmed working on units reporting `MaxiChargerAC` as their model over `BootNotification` (vendor `Autel`, firmware `PFA0102|V0.00.00|V1.38.00||2.4.3.0`), speaking OCPP 1.6-J. Worth stating explicitly because Autel support has told at least one owner that their unit does not support OCPP and that only the AC Smart Elite does; that is not the case.
+
+On a local network no TLS setup is needed - a plain `ws://<home-assistant-ip>:9000` server URL in the charger's OCPP settings is enough. The section below applies only if you are terminating TLS with a reverse proxy.
+
+### Getting `wss://` (TLS) working behind a reverse proxy (e.g. Traefik)
+
+If you're terminating TLS with a reverse proxy such as Traefik (e.g. using Let's Encrypt), the "certificate" field in the Autel's OCPP server setup is required. The charger will silently drop the `wss://` connection if you do not provide a certificate file.
+
+You can either upload the self-generated certificate, or the root CA. An example for Let's Encrypt:
+
+1. Download the ISRG Root X1 certificate from https://letsencrypt.org/certs/isrgrootx1.pem
+2. Verify the chain validates against it before touching the charger:
+   ```bash
+   openssl s_client -connect your.ocpp.host:PORT \
+     -servername your.ocpp.host \
+     -CAfile isrg-root-x1.pem
+   ```
+   If you see `Verify return code: 0 (ok)`, uploading that certificate to the Autel will work.
+3. Upload the certificate to the Autel's OCPP server configuration (the "certificate" field), along with your `wss://` server URL.
+
+### Automation quirks
+
+When writing automations against the MaxiCharger:
+
+- Start/stop charging via `switch.<cpid>_charge_control`, not a remote-start service call.
+- If a session is stopped via `switch.<cpid>_charge_control` while the car stays plugged in (e.g. leaving an off-peak window), the connector sits in `Finishing` rather than going back to `Available`. It won't accept a new session on its own when charging should resume (e.g. the next off-peak window) - press `button.<cpid>_reset` to start a new session without unplugging the car.
+- Gate on `sensor.<cpid>_status_connector`, not `sensor.<cpid>_status`. The latter can read `Available` while a car is plugged in and simply not drawing current; the connector sensor reported `SuspendedEV` for the same charger at the same moment.
+
 ## [CTEK Chargestorm Connected 1, dual connectors](https://www.ctek.com/uk/ev-charging/chargestorm-connected-1)
 See CTEK Chargestorm Connected 2 below for getting started instructions.
 
@@ -99,10 +130,20 @@ match transactions and it won't report some meter values such as session time.
 
 ## [EVBox Elvi](https://evbox.com/en/ev-chargers/elvi)
 
-## [EVLink Wallbox Plus](https://www.se.com/ww/en/product/EVH3S22P0CK/evlink-wallbox-plus---t2-attached-cable---3-phase---32a-22kw/)
-
 ## [Evnex E Series & X Series Charging Stations](https://www.evnex.com/)
 (Ability to configure a custom OCPP server such as HA is being discontinued)
+
+## [FoxESS A-series](https://www.fox-ess.com/) (tested: A022KP1, firmware 1.10/1.06)
+
+Works well on OCPP 1.6J: remote start/stop, status, metering and the `Maximum Current` control all behave. The firmware's OCPP 2.0.1 support has several defects, all reproduced on the wire and confirmed by FoxESS support as protocol-level firmware defects, logged with their engineering team (no fix timeline yet). **Until fixed firmware ships, FoxESS's own guidance matches ours: run this charger on 1.6J.** On 2.0.1:
+
+* `Maximum Current` does not work. The firmware validates 2.0.1 requests against its 1.6 schema and rejects every spec-valid `SetChargingProfile` with `PropertyConstraintViolation: csChargingProfiles validation failed` (a 1.6 field name), so the slider has no effect on the charger.
+* Restarting a stopped charge can knock the charger offline. A `RequestStartTransaction` sent within a few minutes of a `RequestStopTransaction` is accepted and opens a transaction, but no power is ever offered to the vehicle (the charger reports `SuspendedEV`), and the charger then drops offline entirely. Automations that stop and later restart charging - tariff windows, state-of-charge limits - hit this path.
+* Only session energy is reported by default (`TxUpdatedMeasurands = Energy.Active.Import.Register`), so Power/Current/Voltage sensors stay unavailable unless additional measurands are configured on the charger itself.
+* `connectorStatus: Available` is reported after every transaction ends even with the cable still plugged in (on 1.6 the same firmware correctly reports `Finishing`/`Preparing`), so plug detection via the status sensor is unreliable.
+* If the charger's app is left on protocol *auto* while the integration pins 2.0.1, the firmware sends 1.6-shaped messages over the negotiated `ocpp2.0.1` connection.
+
+Reconnection (either protocol): the charger's OCPP client does not reliably redial after an established connection drops. After a Home Assistant restart or an integration reload, silent gaps of ~6 to 19+ minutes before the next connection attempt have been observed (occasionally it reconnects immediately), while a *refused* handshake - e.g. a protocol mismatch - is retried every ~10 seconds indefinitely. If the charger's entities stay unavailable after an HA restart, re-apply the protocol setting in the FoxESS app: that forces a reconnect within ~90 seconds.
 
 ## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
 
@@ -115,6 +156,14 @@ Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.
 
 The "Charger idle sampling interval" is not supported. Set this to **0** to avoid a "ClockAlignedDataInterval is read-only" warning.
 
+## [Ocular LTE Plus v3](https://evse.com.au/) (tested: reports as BS-EV22, firmware 448.3251.0Q03197)
+Works, with some firmware quirks worth knowing about. The same behaviour has been seen on the BS-EV07, so it likely applies to other chargers reporting the vendor `BS AC EV Charger`.
+
+- In the charger's app, set MODE to ONLINE and enter the address without a scheme, for example `192.168.1.10:9000/central`. The examples shown in the app do not work.
+- The charger sends its closing meter reading after StopTransaction rather than before. This is handled.
+- After a remote stop the connector stays in `Finishing` until the cable is unplugged, and it rejects a remote start while it is in that state. To pause and resume a charge without unplugging, leave the session running and set the maximum current to 0 instead of stopping it.
+- Firmware 448.3251.0Q03197 returns a corrupted ID tag, truncates configuration values, and occasionally sends a malformed connection request. These have been reported to the vendor.
+
 ## [Rolec EVO](https://www.rolecserv.com/ev-products/evo)
 Tested single phase 7kW model (ROLEC5011) with firmware 1.2.7, appears to be working fine.
 
@@ -124,6 +173,12 @@ entity in HA will be capped.
 
 You can still connect with the EVO app via Bluetooth after setting the OCPP server,
 but certain features (eg. scheduling) may not work.
+
+## [Schneider Electric EVlink ProAC](https://www.se.com/uk/en/product-range/23107242-evlink-pro-ac/)
+"Supervision URL" setting must be set to the OCPP server address using eSetup mobile app or EcoStruxure Charging Configuration Tool (ECCT) PC software.
+
+## [Schneider Electric EVlink Wallbox Plus](https://www.se.com/nl/en/product/EVH3S22P0CK/evlink-wallbox-plus-t2-attached-cable-3-phase-32a-22kw/)
+Model is discontinued by the manufacturer.
 
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly

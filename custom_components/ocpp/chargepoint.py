@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from websockets.asyncio.server import ServerConnection
@@ -65,10 +66,16 @@ from .const import (
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
+    sensor_unique_id,
 )
 
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
+
+# Seconds before monitor_connection starts post_connect for chargers that
+# never send a boot notification. Module-level so tests can shrink it
+# without monkeypatching asyncio.sleep globally.
+MONITOR_BACKSTOP_DELAY = 10
 
 
 class Metric:
@@ -269,6 +276,9 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        # Set once every sensor requested by a targeted refresh has
+        # resolved; bounds the full-update fallback to the startup window.
+        self._targeted_refresh_ready = False
         self.tasks = None
         self._charger_reports_session_energy = False
 
@@ -297,7 +307,12 @@ class ChargePoint(cp):
         """Get remote id tag from configuration.yaml or generate a random 20 char one."""
         config = self.hass.data[DOMAIN].get(CONFIG, {})
         alphabet = string.ascii_uppercase + string.digits
-        fallback = "".join(secrets.choice(alphabet) for _ in range(20))
+        # Stay short of the 20 character IdToken limit, for non-compliant
+        # chargers that read past their own tag buffer when it is filled
+        # exactly: they echo a longer tag back in StopTransaction than the spec
+        # allows, which the payload validator rejects, so the stop never
+        # completes and charging continues.
+        fallback = "".join(secrets.choice(alphabet) for _ in range(16))
         remote_id_tag = config.get(CONF_REMOTE_ID_TAG)
 
         if isinstance(remote_id_tag, str):
@@ -344,6 +359,7 @@ class ChargePoint(cp):
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
         try:
+            _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
             await self.fetch_supported_features()
             self.num_connectors = await self.get_number_of_connectors()
@@ -398,6 +414,12 @@ class ChargePoint(cp):
             # Ensure HA states are correct immediately after connection
             self.hass.async_create_task(self.update(self.settings.cpid))
 
+        except asyncio.CancelledError:
+            # The connection dropped mid-setup, so the task was cancelled rather
+            # than failed. CancelledError is not an Exception, so it passes the
+            # handler below and setup ends without a word about why.
+            _LOGGER.debug("'%s' post connection setup cancelled part way", self.id)
+            raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 
@@ -499,7 +521,7 @@ class ChargePoint(cp):
 
         # Add backstop to start post connect for non-compliant chargers
         # after 10s to allow for when a boot notification has not been received
-        await asyncio.sleep(10)
+        await asyncio.sleep(MONITOR_BACKSTOP_DELAY)
         if not self.post_connect_success:
             self.hass.async_create_task(self.post_connect())
 
@@ -528,6 +550,12 @@ class ChargePoint(cp):
                 )
                 self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
                 self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                # This loop is these sensors' only publisher: nothing
+                # message-driven republishes them on an idle charger.
+                self._async_refresh_metric_entities(
+                    [cstat.latency_ping.value, cstat.latency_pong.value],
+                    fallback_to_full_update=False,
+                )
 
             except TimeoutError as timeout_exception:
                 timeout_counter += 1
@@ -537,6 +565,10 @@ class ChargePoint(cp):
                 )
                 self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
                 self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                self._async_refresh_metric_entities(
+                    [cstat.latency_ping.value, cstat.latency_pong.value],
+                    fallback_to_full_update=False,
+                )
 
                 if timeout_counter > self.cs_settings.websocket_ping_tries:
                     _LOGGER.debug(
@@ -580,11 +612,16 @@ class ChargePoint(cp):
     async def stop(self):
         """Close connection and cancel ongoing tasks."""
         self.status = STATE_UNAVAILABLE
-        if self._connection.state is State.OPEN:
-            _LOGGER.debug(f"Closing websocket to '{self.id}'")
-            await self._connection.close()
-        for task in self.tasks:
-            task.cancel()
+        try:
+            if self._connection.state is State.OPEN:
+                _LOGGER.debug(f"Closing websocket to '{self.id}'")
+                await self._connection.close()
+        finally:
+            # Cancel regardless of how the close went: a close that raises or
+            # is cancelled must not leave monitor_connection running against a
+            # connection this charge point no longer owns.
+            for task in self.tasks or []:
+                task.cancel()
 
     async def reconnect(self, connection: ServerConnection):
         """Reconnect charge point."""
@@ -623,6 +660,53 @@ class ChargePoint(cp):
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
+
+    def _async_refresh_metric_entities(
+        self, metrics: list[str], *, fallback_to_full_update: bool = True
+    ) -> None:
+        """Refresh only the sensors backing the given charger-level metrics.
+
+        High-rate writers - heartbeats arriving at whatever rate the
+        charger chooses, the latency ping loop every ping interval - must
+        not pay for the full update(), which walks the device registry and
+        force-refreshes every entity of this charger for a change to one
+        or two values. Each sensor is resolved through the entity registry
+        by its canonical unique_id - rename-proof, since the dispatcher
+        filter matches on current entity_id - and only those entities are
+        dispatched.
+
+        A sensor can be unregistered when the first write beats the
+        platforms to it. Event-driven callers fall back to the full update
+        so the write is not lost; periodic callers pass
+        fallback_to_full_update=False and simply dispatch whatever did
+        resolve - the next tick republishes anyway, and falling back at
+        ping rate would run the full registry walk more often than the
+        behaviour this replaces.
+
+        The fallback is bounded to that startup window: once every
+        requested sensor has resolved, a later miss means the entity was
+        removed from the registry, and there is nothing to refresh for a
+        deleted entity - falling back there would silently reinstate the
+        full walk at the writer's rate, forever.
+        """
+        er = entity_registry.async_get(self.hass)
+        entity_ids: set[str] = set()
+        missing = False
+        for metric in metrics:
+            uid = sensor_unique_id(self.settings.cpid, metric)
+            entity_id = er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid)
+            if entity_id is None:
+                missing = True
+            else:
+                entity_ids.add(entity_id)
+        if missing:
+            if fallback_to_full_update and not self._targeted_refresh_ready:
+                self.hass.async_create_task(self.update(self.settings.cpid))
+                return
+        else:
+            self._targeted_refresh_ready = True
+        if entity_ids:
+            async_dispatcher_send(self.hass, DATA_UPDATED, entity_ids)
 
     async def update(self, cpid: str):
         """Update sensors values in HA (charger + connector child devices)."""
@@ -1089,6 +1173,8 @@ class ChargePoint(cp):
 
     async def notify_ha(self, msg: str, title: str = "Ocpp integration"):
         """Notify user via HA web frontend."""
+        if not self.settings.enable_ha_notifications:
+            return False
         await self.hass.services.async_call(
             PN_DOMAIN,
             "create",

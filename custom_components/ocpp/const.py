@@ -14,6 +14,7 @@ CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CPIDS = "cpids"
 CONF_CSID = "csid"
+CONF_ENABLE_HA_NOTIFICATIONS = "enable_ha_notifications"
 CONF_DEFAULT_AUTH_STATUS = "default_authorization_status"
 CONF_HOST = ha.CONF_HOST
 CONF_ID_TAG = "id_tag"
@@ -26,6 +27,7 @@ CONF_MONITORED_VARIABLES = ha.CONF_MONITORED_VARIABLES
 CONF_MONITORED_VARIABLES_AUTOCONFIG = "monitored_variables_autoconfig"
 CONF_NAME = ha.CONF_NAME
 CONF_NUM_CONNECTORS = "num_connectors"
+CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
 CONF_REMOTE_ID_TAG = "remote_id_tag"
@@ -45,6 +47,7 @@ CONF_WEBSOCKET_PING_TIMEOUT = "websocket_ping_timeout"
 DATA_UPDATED = "ocpp_data_updated"
 DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
+DEFAULT_ENABLE_HA_NOTIFICATIONS = True
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_CURRENT = 32
 DEFAULT_NUM_CONNECTORS = 1
@@ -55,7 +58,16 @@ DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+OCPP_1_6 = "ocpp1.6"
 OCPP_2_0 = "ocpp2"
+OCPP_VERSION_AUTO = "auto"
+DEFAULT_OCPP_VERSION = OCPP_VERSION_AUTO
+# Selectable values for the config-flow "OCPP version" field. "auto" advertises
+# every supported subprotocol (DEFAULT_SUBPROTOCOLS) and negotiates in that
+# order, so a charger offering several versions gets the first entry; any other
+# value restricts negotiation to that single OCPP version, so such a charger is
+# held to it and cannot fall back to (and then crash on) the wrong one.
+OCPP_VERSIONS = [OCPP_VERSION_AUTO, "1.6", "2.0.1", "2.1"]
 DEFAULT_METER_INTERVAL = 60
 DEFAULT_IDLE_INTERVAL = 900
 DEFAULT_WEBSOCKET_CLOSE_TIMEOUT = 10
@@ -64,6 +76,27 @@ DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
 DOMAIN = "ocpp"
 CONFIG = "config"
+
+
+def sensor_unique_id(cpid: str, metric: str, connector_id: int | None = None) -> str:
+    """Return the canonical unique_id of the sensor backing a metric.
+
+    The single source of truth: ChargePointMetric builds its unique_id
+    from this, the stale-entity cleanup in sensor.py matches against it,
+    and chargepoint.py resolves entities through it for targeted refresh
+    dispatches. Hand-mirrored copies of this format drifted apart once
+    already (a copy that forgot the dot replacement never matched any
+    dotted metric), so changes belong here and nowhere else. And think
+    hard before changing it at all: unique_ids are persisted in the
+    entity registry, so a new format orphans every existing sensor.
+    """
+    key = str(metric).strip().lower().replace(".", "_")
+    parts = [DOMAIN, cpid, key, "sensor"]
+    if connector_id is not None:
+        parts.insert(2, f"conn{connector_id}")
+    return ".".join(parts)
+
+
 ICON = "mdi:ev-station"
 SLEEP_TIME = 60
 
@@ -153,6 +186,7 @@ class ChargerSystemSettings:
     monitored_variables_autoconfig: bool
     skip_schema_validation: bool
     force_smart_charging: bool
+    enable_ha_notifications: bool = DEFAULT_ENABLE_HA_NOTIFICATIONS
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
 
@@ -173,6 +207,8 @@ class CentralSystemSettings:
     websocket_ping_tries: int
     cpids: list = field(default_factory=list)  # holds cpid config flow settings
     subprotocols: list = field(default_factory=lambda: DEFAULT_SUBPROTOCOLS)
+    # "auto" (advertise all) or a specific OCPP version to pin negotiation to.
+    ocpp_version: str = DEFAULT_OCPP_VERSION
 
     # def __post_init__(self):
     #     i = 0

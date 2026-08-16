@@ -25,7 +25,9 @@ from .ocppv201 import ChargePoint as ChargePointv201
 from .const import (
     CentralSystemSettings,
     DOMAIN,
+    OCPP_1_6,
     OCPP_2_0,
+    OCPP_VERSION_AUTO,
     ChargerSystemSettings,
 )
 from .enums import (
@@ -102,12 +104,17 @@ class CentralSystem:
         self.hass = hass
         self.entry = entry
         self.settings = CentralSystemSettings(**entry.data)
-        self.subprotocols = self.settings.subprotocols
+        self.subprotocols = self._resolve_subprotocols(self.settings)
         self._server = None
         self.id = self.settings.csid
         self.charge_points = {}  # uses cp_id as reference to charger instance
         self.cpids = {}  # dict of {cpid:cp_id}
         self.connections = 0
+        # Whether async_setup_entry forwarded the entity platforms. Unload
+        # has to mirror that exact decision - deriving it from anything
+        # live (connection count, current entry data) diverges from what
+        # setup actually did whenever state changed in between.
+        self.platforms_forwarded = False
 
         # Register custom services with home assistant
         self.hass.services.async_register(
@@ -203,25 +210,84 @@ class CentralSystem:
         except Exception:
             return 0
 
+    @staticmethod
+    def _resolve_subprotocols(settings: CentralSystemSettings) -> list:
+        """Return the websocket subprotocols the server should advertise.
+
+        When the user pins an OCPP version (config-flow "OCPP version" field is
+        not ``auto``), advertise only that version's subprotocol so a charger
+        that offers several versions cannot negotiate the wrong one. ``auto``
+        advertises everything the integration supports, preserving the previous
+        behaviour.
+        """
+        ocpp_version = settings.ocpp_version
+        if ocpp_version and ocpp_version != OCPP_VERSION_AUTO:
+            return [f"ocpp{ocpp_version}"]
+        return list(settings.subprotocols)
+
     def select_subprotocol(
         self, connection: ServerConnection, subprotocols
     ) -> Subprotocol | None:
         """Override default subprotocol selection."""
 
-        # Server offers at least one subprotocol but client doesn't offer any.
-        # Default to None
-        if not subprotocols:
-            return None
+        _LOGGER.debug("Charger offered subprotocols: %s", list(subprotocols or []))
 
-        # Server and client both offer subprotocols. Look for a shared one.
+        # Returning None here (rather than raising, as the websockets default
+        # does) is a deliberate deviation that lets a charger offering no
+        # subprotocol default to OCPP 1.6, and it is kept. It is only valid
+        # while the server is actually willing to talk 1.6: when the version is
+        # pinned to 2.x, accepting such a connection would create a v1.6
+        # ChargePoint that then poisons the charge point cache for the
+        # follow-up connection, so reject instead.
+        if not subprotocols:
+            if OCPP_1_6 in self.subprotocols:
+                return None
+            raise NegotiationError(
+                "no subprotocol offered; expected one of "
+                + ", ".join(self.subprotocols)
+            )
+
+        # Server and client both offer subprotocols. Look for a shared one,
+        # iterating the server's ordered list - the documented websockets
+        # behaviour this function overrides ("pick the first one in the list
+        # declared the server"). This loop previously iterated the client's
+        # offer as a set instead, so for a charger offering several
+        # subprotocols the negotiated version depended on set-iteration order
+        # and varied between handshakes. Pinning an OCPP version leaves a
+        # single entry in self.subprotocols, which is how a charger is held to
+        # a version other than the default preference.
         proposed_subprotocols = set(subprotocols)
-        for subprotocol in proposed_subprotocols:
-            if subprotocol in self.subprotocols:
+        for subprotocol in self.subprotocols:
+            if subprotocol in proposed_subprotocols:
                 return subprotocol
 
         # No common subprotocol was found.
         raise NegotiationError(
             "invalid subprotocol; expected one of " + ", ".join(self.subprotocols)
+        )
+
+    @staticmethod
+    def _negotiated_ocpp_version(websocket: ServerConnection) -> str:
+        """Return the ocpp version string implied by the negotiated subprotocol.
+
+        Mirrors how ``ChargePoint._ocpp_version`` is derived in the v16/v201
+        subclasses: ``ocpp1.6`` -> ``1.6``, ``ocpp2.0.1`` -> ``2.0.1``,
+        ``ocpp2.1`` -> ``2.1``. A charger that offers no subprotocol defaults
+        to 1.6.
+        """
+        subprotocol = websocket.subprotocol
+        if not subprotocol:
+            return "1.6"
+        return subprotocol.replace("ocpp", "")
+
+    def _build_charge_point(self, cp_id: str, websocket: ServerConnection, cp_settings):
+        """Construct the ChargePoint matching this connection's subprotocol."""
+        if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
+            return ChargePointv201(
+                cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
+            )
+        return ChargePointv16(
+            cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
         )
 
     async def on_connect(self, websocket: ServerConnection):
@@ -264,14 +330,7 @@ class CentralSystem:
                 _LOGGER.error(f"Failed to setup charger {cp_id}: {str(e)}")
                 return
 
-            if websocket.subprotocol and websocket.subprotocol.startswith(OCPP_2_0):
-                charge_point = ChargePointv201(
-                    cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
-                )
-            else:
-                charge_point = ChargePointv16(
-                    cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
-                )
+            charge_point = self._build_charge_point(cp_id, websocket, cp_settings)
             self.charge_points[cp_id] = charge_point
             self.connections += 1
             _LOGGER.info(
@@ -282,11 +341,52 @@ class CentralSystem:
             )
             await charge_point.start()
         else:
-            _LOGGER.info(
-                f"Charger {cp_id} reconnected to {self.settings.host}:{self.settings.port}."
-            )
             charge_point = self.charge_points[cp_id]
-            await charge_point.reconnect(websocket)
+            negotiated_version = self._negotiated_ocpp_version(websocket)
+            if negotiated_version != charge_point._ocpp_version:
+                # The charger reconnected negotiating a different OCPP version
+                # than the cached ChargePoint was built with. The cached object
+                # carries a fixed validator / message set / entity model, so
+                # reusing it would validate the new version's payloads against
+                # the old version's schema (e.g. a 2.0.1 BootNotification
+                # against the 1.6 schema), raising FormatViolationError on
+                # every reconnect until the config entry is reloaded. Some
+                # chargers (e.g. FoxESS A-series) make a short-lived 1.6 probe
+                # connection right after a version switch, which is exactly
+                # what plants the mismatched object. Rebuild the ChargePoint
+                # from this handshake's negotiated subprotocol instead. See
+                # issue #2008.
+                _LOGGER.info(
+                    f"Charger {cp_id} reconnected with a different OCPP version "
+                    f"({charge_point._ocpp_version} -> {negotiated_version}); "
+                    f"rebuilding charge point."
+                )
+                # stop() closes the websocket before cancelling its tasks, so a
+                # failure to close would otherwise leave the stale instance's
+                # monitor_connection running against a charger that has already
+                # been replaced here - duplicate pings and metric writes.
+                # Cancel them explicitly if stop() does not get that far.
+                try:
+                    await charge_point.stop()
+                except Exception:
+                    _LOGGER.debug(
+                        "Error stopping stale charge point %s during rebuild; "
+                        "cancelling its tasks directly",
+                        cp_id,
+                        exc_info=True,
+                    )
+                    for task in getattr(charge_point, "tasks", None) or []:
+                        task.cancel()
+                charge_point = self._build_charge_point(
+                    cp_id, websocket, charge_point.settings
+                )
+                self.charge_points[cp_id] = charge_point
+                await charge_point.start()
+            else:
+                _LOGGER.info(
+                    f"Charger {cp_id} reconnected to {self.settings.host}:{self.settings.port}."
+                )
+                await charge_point.reconnect(websocket)
 
     def _get_metrics(self, id: str):
         """Return (cp_id, metrics mapping, cp instance, safe int num_connectors)."""

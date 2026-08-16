@@ -11,10 +11,34 @@
                     "ssl_certfile_path": "Path to SSL certificate or (None)",
                     "ssl_keyfile_path": "Path to SSL key or (None)",
                     "csid": "Central system identity",
+                    "ocpp_version": "OCPP version",
                     "websocket_close_timeout": "Websocket close timeout (seconds)",
                     "websocket_ping_tries": "Websocket successive times to try connection before closing",
                     "websocket_ping_interval": "Websocket ping interval (seconds)",
                     "websocket_ping_timeout": "Websocket ping timeout (seconds)"
+                },
+                "data_description": {
+                    "ocpp_version": "Auto negotiates with the charger using the integration's default order (OCPP 1.6 first). Choose a specific version to restrict negotiation to it, so a charger that advertises several versions is held to the one you pick."
+                }
+            },
+            "reconfigure": {
+                "title": "OCPP Central System Configuration",
+                "description": "If you need help with the configuration have a look [here]({docs_url})",
+                "data": {
+                    "host": "Central system host address",
+                    "port": "Central system port number",
+                    "ssl": "Secure connection",
+                    "ssl_certfile_path": "Path to SSL certificate or (None)",
+                    "ssl_keyfile_path": "Path to SSL key or (None)",
+                    "csid": "Central system identity",
+                    "ocpp_version": "OCPP version",
+                    "websocket_close_timeout": "Websocket close timeout (seconds)",
+                    "websocket_ping_tries": "Websocket successive times to try connection before closing",
+                    "websocket_ping_interval": "Websocket ping interval (seconds)",
+                    "websocket_ping_timeout": "Websocket ping timeout (seconds)"
+                },
+                "data_description": {
+                    "ocpp_version": "Auto negotiates with the charger using the integration's default order (OCPP 1.6 first). Choose a specific version to restrict negotiation to it, so a charger that advertises several versions is held to the one you pick."
                 }
             },
             "cp_user": {
@@ -27,7 +51,8 @@
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
-                    "force_smart_charging": "Force Smart Charging feature profile"
+                    "force_smart_charging": "Force Smart Charging feature profile",
+                    "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },
             "measurands": {
@@ -62,11 +87,13 @@
         "error": {
             "auth": "Username/Password is wrong.",
             "no_measurands_selected": "No measurand selected: please select at least one",
-            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _"
+            "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _",
+            "duplicate_cpid": "This charge point identity is already used by another charge point. Choose a unique one."
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed",
-            "reauth_successful": "New charger configured"
+            "reauth_successful": "New charger configured",
+            "reconfigure_successful": "Configuration updated"
         }
     },
     "exceptions": {
@@ -81,6 +108,67 @@
         },
         "set_variables_error": {
             "message": "Failed to set variable: {message}"
+        },
+        "set_charge_rate_error": {
+            "message": "Failed to set charging current limit: {message}"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "OCPP Charger Configuration",
+                "description": "Select the charge point to edit.",
+                "data": {
+                    "cp_id": "Charge point"
+                }
+            },
+            "cp_settings": {
+                "title": "OCPP Charger Configuration",
+                "description": "Editing charge point {cp_id}. Its charge point identity (cpid: {cpid}) is fixed, because entity IDs derive from it.",
+                "data": {
+                    "max_current": "Maximum charging current",
+                    "meter_interval": "Charging sample interval (seconds)",
+                    "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
+                    "idle_interval": "Charger idle sampling interval (seconds)",
+                    "skip_schema_validation": "Skip OCPP schema validation",
+                    "force_smart_charging": "Force Smart Charging feature profile",
+                    "enable_ha_notifications": "Enable Home Assistant notifications"
+                }
+            },
+            "measurands": {
+                "title": "OCPP Measurands",
+                "description": "Select which measurand(s) should be used in Home Assistant.",
+                "data": {
+                    "Current.Export": "Current.Export: Instantaneous current flow from EV",
+                    "Current.Import": "Current.Import: Instantaneous current flow to EV",
+                    "Current.Offered": "Current.Offered: Maximum current offered to EV",
+                    "Energy.Active.Export.Register": "Energy.Active.Export.Register: Active energy exported to the grid",
+                    "Energy.Active.Import.Register": "Energy.Active.Import.Register: Active energy imported from the grid",
+                    "Energy.Reactive.Export.Register": "Energy.Reactive.Export.Register: Reactive energy exported to the grid",
+                    "Energy.Reactive.Import.Register": "Energy.Reactive.Import.Register: Reactive energy imported from the grid",
+                    "Energy.Active.Export.Interval": "Energy.Active.Export.Interval: Active energy exported to the grid during last interval",
+                    "Energy.Active.Import.Interval": "Energy.Active.Import.Interval: Active energy imported from the grid during last interval",
+                    "Energy.Reactive.Export.Interval": "Energy.Reactive.Export.Interval: Reactive energy exported to the grid during last interval",
+                    "Energy.Reactive.Import.Interval": "Energy.Reactive.Import.Interval: Reactive energy imported from the grid during last interval",
+                    "Frequency": "Frequency: Powerline frequency",
+                    "Power.Active.Export": "Power.Active.Export: Instantaneous active power exported by EV",
+                    "Power.Active.Import": "Power.Active.Import: Instantaneous active power imported by EV",
+                    "Power.Factor": "Power.Factor: Instantaneous power factor of total energy flow",
+                    "Power.Offered": "Power.Offered: Maximum power offered to EV",
+                    "Power.Reactive.Export": "Power.Reactive.Export: Instantaneous reactive power exported by EV",
+                    "Power.Reactive.Import": "Power.Reactive.Import: Instantaneous reactive power imported by EV",
+                    "RPM": "RPM: Fan speed in RPM",
+                    "SoC": "SoC: State of charge of EV in percentage",
+                    "Temperature": "Temperature: Temperature reading inside Charge Point",
+                    "Voltage": "Voltage: Instantaneous AC RMS supply voltage"
+                }
+            }
+        },
+        "error": {
+            "no_measurands_selected": "No measurand selected: please select at least one"
+        },
+        "abort": {
+            "no_charge_points": "No charge point has connected to this central system yet, so there is nothing to configure."
         }
     }
 }

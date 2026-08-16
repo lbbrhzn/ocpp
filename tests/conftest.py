@@ -1,6 +1,7 @@
 """Global fixtures for ocpp integration."""
 
 import asyncio
+import copy
 from collections.abc import AsyncGenerator
 from unittest.mock import patch
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -14,7 +15,8 @@ from .charge_point_test import (
     create_configuration,
     remove_configuration,
 )
-from homeassistant.core import State
+
+from .lifecycle_asserts import assert_no_swallowed_lifecycle_errors
 
 pytest_plugins = "pytest_homeassistant_custom_component"
 
@@ -23,6 +25,27 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations defined in the test dir."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def fail_on_swallowed_lifecycle_errors(request, caplog):
+    """Fail any test whose log carries a swallowed lifecycle failure.
+
+    Home Assistant turns platform-setup exceptions, forward collisions
+    and bad unloads into log lines while the calls report success, so a
+    regression fails no assertion anywhere - this tripwire makes the
+    nearest test fail instead. Tests that provoke these deliberately
+    opt out with @pytest.mark.allow_lifecycle_errors.
+
+    Only the synchronous signatures are enforced here: "Task exception
+    was never retrieved" surfaces at GC/loop-drain time, so it can miss
+    or cross test boundaries depending on environment - dedicated
+    lifecycle tests assert it inside controlled windows instead.
+    """
+    yield
+    if request.node.get_closest_marker("allow_lifecycle_errors"):
+        return
+    assert_no_swallowed_lifecycle_errors(caplog, include_async=False)
 
 
 # This fixture is used to prevent HomeAssistant from attempting to create and dismiss persistent
@@ -41,22 +64,20 @@ def skip_notifications_fixture():
 
 # This fixture, when used, will result in calls to websockets to be bypassed. To have the call
 # return a value, we would add the `return_value=<VALUE_TO_RETURN>` parameter to the patch call.
-# include patch for hass.states.get for use with migration to return cp_id
 @pytest.fixture(name="bypass_get_data")
 def bypass_get_data_fixture():
     """Skip calls to get data from API."""
     future = asyncio.Future()
     future.set_result(websockets.asyncio.server.Server)
-    # Return a HomeAssistant State object instead of a plain string. Some HA
-    # helpers expect a State instance (with attributes) during restore/cleanup.
+    # No StateMachine.get patch here: it used to return a synthetic State
+    # for EVERY hass.states.get in the process, which poisoned core's
+    # duplicate-entity checks on reload and shadowed the real state the
+    # migration test seeds - hiding a genuine migration bug behind it.
+    # The migration test provides its own state; nothing else needs one.
     with (
         patch("websockets.asyncio.server.serve", return_value=future),
         patch("websockets.asyncio.server.Server.close"),
         patch("websockets.asyncio.server.Server.wait_closed"),
-        patch(
-            "homeassistant.core.StateMachine.get",
-            return_value=State("sensor.test_cp_id", "test_cp_id"),
-        ),
     ):
         yield
 
@@ -78,9 +99,14 @@ async def setup_config_entry(hass, request) -> AsyncGenerator[CentralSystem, Non
     """Setup/teardown mock config entry and central system."""
     # Create a mock entry so we don't have to go through config flow
     # Both version and minor need to match config flow so as not to trigger migration flow
-    config_data = MOCK_CONFIG_DATA.copy()
+    # deepcopy, not copy: a shallow copy shares the CONF_CPIDS list with
+    # the module-level constant, so the append below permanently mutated
+    # MOCK_CONFIG_DATA for the rest of the pytest session - every later
+    # test asking for "the chargerless config" silently got a charger
+    # (order-dependent failures that never reproduce in isolation).
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
     config_data[CONF_CPIDS].append(
-        {request.param["cp_id"]: MOCK_CONFIG_CP_APPEND.copy()}
+        {request.param["cp_id"]: copy.deepcopy(MOCK_CONFIG_CP_APPEND)}
     )
     config_data[CONF_PORT] = request.param["port"]
     config_entry = MockConfigEntry(

@@ -1,8 +1,10 @@
 """Implement a test by a simulating an OCPP 2.0.1 chargepoint."""
 
 import asyncio
+import copy
 from datetime import datetime, timedelta, UTC
 
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v16.enums import Measurand
@@ -1041,6 +1043,20 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert boot_res.status == RegistrationStatusEnumType.accepted.value
     assert boot_res.status_info is None
     datetime.fromisoformat(boot_res.current_time)
+    # Regression: a station-level StatusNotification (evseId=0/connectorId=0,
+    # which the spec permits and which e.g. the FoxESS A-series sends on every
+    # boot) must not enter the per-connector bookkeeping. It previously indexed
+    # _connector_status[-1], raising IndexError while that list was still empty
+    # and aborting post_connect. A deliberately different status is used here so
+    # the assertions below also catch it being written to the connector's slot.
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.unavailable,
+            0,
+            0,
+        )
+    )
     await cp.call(
         call.StatusNotification(
             datetime.now(tz=UTC).isoformat(), ConnectorStatusEnumType.available, 1, 1
@@ -1048,10 +1064,15 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     )
 
     heartbeat_resp: call_result.Heartbeat = await cp.call(call.Heartbeat())
-    datetime.fromisoformat(heartbeat_resp.current_time)
+    heartbeat_time = datetime.fromisoformat(heartbeat_resp.current_time)
 
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
+
+    # Checking only the reply let a metric-less handler pass for the bug's
+    # whole life: the sensor's backing metric must hold the same instant
+    # the charger was told.
+    assert cs.get_metric(cpid, cstat.heartbeat.value) == heartbeat_time
 
     await wait_ready(cs.charge_points[cp_id])
 
@@ -1069,6 +1090,21 @@ async def _run_test(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     assert (
         cs.get_metric(cpid, cstat.status_connector.value)
         == ConnectorStatusEnumType.available.value
+    )
+    # The station-level notification landed on the charger-level Status metric
+    # (the key the OCPP 1.6 handler uses for connectorId=0 and the availability
+    # switch reads) and did not overwrite the connector's own status above.
+    server_cp = cs.charge_points[cp_id]
+    assert (
+        server_cp._metrics[(0, cstat.status.value)].value
+        == ConnectorStatusEnumType.unavailable.value
+    )
+    # (0, Status.Connector) stays owned by the EVSE aggregation - a
+    # station-level 'Unavailable' written there would mask the connector's real
+    # state through the flattened sensor's fallback chain.
+    assert (
+        server_cp._metrics[(0, cstat.status_connector.value)].value
+        != ConnectorStatusEnumType.unavailable.value
     )
     assert cp.tx_updated_interval == DEFAULT_METER_INTERVAL
     assert cp.tx_updated_measurands == supported_measurands
@@ -1195,6 +1231,48 @@ class ChargePointReportFailing(ChargePointAllFeatures):
         raise ocpp.exceptions.InternalError("Test failure")
 
 
+class ChargePointIncompleteInventory(ChargePointAllFeatures):
+    """A charge point accepting GetBaseReport but reporting no connectors.
+
+    Mirrors the FoxESS A-series: the FullInventory contains only a
+    charging-station-level EVSE component (evse.id=0) and no Connector
+    components, even though the charger has a real connector which it reports
+    via StatusNotification(evseId=1, connectorId=1).
+    """
+
+    @on(Action.get_base_report)
+    def _on_base_report(self, request_id: int, report_base: str, **kwargs):
+        assert report_base == ReportBaseEnumType.full_inventory.value
+        self.task = asyncio.create_task(self._send_incomplete_inventory(request_id))
+        return call_result.GetBaseReport(
+            GenericDeviceModelStatusEnumType.accepted.value
+        )
+
+    async def _send_incomplete_inventory(self, request_id: int):
+        # The real charger's StatusNotifications arrive before the inventory
+        # exchange completes; give them time to land first so they are
+        # buffered when the report below finishes.
+        await asyncio.sleep(1)
+        await self.call(
+            call.NotifyReport(
+                request_id,
+                datetime.now(tz=UTC).isoformat(),
+                0,
+                [
+                    ReportDataType(
+                        ComponentType("EVSE", evse=EVSEType(0)),
+                        VariableType("AllowReset"),
+                        [
+                            VariableAttributeType(
+                                value="true", mutability=MutabilityEnumType.read_only
+                            )
+                        ],
+                    ),
+                ],
+            )
+        )
+
+
 async def _unsupported_base_report_test(
     hass: HomeAssistant,
     cs: CentralSystem,
@@ -1215,13 +1293,173 @@ async def _unsupported_base_report_test(
         )
     )
     await wait_ready(cs.charge_points[cp_id])
+    # This charger answers no GetBaseReport, so nothing is detectable from an
+    # inventory and SMART can only come from force_smart_charging, which the
+    # test charger enables (tests/const.py). Before the override was honoured
+    # on 2.0.1 this expectation omitted SMART.
     assert (
         cs.get_metric(cpid, cdet.features.value, connector_id=0)
-        == Profiles.CORE | Profiles.REM | Profiles.FW
+        == Profiles.CORE | Profiles.REM | Profiles.FW | Profiles.SMART
+    )
+
+    # Regression: a charger whose GetBaseReport yields no connectors (either
+    # because it does not implement/answer it, or because — like the FoxESS
+    # A-series — it reports only a charging-station-level EVSE with id=0 and no
+    # Connector components) must still be treated as having at least one
+    # connector. Otherwise the base post_connect connector-slot init loop is
+    # empty, session metrics never receive their units, and switching the
+    # charger between OCPP 1.6 and 2.0.1 raises a spurious `units_changed`
+    # repair (issue #2008 companion). See get_number_of_connectors in ocppv201.
+    server_cp = cs.charge_points[cp_id]
+    assert server_cp.num_connectors >= 1
+    assert server_cp._metrics[(1, csess.session_time.value)].unit == UnitOfTime.MINUTES
+
+    # Creating the connector slots is only half the job: a StatusNotification
+    # must still be routable to them. A GetBaseReport answered with a CallError
+    # leaves _inventory None, so acquisition would never be marked complete and
+    # every StatusNotification would be buffered forever - the connector
+    # entities would exist but permanently read unknown.
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.occupied.value,
+            1,
+            1,
+        )
+    )
+    while (
+        cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
+        != ChargePointStatusv16.preparing.value
+    ):
+        await asyncio.sleep(0.1)
+    assert server_cp._pending_status_notifications == []
+
+
+async def _incomplete_inventory_test(
+    hass: HomeAssistant,
+    cs: CentralSystem,
+    cp: ChargePoint,
+    evse_id: int = 1,
+):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
+    await cp.call(
+        call.BootNotification(
+            {
+                "serial_number": "SERIAL",
+                "model": "MODEL",
+                "vendor_name": "VENDOR",
+                "firmware_version": "VERSION",
+            },
+            BootReasonEnumType.power_up.value,
+        )
+    )
+    # The real charger reports a station-level status (evseId=0/connectorId=0)
+    # followed by its connector status right after boot, before the inventory
+    # exchange completes, so both land in _pending_status_notifications while
+    # the EVSE map is not yet built. The station-level entry must not break
+    # the flush (regression: it previously raised IndexError via
+    # _connector_status[-1] on an empty list, aborting post_connect).
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.available.value,
+            0,
+            0,
+        )
+    )
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.occupied.value,
+            evse_id,
+            1,
+        )
+    )
+    await wait_ready(cs.charge_points[cp_id])
+
+    server_cp = cs.charge_points[cp_id]
+    # Inventory reported zero connectors -> normalised to the topology
+    # observed in the buffered StatusNotification: one real connector.
+    assert server_cp.num_connectors == 1
+    assert server_cp._metrics[(1, csess.session_time.value)].unit == UnitOfTime.MINUTES
+    # The buffered StatusNotification must be applied once the fallback
+    # connector map is built - not held in _pending_status_notifications -
+    # and must land on global connector 1, i.e. the map must reflect the
+    # charger's real (evse_id, connector_id) pair rather than an assumed
+    # (1, 1).
+    while (
+        cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
+        != ChargePointStatusv16.preparing.value
+    ):
+        await asyncio.sleep(0.1)
+    assert server_cp._pending_status_notifications == []
+    assert server_cp._evse_to_global == {(evse_id, 1): 1}
+    # The station-level notification must land on the charger-level Status
+    # metric (the key the OCPP 1.6 handler uses for connectorId=0 and the
+    # availability switch reads) - NOT on (0, Status.Connector), which is
+    # owned by the EVSE aggregation and would mask the connector's state via
+    # the flattened sensor's fallback chain.
+    assert (
+        server_cp._metrics[(0, cstat.status.value)].value
+        == ConnectorStatusEnumType.available.value
     )
 
 
-@pytest.mark.timeout(150)
+async def _incomplete_inventory_late_evidence_test(
+    hass: HomeAssistant,
+    cs: CentralSystem,
+    cp: ChargePoint,
+):
+    cp_id = cp.id[:-7]
+    cpid = cs.charge_points[cp_id].settings.cpid
+
+    # No StatusNotification before or during the inventory exchange: the
+    # charger stays quiet until after setup has finished.
+    await cp.call(
+        call.BootNotification(
+            {
+                "serial_number": "SERIAL",
+                "model": "MODEL",
+                "vendor_name": "VENDOR",
+                "firmware_version": "VERSION",
+            },
+            BootReasonEnumType.power_up.value,
+        )
+    )
+    await wait_ready(cs.charge_points[cp_id])
+
+    server_cp = cs.charge_points[cp_id]
+    # One logical connector is exposed (so entities and units exist), and no
+    # mapping is invented from nothing.
+    assert server_cp.num_connectors == 1
+    assert server_cp._evse_to_global == {}
+
+    # The charger's first status arrives only after setup. With no
+    # inventory-derived map and no flush ever coming, it must route through
+    # the dynamic allocation - the first reported pair becomes connector 1 -
+    # rather than being buffered forever with the sensor stuck on unknown.
+    # Here the pair is (2, 2): the single-connector entities follow the
+    # charger's real connector wherever it lives.
+    await cp.call(
+        call.StatusNotification(
+            datetime.now(tz=UTC).isoformat(),
+            ConnectorStatusEnumType.occupied.value,
+            2,
+            2,
+        )
+    )
+    while (
+        cs.get_metric(cpid, cstat.status_connector.value, connector_id=1)
+        != ChargePointStatusv16.preparing.value
+    ):
+        await asyncio.sleep(0.1)
+    assert server_cp._evse_to_global == {(2, 2): 1}
+    assert server_cp.num_connectors == 1
+
+
+@pytest.mark.timeout(360)
 async def test_cms_responses_v201(hass, socket_enabled):
     """Test central system responses to a charger."""
 
@@ -1231,8 +1469,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     # test cannot
     # config_data[CONF_MONITORED_VARIABLES] = ",".join(supported_measurands)
     cp_id = "CP_2"
-    config_data = MOCK_CONFIG_DATA.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9080
@@ -1276,8 +1514,8 @@ async def test_cms_responses_v201(hass, socket_enabled):
     await remove_configuration(hass, config_entry)
 
     cp_id = "CP_2_noreport"
-    config_data = MOCK_CONFIG_DATA_3.copy()
-    config_data[CONF_CPIDS].append({cp_id: MOCK_CONFIG_CP_APPEND.copy()})
+    config_data = copy.deepcopy(MOCK_CONFIG_DATA_3)
+    config_data[CONF_CPIDS].append({cp_id: copy.deepcopy(MOCK_CONFIG_CP_APPEND)})
     config_data[CONF_CPIDS][-1][cp_id][CONF_CPID] = "test_v201_cpid"
 
     config_data[CONF_PORT] = 9011
@@ -1314,6 +1552,61 @@ async def test_cms_responses_v201(hass, socket_enabled):
         ["ocpp2.0.1"],
         lambda ws: ChargePointReportFailing("CP_2_report_fail_client", ws),
         [lambda cp: _unsupported_base_report_test(hass, cs, cp)],
+    )
+
+    cp_id3 = "CP_2_incomplete"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id3: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id3][CONF_CPID] = "test_v201_cpid3"
+    # need to reload to setup sensors etc for new charger
+    await hass.config_entries.async_reload(entry.entry_id)
+    cs = hass.data[DOMAIN][entry.entry_id]
+
+    await run_charge_point_test(
+        config_entry,
+        cp_id3,
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointIncompleteInventory("CP_2_incomplete_client", ws),
+        [lambda cp: _incomplete_inventory_test(hass, cs, cp)],
+    )
+
+    # Same incomplete inventory, but the charger's real connector lives on
+    # EVSE 2: the fallback topology must follow the observed
+    # StatusNotification, not assume (1, 1).
+    cp_id4 = "CP_2_incomplete_evse2"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id4: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id4][CONF_CPID] = "test_v201_cpid4"
+    # need to reload to setup sensors etc for new charger
+    await hass.config_entries.async_reload(entry.entry_id)
+    cs = hass.data[DOMAIN][entry.entry_id]
+
+    await run_charge_point_test(
+        config_entry,
+        cp_id4,
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointIncompleteInventory("CP_2_incomplete_evse2_client", ws),
+        [lambda cp: _incomplete_inventory_test(hass, cs, cp, evse_id=2)],
+    )
+
+    # Same incomplete inventory, but no StatusNotification arrives until after
+    # setup completes: no mapping exists yet (nothing is provisioned from
+    # nothing), so the first observed real pair must bind connector 1 via the
+    # dynamic allocation.
+    cp_id5 = "CP_2_incomplete_late"
+    entry = hass.config_entries._entries.get_entries_for_domain(OCPP_DOMAIN)[0]
+    entry.data[CONF_CPIDS].append({cp_id5: MOCK_CONFIG_CP_APPEND.copy()})
+    entry.data[CONF_CPIDS][-1][cp_id5][CONF_CPID] = "test_v201_cpid5"
+    # need to reload to setup sensors etc for new charger
+    await hass.config_entries.async_reload(entry.entry_id)
+    cs = hass.data[DOMAIN][entry.entry_id]
+
+    await run_charge_point_test(
+        config_entry,
+        cp_id5,
+        ["ocpp2.0.1"],
+        lambda ws: ChargePointIncompleteInventory("CP_2_incomplete_late_client", ws),
+        [lambda cp: _incomplete_inventory_late_evidence_test(hass, cs, cp)],
     )
 
     await remove_configuration(hass, config_entry)
