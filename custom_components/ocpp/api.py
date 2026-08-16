@@ -90,6 +90,11 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("requested_message"): cv.string,
     }
 )
+CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+    }
+)
 
 
 def _norm(s: str) -> str:

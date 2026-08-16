@@ -22,6 +22,7 @@ from ocpp.v16.enums import AuthorizationStatus
 from .api import (
     CentralSystem,
     CHRGR_SERVICE_DATA_SCHEMA,
+    CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
     CONF_SERVICE_DATA_SCHEMA,
     GCONF_SERVICE_DATA_SCHEMA,
     GDIAG_SERVICE_DATA_SCHEMA,
@@ -84,9 +85,11 @@ from .const import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
-# Key used to track whether domain-level services have already been registered.
-# This prevents duplicate registration when a second config entry is loaded.
-_SERVICES_REGISTERED_KEY = "_services_registered"
+# Key used to track domain-level services registered by this integration.
+# Storing the names allows targeted removal on unload without relying on
+# async_services_for_domain, which is unavailable before Home Assistant 2024.2.
+_DOMAIN_SERVICE_NAMES = "_domain_service_names"
+
 
 AUTH_LIST_SCHEMA = vol.Schema(
     {
@@ -165,13 +168,16 @@ def _resolve_central_system(hass: HomeAssistant, devid: str):
     )
 
 
-def _register_domain_services(hass: HomeAssistant) -> None:
+def _register_domain_services(hass: HomeAssistant) -> list[str]:
     """Register global domain services that route to the correct CentralSystem.
 
     Services are registered exactly once for the whole domain.  When multiple
     central systems are active each call is routed to the instance that owns
     the charger identified by *devid*, preventing handler collisions and
     cross-system misrouting.
+
+    Returns the list of service names registered by this integration so they
+    can be removed precisely during unload without relying on newer HA APIs.
     """
 
     async def _route(method_name: str, call: ServiceCall) -> ServiceResponse:
@@ -203,6 +209,17 @@ def _register_domain_services(hass: HomeAssistant) -> None:
     async def _route_get_diagnostics(call: ServiceCall) -> None:
         await _route("handle_get_diagnostics", call)
 
+    services = [
+        csvcs.service_configure.value,
+        csvcs.service_get_configuration.value,
+        csvcs.service_data_transfer.value,
+        csvcs.service_trigger_custom_message.value,
+        csvcs.service_clear_profile.value,
+        csvcs.service_set_charge_rate.value,
+        csvcs.service_update_firmware.value,
+        csvcs.service_get_diagnostics.value,
+    ]
+
     hass.services.async_register(
         DOMAIN,
         csvcs.service_configure.value,
@@ -233,6 +250,7 @@ def _register_domain_services(hass: HomeAssistant) -> None:
         DOMAIN,
         csvcs.service_clear_profile.value,
         _route_clear_profile,
+        CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
@@ -252,6 +270,8 @@ def _register_domain_services(hass: HomeAssistant) -> None:
         _route_get_diagnostics,
         GDIAG_SERVICE_DATA_SCHEMA,
     )
+
+    return services
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -289,9 +309,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Register domain-wide services exactly once across all config entries.
     # The global handlers route each call to the correct CentralSystem by
     # resolving *devid* against every active instance's charger registry.
-    if not hass.data[DOMAIN].get(_SERVICES_REGISTERED_KEY):
-        _register_domain_services(hass)
-        hass.data[DOMAIN][_SERVICES_REGISTERED_KEY] = True
+    if not hass.data[DOMAIN].get(_DOMAIN_SERVICE_NAMES):
+        hass.data[DOMAIN][_DOMAIN_SERVICE_NAMES] = _register_domain_services(hass)
 
     if entry.data[CONF_CPIDS]:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -460,9 +479,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # would break all service calls for that remaining instance.
                 remaining_cs = list(_iter_central_systems(hass))
                 if not remaining_cs:
-                    for service in hass.services.async_services_for_domain(DOMAIN):
+                    for service in hass.data[DOMAIN].pop(_DOMAIN_SERVICE_NAMES, []):
                         hass.services.async_remove(DOMAIN, service)
-                    hass.data[DOMAIN].pop(_SERVICES_REGISTERED_KEY, None)
 
     return unloaded
 

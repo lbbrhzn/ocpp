@@ -775,7 +775,7 @@ async def test_empty_devid_resolves_to_only_central_system(hass):
 @pytest.mark.asyncio
 async def test_unload_preserves_services_while_second_cs_active(hass):
     """Unloading one entry must not remove domain services while a second is still active."""
-    from custom_components.ocpp import _resolve_central_system, _SERVICES_REGISTERED_KEY
+    from custom_components.ocpp import _resolve_central_system, _DOMAIN_SERVICE_NAMES
 
     hass.data.setdefault(DOMAIN, {})
 
@@ -789,7 +789,7 @@ async def test_unload_preserves_services_while_second_cs_active(hass):
 
     hass.data[DOMAIN][entry_a.entry_id] = cs_a
     hass.data[DOMAIN][entry_b.entry_id] = cs_b
-    hass.data[DOMAIN][_SERVICES_REGISTERED_KEY] = True
+    hass.data[DOMAIN][_DOMAIN_SERVICE_NAMES] = ["configure"]
 
     # Simulate entry_a being removed (as async_unload_entry would do after
     # successful platform unload).
