@@ -116,7 +116,7 @@
             "message": "Charger is currently unavailable: {message}"
         },
         "not_found": {
-            "message": "No charger found for device id '{message}'. Check the devid matches the HA charger id (cpid) or the OCPP charger id."
+            "message": "No charger found for device id {message}. Check the devid matches the HA charger id (cpid) or the OCPP charger id."
         }
     },
     "options": {

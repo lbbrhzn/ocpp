@@ -1,17 +1,18 @@
 {
 	"domain": "ocpp",
-	"name": "Open Charge Point Protocol (OCPP)",
+	"name": "Open Charge Point Protocol (OCPP) - alexisml fork",
 	"after_dependencies": [
 		"persistent_notification"
 	],
 	"codeowners": [
 		"@lbbrhzn",
-		"@drc38"
+		"@drc38",
+		"@alexisml"
 	],
 	"config_flow": true,
-	"documentation": "https://github.com/lbbrhzn/ocpp/blob/main/README.md",
+	"documentation": "https://github.com/alexisml/ocpp/blob/main/README.md",
 	"iot_class": "local_push",
-	"issue_tracker": "https://github.com/lbbrhzn/ocpp/issues",
+	"issue_tracker": "https://github.com/alexisml/ocpp/issues",
 	"requirements": [
 		"ocpp>=2.1.0",
 		"websockets>=14.1"
