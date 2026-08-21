@@ -3,8 +3,14 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import slugify
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import device_registry
@@ -13,7 +19,18 @@ import voluptuous as vol
 
 from ocpp.v16.enums import AuthorizationStatus
 
-from .api import CentralSystem
+from .api import (
+    CentralSystem,
+    CHRGR_SERVICE_DATA_SCHEMA,
+    CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
+    CONF_SERVICE_DATA_SCHEMA,
+    GCONF_SERVICE_DATA_SCHEMA,
+    GDIAG_SERVICE_DATA_SCHEMA,
+    TRANS_SERVICE_DATA_SCHEMA,
+    UFW_SERVICE_DATA_SCHEMA,
+    CUSTMSG_SERVICE_DATA_SCHEMA,
+)
+from .enums import HAChargerServices as csvcs
 from .const import (
     CONF_AUTH_LIST,
     CONF_AUTH_STATUS,
@@ -68,6 +85,12 @@ from .const import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
+# Key used to track domain-level services registered by this integration.
+# Storing the names allows targeted removal on unload without relying on
+# async_services_for_domain, which is unavailable before Home Assistant 2024.2.
+_DOMAIN_SERVICE_NAMES = "_domain_service_names"
+
+
 AUTH_LIST_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ID_TAG): cv.string,
@@ -98,6 +121,157 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
     hass.data[DOMAIN][CONFIG] = ocpp_config
     _LOGGER.info(f"config = {ocpp_config}")
     return True
+
+
+def _iter_central_systems(hass: HomeAssistant):
+    """Yield every active CentralSystem instance registered in hass.data."""
+    domain_data = hass.data.get(DOMAIN, {})
+    for _key, value in domain_data.items():
+        if isinstance(value, CentralSystem):
+            yield value
+
+
+def _resolve_central_system(hass: HomeAssistant, devid: str):
+    """Return the CentralSystem that owns *devid*.
+
+    *devid* is matched against both the HA charger id (``cpid``) and the raw
+    OCPP charger id (``cp_id``) for every active central system.  When *devid*
+    is empty or missing the resolver falls back to the only active CentralSystem
+    if exactly one is loaded, preserving backwards compatibility for legacy
+    service calls.  If no match is found a :class:`HomeAssistantError` is
+    raised so the caller gets an explicit failure instead of silently routing
+    to the wrong charger.
+    """
+    central_systems = list(_iter_central_systems(hass))
+
+    # Backwards compatibility: legacy service calls did not always supply a
+    # devid. With exactly one CentralSystem loaded the intended target is
+    # unambiguous, so keep the historical fallback behaviour.
+    if not devid:
+        if len(central_systems) == 1:
+            return central_systems[0]
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="not_found",
+            translation_placeholders={"message": devid},
+        )
+
+    for cs in central_systems:
+        # cpids maps HA cpid -> OCPP cp_id; fall through to cp_id direct match.
+        cp_id = cs.cpids.get(devid, devid)
+        if cp_id in cs.charge_points:
+            return cs
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="not_found",
+        translation_placeholders={"message": devid},
+    )
+
+
+def _register_domain_services(hass: HomeAssistant) -> list[str]:
+    """Register global domain services that route to the correct CentralSystem.
+
+    Services are registered exactly once for the whole domain.  When multiple
+    central systems are active each call is routed to the instance that owns
+    the charger identified by *devid*, preventing handler collisions and
+    cross-system misrouting.
+
+    Returns the list of service names registered by this integration so they
+    can be removed precisely during unload without relying on newer HA APIs.
+    """
+
+    async def _route(method_name: str, call: ServiceCall) -> ServiceResponse:
+        devid = call.data.get("devid", "")
+        cs = _resolve_central_system(hass, devid)
+        return await getattr(cs, method_name)(call)
+
+    async def _route_configure(call: ServiceCall) -> ServiceResponse:
+        return await _route("handle_configure", call)
+
+    async def _route_get_configuration(call: ServiceCall) -> ServiceResponse:
+        return await _route("handle_get_configuration", call)
+
+    async def _route_data_transfer(call: ServiceCall) -> None:
+        await _route("handle_data_transfer", call)
+
+    async def _route_trigger_custom_message(call: ServiceCall) -> None:
+        await _route("handle_trigger_custom_message", call)
+
+    async def _route_clear_profile(call: ServiceCall) -> None:
+        await _route("handle_clear_profile", call)
+
+    async def _route_set_charge_rate(call: ServiceCall) -> None:
+        await _route("handle_set_charge_rate", call)
+
+    async def _route_update_firmware(call: ServiceCall) -> None:
+        await _route("handle_update_firmware", call)
+
+    async def _route_get_diagnostics(call: ServiceCall) -> None:
+        await _route("handle_get_diagnostics", call)
+
+    services = [
+        csvcs.service_configure.value,
+        csvcs.service_get_configuration.value,
+        csvcs.service_data_transfer.value,
+        csvcs.service_trigger_custom_message.value,
+        csvcs.service_clear_profile.value,
+        csvcs.service_set_charge_rate.value,
+        csvcs.service_update_firmware.value,
+        csvcs.service_get_diagnostics.value,
+    ]
+
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_configure.value,
+        _route_configure,
+        CONF_SERVICE_DATA_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_get_configuration.value,
+        _route_get_configuration,
+        GCONF_SERVICE_DATA_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_data_transfer.value,
+        _route_data_transfer,
+        TRANS_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_trigger_custom_message.value,
+        _route_trigger_custom_message,
+        CUSTMSG_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_clear_profile.value,
+        _route_clear_profile,
+        CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_set_charge_rate.value,
+        _route_set_charge_rate,
+        CHRGR_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_update_firmware.value,
+        _route_update_firmware,
+        UFW_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_get_diagnostics.value,
+        _route_get_diagnostics,
+        GDIAG_SERVICE_DATA_SCHEMA,
+    )
+
+    return services
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -131,6 +305,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
+
+    # Register domain-wide services exactly once across all config entries.
+    # The global handlers route each call to the correct CentralSystem by
+    # resolving *devid* against every active instance's charger registry.
+    if not hass.data[DOMAIN].get(_DOMAIN_SERVICE_NAMES):
+        hass.data[DOMAIN][_DOMAIN_SERVICE_NAMES] = _register_domain_services(hass)
 
     if entry.data[CONF_CPIDS]:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -268,10 +448,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             central_sys = hass.data[DOMAIN][entry.entry_id]
             central_sys._server.close()
             await central_sys._server.wait_closed()
-            # Unload services
-            # print(hass.services.async_services_for_domain(DOMAIN))
-            for service in hass.services.async_services_for_domain(DOMAIN):
-                hass.services.async_remove(DOMAIN, service)
             # Unload the platforms if - and only if - setup forwarded them.
             # Deciding from the live connection count skipped the unload
             # whenever every configured charger happened to be offline, and
@@ -298,6 +474,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Remove entry
             if unloaded:
                 hass.data[DOMAIN].pop(entry.entry_id)
+                # Remove domain-wide services only when this is the last active
+                # CentralSystem.  Removing them while another CS is still loaded
+                # would break all service calls for that remaining instance.
+                remaining_cs = list(_iter_central_systems(hass))
+                if not remaining_cs:
+                    for service in hass.data[DOMAIN].pop(_DOMAIN_SERVICE_NAMES, []):
+                        hass.services.async_remove(DOMAIN, service)
 
     return unloaded
 
