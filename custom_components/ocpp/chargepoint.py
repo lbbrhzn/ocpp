@@ -424,8 +424,8 @@ class ChargePoint(cp):
 
     async def set_charge_rate(
         self,
-        limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_amps: int | float | None = None,
+        limit_watts: int | float | None = None,
         conn_id: int = 0,
         profile: dict | None = None,
     ):

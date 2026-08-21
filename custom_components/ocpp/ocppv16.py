@@ -28,6 +28,7 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
+    Phase,
     ReadingContext,
     RegistrationStatus,
     RemoteStartStopStatus,
@@ -57,6 +58,7 @@ from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
+    DEFAULT_MAX_CURRENT,
     HA_ENERGY_UNIT,
     MEASURANDS,
 )
@@ -77,6 +79,37 @@ def _to_message_trigger(name: str) -> MessageTrigger | None:
         "firmwarestatusnotification": MessageTrigger.firmware_status_notification,
     }
     return mapping.get(key)
+
+
+# Charge-rate defaults plus conservative electrical conversion fallbacks.
+_DEFAULT_LIMIT_AMPS = DEFAULT_MAX_CURRENT
+_DEFAULT_LIMIT_WATTS = 22000
+_DEFAULT_LINE_VOLTAGE = 230.0
+_DEFAULT_PHASES = 1
+
+_AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
+_WATTS_UNIT_TOKENS = frozenset({"power", "w", "watt", "watts"})
+_PHASE_KEY_GROUPS = (
+    frozenset({Phase.l1.value, Phase.l2.value, Phase.l3.value}),
+    frozenset({Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value}),
+    frozenset({Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value}),
+)
+
+
+def _allowed_charging_rate_units(units_resp: str | None) -> tuple[bool, bool]:
+    """Parse ChargingScheduleAllowedChargingRateUnit into (amps, watts) support."""
+    if not units_resp:
+        return True, False
+    tokens = {
+        tok.strip().lower()
+        for tok in str(units_resp).replace(";", ",").split(",")
+        if tok.strip()
+    }
+    supports_amps = bool(tokens & _AMPS_UNIT_TOKENS)
+    supports_watts = bool(tokens & _WATTS_UNIT_TOKENS)
+    if not supports_amps and not supports_watts:
+        return True, False
+    return supports_amps, supports_watts
 
 
 class ChargePoint(cp):
@@ -409,10 +442,75 @@ class ChargePoint(cp):
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
 
+    def _lookup_metric(self, measurand: str, conn_id: int):
+        """Return a connector metric if it has a value, else None."""
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None:
+            return None
+        try:
+            target = int(conn_id) if conn_id and int(conn_id) > 0 else 1
+        except (TypeError, ValueError):
+            target = 1
+        # Connector 0 contains legacy/global telemetry. Never fall back to
+        # connector 1 for another connector, as that can mix unrelated ports.
+        connector_ids = (target, 0) if target != 0 else (0,)
+        for cid in connector_ids:
+            key = (cid, measurand)
+            if key not in metrics:
+                continue
+            metric = metrics[key]
+            if metric is not None and getattr(metric, "value", None) is not None:
+                return metric
+        return None
+
+    def _line_voltage(self, conn_id: int) -> float:
+        """Return a plausible line-to-neutral voltage, or the 230 V default."""
+        metric = self._lookup_metric(Measurand.voltage.value, conn_id)
+        if metric is not None:
+            try:
+                voltage = float(metric.value)
+            except (TypeError, ValueError):
+                voltage = 0.0
+            if 50.0 <= voltage <= 500.0:
+                return voltage
+        return _DEFAULT_LINE_VOLTAGE
+
+    def _phase_count(self, conn_id: int) -> int:
+        """Count explicitly reported phases; conservatively default to one."""
+        measurands = (
+            Measurand.voltage.value,
+            Measurand.current_import.value,
+            Measurand.current_offered.value,
+        )
+        best = 0
+        for measurand in measurands:
+            metric = self._lookup_metric(measurand, conn_id)
+            if metric is None:
+                continue
+            keys = {str(k) for k in (metric.extra_attr or {})}
+            for group in _PHASE_KEY_GROUPS:
+                n = len(keys & group)
+                if n > best:
+                    best = n
+        return best if best > 0 else _DEFAULT_PHASES
+
+    def _amps_to_watts(self, amps: float, conn_id: int) -> float:
+        """Convert a current limit to watts for Power-only chargers."""
+        return float(
+            round(amps * self._line_voltage(conn_id) * self._phase_count(conn_id))
+        )
+
+    def _watts_to_amps(self, watts: float, conn_id: int) -> float:
+        """Convert a power limit to amps for Current-only chargers."""
+        denom = self._line_voltage(conn_id) * self._phase_count(conn_id)
+        if denom <= 0:
+            return float(_DEFAULT_LIMIT_AMPS)
+        return round(watts / denom, 1)
+
     async def set_charge_rate(
         self,
-        limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_amps: int | float | None = None,
+        limit_watts: int | float | None = None,
         conn_id: int = 0,
         profile: dict | None = None,
     ) -> bool:
@@ -443,10 +541,37 @@ class ChargePoint(cp):
         )
         if not units_resp:
             _LOGGER.debug("Charging rate unit not reported; assuming Amps")
-            units_resp = om.current.value
 
-        use_amps = om.current.value in units_resp
-        limit_value = float(limit_amps if use_amps else limit_watts)
+        supports_amps, supports_watts = _allowed_charging_rate_units(units_resp)
+        # Watt-only chargers (Huawei FusionCharge reports "Power") must not
+        # fall back to the old limit_watts=22000 default when the HA number
+        # entity passes only limit_amps.
+        if supports_amps and not supports_watts:
+            use_amps = True
+        elif supports_watts and not supports_amps:
+            use_amps = False
+        else:
+            use_amps = limit_amps is not None or limit_watts is None
+
+        if use_amps:
+            if limit_amps is not None:
+                limit_value = float(limit_amps)
+            elif limit_watts is not None:
+                limit_value = self._watts_to_amps(float(limit_watts), conn_id)
+            else:
+                limit_value = float(_DEFAULT_LIMIT_AMPS)
+        elif limit_watts is not None:
+            limit_value = float(limit_watts)
+        elif limit_amps is not None:
+            limit_value = self._amps_to_watts(float(limit_amps), conn_id)
+            _LOGGER.debug(
+                "Converted %.1f A to %.0f W for Power-only charger",
+                float(limit_amps),
+                limit_value,
+            )
+        else:
+            limit_value = float(_DEFAULT_LIMIT_WATTS)
+
         units_value = (
             ChargingRateUnitType.amps.value
             if use_amps
