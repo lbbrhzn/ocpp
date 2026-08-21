@@ -453,7 +453,7 @@ class ChargePoint(cp):
             target = 1
         # Connector 0 contains legacy/global telemetry. Never fall back to
         # connector 1 for another connector, as that can mix unrelated ports.
-        connector_ids = (target, 0) if target != 0 else (0,)
+        connector_ids = (target, 0)
         for cid in connector_ids:
             key = (cid, measurand)
             if key not in metrics:

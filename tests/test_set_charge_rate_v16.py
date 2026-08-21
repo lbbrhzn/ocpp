@@ -24,6 +24,7 @@ from custom_components.ocpp.chargepoint import (
     Metric,
     _ConnectorAwareMetrics,
 )
+from custom_components.ocpp.const import DEFAULT_MAX_CURRENT
 from custom_components.ocpp.enums import (
     ConfigurationKey as ckey,
     OcppMisc as om,
@@ -368,3 +369,70 @@ async def test_unknown_rate_unit_defaults_to_current(cp_v16, monkeypatch):
     unit, limit = _schedule_limit(captured[0])
     assert unit == ChargingRateUnitType.amps.value
     assert limit == 10.0
+
+
+def test_lookup_metric_without_metrics_returns_none(cp_v16):
+    """A ChargePoint with no metric store must not raise."""
+    cp_v16._metrics = None
+    assert cp_v16._lookup_metric(Measurand.voltage.value, 1) is None
+
+
+def test_lookup_metric_invalid_connector_falls_back_to_one(cp_v16):
+    """A non-integer connector id is treated as connector 1."""
+    voltage = Metric(240.0, "V")
+    cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
+    assert cp_v16._lookup_metric(Measurand.voltage.value, "bad") is voltage
+
+
+def test_lookup_metric_skips_empty_values(cp_v16):
+    """A present metric with no value is ignored."""
+    cp_v16._metrics[(1, Measurand.voltage.value)] = Metric(None, "V")
+    assert cp_v16._lookup_metric(Measurand.voltage.value, 1) is None
+
+
+def test_line_voltage_rejects_non_numeric_and_out_of_range(cp_v16):
+    """Implausible voltages fall back to 230 V."""
+    cp_v16._metrics[(1, Measurand.voltage.value)] = Metric("n/a", "V")
+    assert cp_v16._line_voltage(1) == 230.0
+    cp_v16._metrics[(1, Measurand.voltage.value)] = Metric(12.0, "V")
+    assert cp_v16._line_voltage(1) == 230.0
+
+
+def test_watts_to_amps_zero_denominator_uses_default(cp_v16, monkeypatch):
+    """A zero volt-amp product must not divide by zero."""
+    monkeypatch.setattr(cp_v16, "_line_voltage", lambda _conn: 0.0)
+    monkeypatch.setattr(cp_v16, "_phase_count", lambda _conn: 0)
+    assert cp_v16._watts_to_amps(5000, 1) == float(DEFAULT_MAX_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_amp_charger_default_limit_when_no_value_given(cp_v16, monkeypatch):
+    """Calling set_charge_rate() with no limit uses the default amp cap."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Current")
+
+    assert await cp_v16.set_charge_rate() is True
+    unit, limit = _schedule_limit(captured[0])
+    assert unit == ChargingRateUnitType.amps.value
+    assert limit == float(DEFAULT_MAX_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_power_charger_default_limit_when_no_value_given(cp_v16, monkeypatch):
+    """Calling set_charge_rate() with no limit uses the default watt cap."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Power")
+
+    assert await cp_v16.set_charge_rate() is True
+    unit, limit = _schedule_limit(captured[0])
+    assert unit == ChargingRateUnitType.watts.value
+    assert limit == 22000.0
+
+
+@pytest.mark.asyncio
+async def test_dual_unit_charger_sends_explicit_watts(cp_v16, monkeypatch):
+    """When both units are allowed, an explicit watt limit stays in watts."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Current,Power")
+
+    assert await cp_v16.set_charge_rate(limit_watts=7000, conn_id=1) is True
+    unit, limit = _schedule_limit(captured[0])
+    assert unit == ChargingRateUnitType.watts.value
+    assert limit == 7000.0
