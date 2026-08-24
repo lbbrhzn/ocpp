@@ -736,7 +736,7 @@ class ChargePoint(cp):
         auth_list = config.get(CONF_AUTH_LIST, {})
         # search for the entry, based on the id_tag
         auth_status = None
-        for auth_entry in auth_list:
+        for auth_entry in auth_list.values():
             id_entry = auth_entry.get(CONF_ID_TAG, None)
             if id_tag == id_entry:
                 # get the authorization status, use the default if not configured
