@@ -3,6 +3,8 @@ Supported devices
 
 All OCPP 1.6j compatible devices should be supported, but not every device offers the same level of functionality. So far, we've tried:
 
+Running several of these at once? See [Multiple central systems](https://github.com/lbbrhzn/ocpp/blob/main/docs/multiple-central-systems.md) for how actions are routed when more than one central system is configured.
+
 ## ABB Terra AC chargers
 
 ABB Terra AC chargers with firmware version 1.8.21 and earlier fail to respond correctly when OCPP measurands are automatically detected by the OCPP integration. As of this writing, ABB has been notified, but no corresponding firmware fix is available.
