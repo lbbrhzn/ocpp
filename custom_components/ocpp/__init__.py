@@ -142,12 +142,11 @@ def _resolve_central_system(hass: HomeAssistant, devid: str):
     a coincidental ``cp_id`` in one system from shadowing the real ``cpid`` of
     another.
 
-    When *devid* is empty, missing or unrecognised the resolver falls back to
-    the only active CentralSystem if exactly one is loaded, which reproduces
-    the historical behaviour for every single-central-system installation.
-    With several central systems loaded there is nothing to guess from, so a
-    :class:`HomeAssistantError` is raised instead of silently routing to the
-    wrong system.
+    An omitted *devid* falls back to the only active CentralSystem if exactly
+    one is loaded, which keeps working the legacy service calls that never
+    supplied a target.  A *devid* that is supplied but matches nothing is an
+    error: the caller named a charger, and quietly running the action against
+    a different one is worse than failing.
     """
     central_systems = list(_iter_central_systems(hass))
 
@@ -172,13 +171,11 @@ def _resolve_central_system(hass: HomeAssistant, devid: str):
                 translation_placeholders={"message": devid},
             )
 
-    # Backwards compatibility: legacy service calls did not always supply a
-    # devid, and an unrecognised one used to fall through to a known charger.
-    # With exactly one CentralSystem loaded the target system is unambiguous,
-    # so keep that behaviour and let the handler pick the charge point exactly
-    # as it did before.  Only a multi-central-system setup - which never
-    # routed correctly in the first place - fails here.
-    if len(central_systems) == 1:
+    # Backwards compatibility, scoped to an omitted target: legacy service
+    # calls did not always supply a devid, and with exactly one CentralSystem
+    # loaded the intended system is unambiguous.  A devid that was supplied
+    # and did not resolve above never reaches this point.
+    elif len(central_systems) == 1:
         return central_systems[0]
 
     raise HomeAssistantError(
@@ -201,7 +198,7 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
     """
 
     async def _route(method_name: str, call: ServiceCall) -> ServiceResponse:
-        devid = call.data.get("devid", "")
+        devid = call.data.get("devid") or ""
         cs = _resolve_central_system(hass, devid)
         return await getattr(cs, method_name)(call)
 

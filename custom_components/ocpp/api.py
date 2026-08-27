@@ -659,19 +659,17 @@ class CentralSystem:
         """Check charger is available before executing service with Decorator."""
 
         async def wrapper(self, call, *args, **kwargs):
-            devid = call.data.get("devid", "")
+            devid = call.data.get("devid") or ""
             # Accept either the HA charger id (cpid) or the OCPP charger id (cp_id).
             cp_id = self.cpids.get(devid, devid)
             cp = self.charge_points.get(cp_id)
             if cp is None:
-                # Backwards compatibility: legacy service calls did not always
-                # supply a devid, and an unrecognised one has always fallen
-                # through to the first known charge point of this instance.
-                # Keep that, so single-central-system setups behave exactly as
-                # before. Cross-instance routing is handled upstream by
-                # _resolve_central_system() in __init__.py, which never
-                # defaults to an arbitrary system when several are loaded.
-                if not self.charge_points:
+                # An omitted devid still falls back to a charge point of this
+                # instance, which is what legacy service calls relied on. A
+                # devid that was supplied and did not match is an error: the
+                # caller named a charger, so running the action against a
+                # different one would be worse than failing.
+                if devid or not self.charge_points:
                     raise HomeAssistantError(
                         translation_domain=DOMAIN,
                         translation_key="not_found",
