@@ -136,31 +136,31 @@ def _resolve_central_system(hass: HomeAssistant, devid: str):
 
     *devid* is matched against both the HA charger id (``cpid``) and the raw
     OCPP charger id (``cp_id``) for every active central system.  When *devid*
-    is empty or missing the resolver falls back to the only active CentralSystem
-    if exactly one is loaded, preserving backwards compatibility for legacy
-    service calls.  If no match is found a :class:`HomeAssistantError` is
-    raised so the caller gets an explicit failure instead of silently routing
-    to the wrong charger.
+    is empty, missing or unrecognised the resolver falls back to the only
+    active CentralSystem if exactly one is loaded, which reproduces the
+    historical behaviour for every single-central-system installation.  With
+    several central systems loaded there is nothing to guess from, so a
+    :class:`HomeAssistantError` is raised instead of silently routing to the
+    wrong system.
     """
     central_systems = list(_iter_central_systems(hass))
 
-    # Backwards compatibility: legacy service calls did not always supply a
-    # devid. With exactly one CentralSystem loaded the intended target is
-    # unambiguous, so keep the historical fallback behaviour.
-    if not devid:
-        if len(central_systems) == 1:
-            return central_systems[0]
-        raise HomeAssistantError(
-            translation_domain=DOMAIN,
-            translation_key="not_found",
-            translation_placeholders={"message": devid},
-        )
+    if devid:
+        for cs in central_systems:
+            # cpids maps HA cpid -> OCPP cp_id; fall through to cp_id direct match.
+            cp_id = cs.cpids.get(devid, devid)
+            if cp_id in cs.charge_points:
+                return cs
 
-    for cs in central_systems:
-        # cpids maps HA cpid -> OCPP cp_id; fall through to cp_id direct match.
-        cp_id = cs.cpids.get(devid, devid)
-        if cp_id in cs.charge_points:
-            return cs
+    # Backwards compatibility: legacy service calls did not always supply a
+    # devid, and an unrecognised one used to fall through to a known charger.
+    # With exactly one CentralSystem loaded the target system is unambiguous,
+    # so keep that behaviour and let the handler pick the charge point exactly
+    # as it did before.  Only a multi-central-system setup - which never
+    # routed correctly in the first place - fails here.
+    if len(central_systems) == 1:
+        return central_systems[0]
+
     raise HomeAssistantError(
         translation_domain=DOMAIN,
         translation_key="not_found",

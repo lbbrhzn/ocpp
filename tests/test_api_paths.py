@@ -623,9 +623,9 @@ async def test_on_connect_cancels_tasks_when_stop_fails(hass, monkeypatch):
     # must not raise, and must still replace the charge point
     await cs.on_connect(_make_ws("ocpp2.0.1"))
 
-    assert all(task.cancelled for task in old_cp.tasks), (
-        "stale charge point's tasks must be cancelled when stop() fails"
-    )
+    assert all(
+        task.cancelled for task in old_cp.tasks
+    ), "stale charge point's tasks must be cancelled when stop() fails"
     assert cs.charge_points["CP_1"] is new_cp
     assert new_cp.started is True
 
@@ -660,23 +660,36 @@ async def test_on_connect_reconnects_when_version_unchanged(hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unresolved_devid_raises_when_multiple_cps(hass):
-    """Service call with an unknown devid must raise when multiple CPs exist.
+async def test_unresolved_devid_falls_back_within_one_central_system(hass):
+    """An unknown devid keeps falling through to the first charger of the CS.
 
-    Regression guard: ambiguous devids must not silently fall back to the
-    first charger when the choice would be arbitrary.
+    Backwards compatibility guard: this is what the integration has always
+    done inside a single CentralSystem, and service calls omitting devid rely
+    on it. Cross-central-system routing is the part this change makes strict -
+    see test_multi_central_system_routing_via_global_resolver.
     """
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     cs = CentralSystem(hass, entry)
 
-    _install_dummy_cp(cs, cpid="cp_a", cp_id="CP_A", status=STATE_OK)
-    _install_dummy_cp(cs, cpid="cp_b", cp_id="CP_B", status=STATE_OK)
+    first = _install_dummy_cp(cs, cpid="cp_a", cp_id="CP_A", status=STATE_OK)
+    second = _install_dummy_cp(cs, cpid="cp_b", cp_id="CP_B", status=STATE_OK)
 
-    # An unrecognised devid must raise, not fall back to the first charger.
+    await cs.handle_clear_profile(
+        SimpleNamespace(data={"devid": "completely_unknown_charger"}),
+    )
+
+    assert any(k == "clear_profile" for k, _ in first.calls)
+    assert not second.calls
+
+
+@pytest.mark.asyncio
+async def test_service_call_raises_when_no_charge_points(hass):
+    """With no charger to fall back to the call must fail explicitly."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
     with pytest.raises(HomeAssistantError):
-        await cs.handle_clear_profile(
-            SimpleNamespace(data={"devid": "completely_unknown_charger"}),
-        )
+        await cs.handle_clear_profile(SimpleNamespace(data={"devid": "anything"}))
 
 
 @pytest.mark.asyncio

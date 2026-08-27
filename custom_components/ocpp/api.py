@@ -665,19 +665,19 @@ class CentralSystem:
             cp = self.charge_points.get(cp_id)
             if cp is None:
                 # Backwards compatibility: legacy service calls did not always
-                # supply a devid. When this CentralSystem owns a single charge
-                # point, fall back to it. This fallback is scoped to one
-                # CentralSystem; when multiple central systems are configured
-                # the global router in __init__.py never defaults to the first
-                # one, because multi-CS setups never worked before.
-                if len(self.charge_points) == 1:
-                    cp_id, cp = next(iter(self.charge_points.items()))
-                else:
+                # supply a devid, and an unrecognised one has always fallen
+                # through to the first known charge point of this instance.
+                # Keep that, so single-central-system setups behave exactly as
+                # before. Cross-instance routing is handled upstream by
+                # _resolve_central_system() in __init__.py, which never
+                # defaults to an arbitrary system when several are loaded.
+                if not self.charge_points:
                     raise HomeAssistantError(
                         translation_domain=DOMAIN,
                         translation_key="not_found",
                         translation_placeholders={"message": devid},
                     )
+                cp_id, cp = next(iter(self.charge_points.items()))
             if cp.status == STATE_UNAVAILABLE:
                 _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
                 raise HomeAssistantError(
