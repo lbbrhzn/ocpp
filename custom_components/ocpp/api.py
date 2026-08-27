@@ -11,7 +11,7 @@ import ssl
 from functools import partial
 from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -90,6 +90,11 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("requested_message"): cv.string,
     }
 )
+CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+    }
+)
 
 
 def _norm(s: str) -> str:
@@ -116,56 +121,10 @@ class CentralSystem:
         # setup actually did whenever state changed in between.
         self.platforms_forwarded = False
 
-        # Register custom services with home assistant
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_configure.value,
-            self.handle_configure,
-            CONF_SERVICE_DATA_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_get_configuration.value,
-            self.handle_get_configuration,
-            GCONF_SERVICE_DATA_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_data_transfer.value,
-            self.handle_data_transfer,
-            TRANS_SERVICE_DATA_SCHEMA,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_trigger_custom_message.value,
-            self.handle_trigger_custom_message,
-            CUSTMSG_SERVICE_DATA_SCHEMA,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_clear_profile.value,
-            self.handle_clear_profile,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_set_charge_rate.value,
-            self.handle_set_charge_rate,
-            CHRGR_SERVICE_DATA_SCHEMA,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_update_firmware.value,
-            self.handle_update_firmware,
-            UFW_SERVICE_DATA_SCHEMA,
-        )
-        self.hass.services.async_register(
-            DOMAIN,
-            csvcs.service_get_diagnostics.value,
-            self.handle_get_diagnostics,
-            GDIAG_SERVICE_DATA_SCHEMA,
-        )
+        # Service registration is performed globally by the integration setup
+        # (custom_components/ocpp/__init__.py) so that multiple central system
+        # instances do not overwrite each other's handlers.  See
+        # _register_domain_services() in __init__.py.
 
     @staticmethod
     async def create(hass: HomeAssistant, entry: ConfigEntry):
@@ -700,11 +659,23 @@ class CentralSystem:
         """Check charger is available before executing service with Decorator."""
 
         async def wrapper(self, call, *args, **kwargs):
-            try:
-                cp_id = self.cpids.get(call.data["devid"], call.data["devid"])
-                cp = self.charge_points[cp_id]
-            except KeyError:
-                cp = list(self.charge_points.values())[0]
+            devid = call.data.get("devid") or ""
+            # Accept either the HA charger id (cpid) or the OCPP charger id (cp_id).
+            cp_id = self.cpids.get(devid, devid)
+            cp = self.charge_points.get(cp_id)
+            if cp is None:
+                # An omitted devid still falls back to a charge point of this
+                # instance, which is what legacy service calls relied on. A
+                # devid that was supplied and did not match is an error: the
+                # caller named a charger, so running the action against a
+                # different one would be worse than failing.
+                if devid or not self.charge_points:
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="not_found",
+                        translation_placeholders={"message": devid},
+                    )
+                cp_id, cp = next(iter(self.charge_points.items()))
             if cp.status == STATE_UNAVAILABLE:
                 _LOGGER.warning(f"{cp_id}: charger is currently unavailable")
                 raise HomeAssistantError(

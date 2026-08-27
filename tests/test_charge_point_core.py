@@ -390,9 +390,9 @@ async def test_stop_cancels_tasks_when_close_fails(hass):
     with pytest.raises(OSError):
         await cp.stop()
 
-    assert all(
-        task.cancelled for task in cp.tasks
-    ), "tasks must be cancelled even when the websocket close raises"
+    assert all(task.cancelled for task in cp.tasks), (
+        "tasks must be cancelled even when the websocket close raises"
+    )
     assert cp.status == STATE_UNAVAILABLE
 
 
@@ -417,9 +417,9 @@ async def test_stop_cancels_tasks_when_close_is_cancelled(hass):
     with pytest.raises(asyncio.CancelledError):
         await cp.stop()
 
-    assert all(
-        task.cancelled for task in cp.tasks
-    ), "tasks must be cancelled even when the websocket close is cancelled"
+    assert all(task.cancelled for task in cp.tasks), (
+        "tasks must be cancelled even when the websocket close is cancelled"
+    )
     assert cp.status == STATE_UNAVAILABLE
 
 

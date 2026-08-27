@@ -134,12 +134,12 @@ async def test_second_post_connect_during_slow_inventory_does_not_poison_map(has
     total = await cp.get_number_of_connectors()  # the second, concurrent pass
 
     assert total == 1  # the floor still applies to the returned count
-    assert (
-        cp._evse_to_global == {}
-    ), "no map may be installed while the inventory attempt is in flight"
-    assert (
-        len(cp._pending_status_notifications) == 2
-    ), "statuses must stay buffered for the real map"
+    assert cp._evse_to_global == {}, (
+        "no map may be installed while the inventory attempt is in flight"
+    )
+    assert len(cp._pending_status_notifications) == 2, (
+        "statuses must stay buffered for the real map"
+    )
 
     # the real inventory finishes: two EVSEs, one connector each
     cp._inventory.evse_count = 2
@@ -200,9 +200,9 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
 
     await refetch  # the attempt times out and settles
 
-    assert (
-        cp._pending_status_notifications == []
-    ), "settling the attempt must drain the buffer"
+    assert cp._pending_status_notifications == [], (
+        "settling the attempt must drain the buffer"
+    )
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
     assert cp._evse_to_global == {(1, 2): 1}
     await asyncio.sleep(0)  # let the scheduled update task run
@@ -290,9 +290,9 @@ async def test_partial_topology_timeout_still_drains_buffered_statuses(hass):
     # two connectors proves the partial topology was RETAINED - the
     # one-connector floor would have produced 1
     assert total == 2, "the partial inventory bypasses the floor"
-    assert (
-        cp._pending_status_notifications == []
-    ), "the drain must not live only in the zero-connector fallback"
+    assert cp._pending_status_notifications == [], (
+        "the drain must not live only in the zero-connector fallback"
+    )
     assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
     assert cp._evse_to_global == {(1, 1): 1, (1, 2): 2}
 
@@ -354,9 +354,9 @@ async def test_failed_attempt_releases_ownership_for_the_next_one(hass):
     with pytest.raises(TimeoutError):
         await cp.get_number_of_connectors()
 
-    assert (
-        cp._wait_inventory is None
-    ), "a failed attempt must release ownership on its way out"
+    assert cp._wait_inventory is None, (
+        "a failed attempt must release ownership on its way out"
+    )
     assert cp._pending_status_notifications == [], (
         "even a failed attempt must drain on its way out - on a persistently "
         "failing charger the next attempt would strand these again"

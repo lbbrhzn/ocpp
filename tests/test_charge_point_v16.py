@@ -225,6 +225,12 @@ async def test_services(hass, cpid, serv_list, socket_enabled):
 test_services.__test__ = False
 
 
+async def _assert_services_reject_devid(hass, devid, serv_list, socket_enabled):
+    """Every service must refuse a supplied devid that matches no charger."""
+    with pytest.raises(HomeAssistantError):
+        await test_services(hass, devid, serv_list, socket_enabled)
+
+
 # @pytest.mark.skip(reason="skip")
 @pytest.mark.timeout(20)  # Set timeout for this test
 @pytest.mark.parametrize(
@@ -643,9 +649,11 @@ async def test_cms_responses_errors_v16(
                         cs.charge_points[cp_id].settings.cpid,
                         socket_enabled,
                     ),
-                    test_services(
+                    # A devid that was supplied but matches no charger must
+                    # raise rather than fall through to an arbitrary one.
+                    _assert_services_reject_devid(
                         hass,
-                        "xxx",  # Test with incorrect devid supplied
+                        "xxx",
                         SERVICES_ERROR,
                         socket_enabled,
                     ),
@@ -1502,9 +1510,9 @@ async def test_get_diagnostics_and_data_transfer_v16(
             service_data={"devid": cpid, "upload_url": "not-a-valid-url"},
             blocking=True,
         )
-        assert any(
-            "Failed to parse url" in rec.message for rec in caplog.records
-        ), "Expected warning for invalid diagnostics upload_url not found"
+        assert any("Failed to parse url" in rec.message for rec in caplog.records), (
+            "Expected warning for invalid diagnostics upload_url not found"
+        )
 
         # --- get_diagnostics: FW profile NOT supported branch ---
         # Simulate that FirmwareManagement profile is not supported by the CP
@@ -2183,9 +2191,9 @@ async def test_current_import_phase_extra_attrs_single_and_multi_connector(
             if num_connectors == 1:
                 # Without connector_id -> should resolve (fallback) to connector 1
                 attrs = cs.get_extra_attr(cp_id, "Current.Import", connector_id=None)
-                assert (
-                    attrs is not None
-                ), "Expected extra_attr dict for single-connector"
+                assert attrs is not None, (
+                    "Expected extra_attr dict for single-connector"
+                )
                 assert attrs.get("L1") == 5.0
                 assert attrs.get("L2") == 7.0
                 assert attrs.get("L3") == 8.0
@@ -2202,9 +2210,9 @@ async def test_current_import_phase_extra_attrs_single_and_multi_connector(
                 attrs1 = cs.get_extra_attr(cp_id, "Current.Import", connector_id=1)
                 attrs2 = cs.get_extra_attr(cp_id, "Current.Import", connector_id=2)
 
-                assert (
-                    attrs1 is not None and attrs2 is not None
-                ), "Expected extra_attr dicts for both connectors"
+                assert attrs1 is not None and attrs2 is not None, (
+                    "Expected extra_attr dicts for both connectors"
+                )
 
                 # Connector 1 values
                 assert attrs1.get("L1") == 5.0

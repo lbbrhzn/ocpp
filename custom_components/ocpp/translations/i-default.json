@@ -114,6 +114,12 @@
         },
         "set_charge_rate_error": {
             "message": "Failed to set charging current limit: {message}"
+        },
+        "not_found": {
+            "message": "No charger found for device id {message}. Check the devid matches the HA charger id (cpid) or the OCPP charger id."
+        },
+        "ambiguous_devid": {
+            "message": "Charger id {message} is ambiguous: several central systems have a charger with that OCPP id. Use the HA charger id (cpid) instead, which is unique."
         }
     },
     "options": {

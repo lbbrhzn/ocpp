@@ -4,13 +4,25 @@ repos:
     hooks:
       - id: pyupgrade
         args: [--py37-plus]
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.4
+  # ruff runs from the environment rather than from a pinned hook revision,
+  # so the version used here is always the one in requirements.txt and the
+  # two cannot drift apart. Install the requirements before running.
+  - repo: local
     hooks:
       # Run the linter.
-      - id: ruff
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       # Run the formatter.
       - id: ruff-format
+        name: ruff format
+        entry: ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

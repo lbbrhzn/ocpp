@@ -623,9 +623,9 @@ async def test_on_connect_cancels_tasks_when_stop_fails(hass, monkeypatch):
     # must not raise, and must still replace the charge point
     await cs.on_connect(_make_ws("ocpp2.0.1"))
 
-    assert all(
-        task.cancelled for task in old_cp.tasks
-    ), "stale charge point's tasks must be cancelled when stop() fails"
+    assert all(task.cancelled for task in old_cp.tasks), (
+        "stale charge point's tasks must be cancelled when stop() fails"
+    )
     assert cs.charge_points["CP_1"] is new_cp
     assert new_cp.started is True
 
@@ -652,3 +652,237 @@ async def test_on_connect_reconnects_when_version_unchanged(hass, monkeypatch):
     assert cs.charge_points["CP_1"] is cp
     assert cp.reconnected_with is ws
     assert cp.stopped is False
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: service routing across multiple central systems
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_supplied_but_unresolved_devid_raises(hass):
+    """A devid that was supplied and matches nothing must not pick a charger.
+
+    The caller named a target, so running the action against a different one
+    is worse than failing. Only an omitted devid falls back - see
+    test_single_cp_fallback_for_missing_devid.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    first = _install_dummy_cp(cs, cpid="cp_a", cp_id="CP_A", status=STATE_OK)
+    second = _install_dummy_cp(cs, cpid="cp_b", cp_id="CP_B", status=STATE_OK)
+
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_clear_profile(
+            SimpleNamespace(data={"devid": "completely_unknown_charger"}),
+        )
+
+    # Neither charger may be touched by a call that could not be resolved.
+    assert not first.calls
+    assert not second.calls
+
+
+@pytest.mark.asyncio
+async def test_supplied_but_unresolved_devid_raises_with_a_single_charger(hass):
+    """The strict rule holds even when there is only one charger to pick."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    only = _install_dummy_cp(cs, cpid="only_cpid", cp_id="CP_ONLY", status=STATE_OK)
+
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_clear_profile(SimpleNamespace(data={"devid": "not_this_one"}))
+
+    assert not only.calls
+
+
+@pytest.mark.asyncio
+async def test_service_call_raises_when_no_charge_points(hass):
+    """With no charger to fall back to the call must fail explicitly."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_clear_profile(SimpleNamespace(data={"devid": "anything"}))
+
+
+@pytest.mark.asyncio
+async def test_single_cp_fallback_for_missing_devid(hass):
+    """Backwards compatibility: a single CP falls back when devid is missing.
+
+    Legacy service calls did not always include a devid.  With exactly one
+    charge point on the central system the intended target is unambiguous,
+    so keep the historical fallback behaviour.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    cp = _install_dummy_cp(cs, cpid="only_cpid", cp_id="CP_ONLY", status=STATE_OK)
+
+    # Key absent entirely, and present but blank: both mean "no target given".
+    await cs.handle_clear_profile(SimpleNamespace(data={}))
+    await cs.handle_clear_profile(SimpleNamespace(data={"devid": ""}))
+    assert [k for k, _ in cp.calls] == ["clear_profile", "clear_profile"]
+
+
+@pytest.mark.asyncio
+async def test_devid_resolves_by_cpid(hass):
+    """Service call with devid equal to the HA cpid routes to the correct charger."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    cp = _install_dummy_cp(cs, cpid="garage_charger", cp_id="CP_001", status=STATE_OK)
+
+    await cs.handle_clear_profile(SimpleNamespace(data={"devid": "garage_charger"}))
+    assert any(k == "clear_profile" for k, _ in cp.calls)
+
+
+@pytest.mark.asyncio
+async def test_devid_resolves_by_cp_id(hass):
+    """Service call with devid equal to the raw OCPP cp_id routes to the correct charger."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    cp = _install_dummy_cp(cs, cpid="garage_charger", cp_id="CP_001", status=STATE_OK)
+
+    await cs.handle_clear_profile(SimpleNamespace(data={"devid": "CP_001"}))
+    assert any(k == "clear_profile" for k, _ in cp.calls)
+
+
+@pytest.mark.asyncio
+async def test_multi_central_system_routing_via_global_resolver(hass):
+    """Two CentralSystem instances must not interfere.
+
+    _resolve_central_system must route a devid to exactly the CS that owns
+    the charger.
+    """
+    from custom_components.ocpp import _resolve_central_system
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    _install_dummy_cp(cs_a, cpid="charger_a", cp_id="CP_A", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="charger_b", cp_id="CP_B", status=STATE_OK)
+
+    # Register both in hass.data so the resolver can find them.
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+
+    # devid "charger_a" (cpid) must resolve to cs_a
+    assert _resolve_central_system(hass, "charger_a") is cs_a
+    # devid "CP_B" (cp_id) must resolve to cs_b
+    assert _resolve_central_system(hass, "CP_B") is cs_b
+    # devid "charger_b" (cpid in cs_b) must resolve to cs_b
+    assert _resolve_central_system(hass, "charger_b") is cs_b
+    # unknown devid must raise
+    with pytest.raises(HomeAssistantError):
+        _resolve_central_system(hass, "nonexistent")
+    # empty devid is ambiguous with multiple CSes and must raise
+    with pytest.raises(HomeAssistantError):
+        _resolve_central_system(hass, "")
+
+
+@pytest.mark.asyncio
+async def test_empty_devid_resolves_to_only_central_system(hass):
+    """Backwards compatibility: empty devid resolves when only one CS is loaded."""
+    from custom_components.ocpp import _resolve_central_system
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+
+    _install_dummy_cp(cs, cpid="only_cpid", cp_id="CP_ONLY", status=STATE_OK)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = cs
+
+    assert _resolve_central_system(hass, "") is cs
+
+
+@pytest.mark.asyncio
+async def test_unload_preserves_services_while_second_cs_active(hass):
+    """Unloading one entry must not remove domain services while a second is still active."""
+    from custom_components.ocpp import _resolve_central_system, _DOMAIN_SERVICE_NAMES
+
+    hass.data.setdefault(DOMAIN, {})
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    _install_dummy_cp(cs_a, cpid="charger_a", cp_id="CP_A", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="charger_b", cp_id="CP_B", status=STATE_OK)
+
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+    hass.data[DOMAIN][_DOMAIN_SERVICE_NAMES] = ["configure"]
+
+    # Simulate entry_a being removed (as async_unload_entry would do after
+    # successful platform unload).
+    hass.data[DOMAIN].pop(entry_a.entry_id)
+
+    # cs_b is still registered, so devid resolution must still work.
+    assert _resolve_central_system(hass, "charger_b") is cs_b
+    assert _resolve_central_system(hass, "CP_B") is cs_b
+
+
+@pytest.mark.asyncio
+async def test_duplicate_cp_id_across_central_systems_is_rejected(hass):
+    """The same OCPP cp_id in two systems must not resolve to an arbitrary one.
+
+    cp_id is reported by the charger, so two central systems can each own one
+    with the factory default name. Picking the first would be a coin flip on a
+    mutating service call, so the resolver refuses and the user is expected to
+    use their unique cpid instead.
+    """
+    from custom_components.ocpp import _resolve_central_system
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    # Same OCPP id on both sides, distinct HA cpids - what the config flow allows.
+    _install_dummy_cp(cs_a, cpid="garage", cp_id="CP_1", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="driveway", cp_id="CP_1", status=STATE_OK)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+
+    with pytest.raises(HomeAssistantError):
+        _resolve_central_system(hass, "CP_1")
+
+    # The unique cpid still resolves each side unambiguously.
+    assert _resolve_central_system(hass, "garage") is cs_a
+    assert _resolve_central_system(hass, "driveway") is cs_b
+
+
+@pytest.mark.asyncio
+async def test_cpid_wins_over_a_colliding_cp_id(hass):
+    """A cpid must not be shadowed by another system's identical cp_id.
+
+    cpid is kept unique by the config flow, cp_id is not, so the unique
+    identifier has to be matched first regardless of load order.
+    """
+    from custom_components.ocpp import _resolve_central_system
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    # cs_a owns a charger whose raw cp_id happens to equal cs_b's cpid.
+    _install_dummy_cp(cs_a, cpid="charger_a", cp_id="shared_name", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="shared_name", cp_id="CP_B", status=STATE_OK)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+
+    # cs_a is registered first, but the cpid owner must win.
+    assert _resolve_central_system(hass, "shared_name") is cs_b

@@ -16,6 +16,7 @@ Table of Contents
 
    installation
    supported-devices
+   multiple-central-systems
    user-guide
    support
    debugging
