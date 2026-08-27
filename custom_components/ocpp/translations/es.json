@@ -117,6 +117,9 @@
         },
         "not_found": {
             "message": "No se encontró ningún cargador para el id de dispositivo {message}. Compruebe que el devid coincide con el id del cargador en HA (cpid) o con el id del cargador OCPP."
+        },
+        "ambiguous_devid": {
+            "message": "El id de cargador {message} es ambiguo: varios sistemas centrales tienen un cargador con ese id OCPP. Usa el id de cargador de HA (cpid), que es único."
         }
     },
     "options": {

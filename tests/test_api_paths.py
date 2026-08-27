@@ -811,3 +811,61 @@ async def test_unload_preserves_services_while_second_cs_active(hass):
     # cs_b is still registered, so devid resolution must still work.
     assert _resolve_central_system(hass, "charger_b") is cs_b
     assert _resolve_central_system(hass, "CP_B") is cs_b
+
+
+@pytest.mark.asyncio
+async def test_duplicate_cp_id_across_central_systems_is_rejected(hass):
+    """The same OCPP cp_id in two systems must not resolve to an arbitrary one.
+
+    cp_id is reported by the charger, so two central systems can each own one
+    with the factory default name. Picking the first would be a coin flip on a
+    mutating service call, so the resolver refuses and the user is expected to
+    use their unique cpid instead.
+    """
+    from custom_components.ocpp import _resolve_central_system
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    # Same OCPP id on both sides, distinct HA cpids - what the config flow allows.
+    _install_dummy_cp(cs_a, cpid="garage", cp_id="CP_1", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="driveway", cp_id="CP_1", status=STATE_OK)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+
+    with pytest.raises(HomeAssistantError):
+        _resolve_central_system(hass, "CP_1")
+
+    # The unique cpid still resolves each side unambiguously.
+    assert _resolve_central_system(hass, "garage") is cs_a
+    assert _resolve_central_system(hass, "driveway") is cs_b
+
+
+@pytest.mark.asyncio
+async def test_cpid_wins_over_a_colliding_cp_id(hass):
+    """A cpid must not be shadowed by another system's identical cp_id.
+
+    cpid is kept unique by the config flow, cp_id is not, so the unique
+    identifier has to be matched first regardless of load order.
+    """
+    from custom_components.ocpp import _resolve_central_system
+
+    entry_a = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    entry_b = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs_a = CentralSystem(hass, entry_a)
+    cs_b = CentralSystem(hass, entry_b)
+
+    # cs_a owns a charger whose raw cp_id happens to equal cs_b's cpid.
+    _install_dummy_cp(cs_a, cpid="charger_a", cp_id="shared_name", status=STATE_OK)
+    _install_dummy_cp(cs_b, cpid="shared_name", cp_id="CP_B", status=STATE_OK)
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry_a.entry_id] = cs_a
+    hass.data[DOMAIN][entry_b.entry_id] = cs_b
+
+    # cs_a is registered first, but the cpid owner must win.
+    assert _resolve_central_system(hass, "shared_name") is cs_b

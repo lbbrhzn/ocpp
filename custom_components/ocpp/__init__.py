@@ -134,23 +134,43 @@ def _iter_central_systems(hass: HomeAssistant):
 def _resolve_central_system(hass: HomeAssistant, devid: str):
     """Return the CentralSystem that owns *devid*.
 
-    *devid* is matched against both the HA charger id (``cpid``) and the raw
-    OCPP charger id (``cp_id``) for every active central system.  When *devid*
-    is empty, missing or unrecognised the resolver falls back to the only
-    active CentralSystem if exactly one is loaded, which reproduces the
-    historical behaviour for every single-central-system installation.  With
-    several central systems loaded there is nothing to guess from, so a
+    *devid* is matched against the HA charger id (``cpid``) first and the raw
+    OCPP charger id (``cp_id``) only afterwards.  The order matters: the config
+    flow keeps ``cpid`` unique across every charge point of every entry, while
+    ``cp_id`` is reported by the charger itself and two central systems can
+    each own one of the same name.  Matching the unique identifier first stops
+    a coincidental ``cp_id`` in one system from shadowing the real ``cpid`` of
+    another.
+
+    When *devid* is empty, missing or unrecognised the resolver falls back to
+    the only active CentralSystem if exactly one is loaded, which reproduces
+    the historical behaviour for every single-central-system installation.
+    With several central systems loaded there is nothing to guess from, so a
     :class:`HomeAssistantError` is raised instead of silently routing to the
     wrong system.
     """
     central_systems = list(_iter_central_systems(hass))
 
     if devid:
-        for cs in central_systems:
-            # cpids maps HA cpid -> OCPP cp_id; fall through to cp_id direct match.
-            cp_id = cs.cpids.get(devid, devid)
-            if cp_id in cs.charge_points:
-                return cs
+        # Pass 1: cpid, the identifier the config flow keeps globally unique.
+        owners = [
+            cs for cs in central_systems if cs.cpids.get(devid) in cs.charge_points
+        ]
+        # Pass 2: cp_id as reported over OCPP, which carries no such guarantee.
+        if not owners:
+            owners = [cs for cs in central_systems if devid in cs.charge_points]
+
+        if len(owners) == 1:
+            return owners[0]
+        if len(owners) > 1:
+            # Several systems answer to this identifier, and picking one would
+            # be a coin flip on a mutating service call.  Fail with something
+            # the user can act on: their cpid is unique, so it always resolves.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ambiguous_devid",
+                translation_placeholders={"message": devid},
+            )
 
     # Backwards compatibility: legacy service calls did not always supply a
     # devid, and an unrecognised one used to fall through to a known charger.
