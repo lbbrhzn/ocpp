@@ -34,7 +34,7 @@ jobs:
       - name: Install Python modules
         run: |
           . venv/bin/activate
-          uv pip install "$(grep '^pre-commit' < requirements.txt)"
+          uv pip install "$(grep '^pre-commit' < requirements.txt)" "$(grep '^ruff' < requirements.txt)"
 
       - name: Run pre-commit on all files
         run: |
