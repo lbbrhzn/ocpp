@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 import logging
 from math import sqrt
 import secrets
@@ -201,7 +201,7 @@ class _ConnectorAwareMetrics(MutableMapping):
         return key in self._by_conn[0]
 
 
-class OcppVersion(str, Enum):
+class OcppVersion(StrEnum):
     """OCPP version choice."""
 
     V16 = "1.6"
