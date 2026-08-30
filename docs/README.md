@@ -11,6 +11,7 @@ Contents
 * [Supported devices](supported-devices.md)
 * [Multiple central systems](multiple-central-systems.md)
 * [User guide](user-guide.md)
+* [Charge automation](Charge_automation.md)
 * [Support](support.md)
 * [Development](development.md)
 * [Debugging](debugging.md)

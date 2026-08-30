@@ -18,6 +18,7 @@ Table of Contents
    supported-devices
    multiple-central-systems
    user-guide
+   Charge_automation
    support
    debugging
    development
