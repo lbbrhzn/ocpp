@@ -12,6 +12,7 @@ Contents
 <!-- links within the wiki should not use a file extension! -->
 * [Installation](installation)
 * [Supported devices](supported-devices)
+* [Multiple central systems](multiple-central-systems)
 * [User guide](user-guide)
 * [Support](support)
 * [Development](development)
