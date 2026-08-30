@@ -9,6 +9,7 @@ Contents
 ========
 * [Installation](installation.md)
 * [Supported devices](supported-devices.md)
+* [Multiple central systems](multiple-central-systems.md)
 * [User guide](user-guide.md)
 * [Support](support.md)
 * [Development](development.md)
