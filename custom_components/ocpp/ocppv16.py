@@ -140,8 +140,10 @@ class ChargePoint(cp):
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
-        resp = None
+        MAX_CONNECTORS = 100
+        configured = int(self.settings.num_connectors or 1)
 
+        resp = None
         try:
             req = call.GetConfiguration(key=["NumberOfConnectors"])
             resp = await self.call(req)
@@ -172,12 +174,19 @@ class ChargePoint(cp):
                 if k == "NumberOfConnectors" and v not in (None, ""):
                     try:
                         n = int(str(v).strip())
-                        if n > 0:
-                            return n
                     except (ValueError, TypeError):
-                        pass
-
-        return 1
+                        break
+                    if 0 < n <= MAX_CONNECTORS:
+                        return n
+                    _LOGGER.warning(
+                        "%s: charger reported implausible NumberOfConnectors=%s "
+                        "(possibly corrupted configuration); using configured value %s",
+                        self.id,
+                        v,
+                        configured,
+                    )
+                    return configured
+        return configured
 
     async def get_heartbeat_interval(self):
         """Retrieve heartbeat interval from the charger and store it."""
