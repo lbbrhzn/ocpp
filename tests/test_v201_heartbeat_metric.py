@@ -111,7 +111,7 @@ async def test_a_heartbeat_writes_the_metric(hass):
     """The sensor's backing metric must move when the charger beats."""
     cp = _mk_cp(hass)
     stale = datetime(2026, 8, 8, 0, 41, 40, tzinfo=UTC)
-    cp._metrics[(0, cstat.heartbeat.value)].value = stale
+    cp._metrics[(0, cstat.heartbeat)].value = stale
 
     before = datetime.now(tz=UTC)
     with patch.object(ChargePoint, "update", AsyncMock()):
@@ -119,7 +119,7 @@ async def test_a_heartbeat_writes_the_metric(hass):
         await hass.async_block_till_done()
     after = datetime.now(tz=UTC)
 
-    recorded = cp._metrics[(0, cstat.heartbeat.value)].value
+    recorded = cp._metrics[(0, cstat.heartbeat)].value
     assert recorded != stale
     # Bounded by the test's own clock reads - no wall-clock window to flake.
     assert before <= recorded <= after
@@ -134,7 +134,7 @@ async def test_the_reply_and_the_metric_agree(hass):
         result = cp.on_heartbeat()
         await hass.async_block_till_done()
 
-    recorded = cp._metrics[(0, cstat.heartbeat.value)].value
+    recorded = cp._metrics[(0, cstat.heartbeat)].value
     assert result.current_time == recorded.isoformat()
 
 
@@ -160,7 +160,7 @@ def _register_metric_sensor(hass, metric, cpid="test_cpid", suffix="renamed"):
 
 def _register_heartbeat_sensor(hass, cpid="test_cpid"):
     """Register the heartbeat sensor under a deliberately renamed id."""
-    return _register_metric_sensor(hass, cstat.heartbeat.value, cpid, "pulse")
+    return _register_metric_sensor(hass, cstat.heartbeat, cpid, "pulse")
 
 
 def _capture_dispatches(hass):
@@ -220,7 +220,7 @@ async def test_the_v16_handler_refreshes_the_same_way(hass):
 
     update.assert_not_awaited()
     assert seen == [({entity_id},)]
-    assert cp16._metrics[0][cstat.heartbeat.value].value is not None
+    assert cp16._metrics[0][cstat.heartbeat].value is not None
 
 
 @pytest.mark.asyncio
@@ -285,8 +285,8 @@ async def test_the_ping_loop_publishes_the_latency_sensors(hass, monkeypatch):
     pushes exactly the two entities it wrote.
     """
     cp = _mk_cp(hass)
-    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
-    eid_pong = _register_metric_sensor(hass, cstat.latency_pong.value)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping)
+    eid_pong = _register_metric_sensor(hass, cstat.latency_pong)
     seen = _capture_dispatches(hass)
 
     with patch.object(ChargePoint, "update", AsyncMock()) as update:
@@ -306,8 +306,8 @@ async def test_a_ping_timeout_also_publishes_the_latency_sensors(hass, monkeypat
     the latency sensors, so the degraded reading matters most.
     """
     cp = _mk_cp(hass)
-    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
-    eid_pong = _register_metric_sensor(hass, cstat.latency_pong.value)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping)
+    eid_pong = _register_metric_sensor(hass, cstat.latency_pong)
     seen = _capture_dispatches(hass)
 
     with patch.object(ChargePoint, "update", AsyncMock()) as update:
@@ -350,7 +350,7 @@ async def test_a_partially_registered_pair_dispatches_what_resolved(hass, monkey
     platforms add entities; the resolved one still deserves its refresh.
     """
     cp = _mk_cp(hass)
-    eid_ping = _register_metric_sensor(hass, cstat.latency_ping.value)
+    eid_ping = _register_metric_sensor(hass, cstat.latency_ping)
     seen = _capture_dispatches(hass)
 
     with patch.object(ChargePoint, "update", AsyncMock()) as update:

@@ -87,7 +87,7 @@ async def test_silent_charger_still_gets_the_floor(hass):
 
     assert total == 1
     assert cp._pending_status_notifications == []
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Available"
 
 
 @pytest.mark.asyncio
@@ -149,8 +149,8 @@ async def test_second_post_connect_during_slow_inventory_does_not_poison_map(has
     cp._flush_pending_status_notifications()
 
     assert cp._evse_to_global == {(1, 1): 1, (2, 1): 2}
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
-    assert cp._metrics[(2, cstat.status_connector.value)].value == "Faulted"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Available"
+    assert cp._metrics[(2, cstat.status_connector)].value == "Faulted"
 
 
 @pytest.mark.asyncio
@@ -203,7 +203,7 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
     assert cp._pending_status_notifications == [], (
         "settling the attempt must drain the buffer"
     )
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Available"
     assert cp._evse_to_global == {(1, 2): 1}
     await asyncio.sleep(0)  # let the scheduled update task run
     assert updates, (
@@ -221,7 +221,7 @@ async def test_status_buffered_during_refetch_is_drained_when_it_times_out(hass)
     assert cp._pending_status_notifications == []
     # The per-connector metric speaks the OCPP 1.6 vocabulary, as the
     # charging-station-level one already did: Occupied maps to Preparing.
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Preparing"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Preparing"
 
 
 @pytest.mark.asyncio
@@ -293,7 +293,7 @@ async def test_partial_topology_timeout_still_drains_buffered_statuses(hass):
     assert cp._pending_status_notifications == [], (
         "the drain must not live only in the zero-connector fallback"
     )
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Available"
     assert cp._evse_to_global == {(1, 1): 1, (1, 2): 2}
 
 
@@ -361,7 +361,7 @@ async def test_failed_attempt_releases_ownership_for_the_next_one(hass):
         "even a failed attempt must drain on its way out - on a persistently "
         "failing charger the next attempt would strand these again"
     )
-    assert cp._metrics[(1, cstat.status_connector.value)].value == "Available"
+    assert cp._metrics[(1, cstat.status_connector)].value == "Available"
 
     total = await cp.get_number_of_connectors()
 

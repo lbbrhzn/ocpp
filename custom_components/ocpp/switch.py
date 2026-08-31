@@ -52,7 +52,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_charge_start.name,
         off_action=HAChargerServices.service_charge_stop.name,
-        metric_state=HAChargerStatuses.status_connector.value,
+        metric_state=HAChargerStatuses.status_connector,
         metric_condition=[
             ChargePointStatus.charging.value,
             ChargePointStatus.suspended_evse.value,
@@ -66,7 +66,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status.value,  # charger-level status
+        metric_state=HAChargerStatuses.status,  # charger-level status
         metric_condition=[ChargePointStatus.available.value],
         default_state=True,
         per_connector=False,
@@ -77,7 +77,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status_connector.value,  # connector-level status
+        metric_state=HAChargerStatuses.status_connector,  # connector-level status
         metric_condition=[
             ChargePointStatus.available.value,
             ChargePointStatus.preparing.value,
@@ -221,7 +221,7 @@ class ChargePointSwitch(SwitchEntity):
                 self.connector_id
                 if (
                     self.entity_description.metric_state
-                    == HAChargerStatuses.status_connector.value
+                    == HAChargerStatuses.status_connector
                     or self.entity_description.per_connector
                 )
                 else None

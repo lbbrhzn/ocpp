@@ -78,34 +78,34 @@ async def async_setup_entry(hass, entry, async_add_devices):
         measurands = sorted(configured or default_measurands)
 
         CHARGER_ONLY = [
-            HAChargerStatuses.status.value,
-            HAChargerStatuses.error_code.value,
-            HAChargerStatuses.firmware_status.value,
-            HAChargerStatuses.heartbeat.value,
-            HAChargerStatuses.id_tag.value,
-            HAChargerStatuses.latency_ping.value,
-            HAChargerStatuses.latency_pong.value,
-            HAChargerStatuses.reconnects.value,
-            HAChargerDetails.identifier.value,
-            HAChargerDetails.vendor.value,
-            HAChargerDetails.model.value,
-            HAChargerDetails.serial.value,
-            HAChargerDetails.firmware_version.value,
-            HAChargerDetails.features.value,
-            HAChargerDetails.connectors.value,
-            HAChargerDetails.config_response.value,
-            HAChargerDetails.data_response.value,
-            HAChargerDetails.data_transfer.value,
+            HAChargerStatuses.status,
+            HAChargerStatuses.error_code,
+            HAChargerStatuses.firmware_status,
+            HAChargerStatuses.heartbeat,
+            HAChargerStatuses.id_tag,
+            HAChargerStatuses.latency_ping,
+            HAChargerStatuses.latency_pong,
+            HAChargerStatuses.reconnects,
+            HAChargerDetails.identifier,
+            HAChargerDetails.vendor,
+            HAChargerDetails.model,
+            HAChargerDetails.serial,
+            HAChargerDetails.firmware_version,
+            HAChargerDetails.features,
+            HAChargerDetails.connectors,
+            HAChargerDetails.config_response,
+            HAChargerDetails.data_response,
+            HAChargerDetails.data_transfer,
         ]
 
         CONNECTOR_ONLY = measurands + [
-            HAChargerStatuses.status_connector.value,
-            HAChargerStatuses.error_code_connector.value,
-            HAChargerStatuses.stop_reason.value,
-            HAChargerSession.transaction_id.value,
-            HAChargerSession.session_time.value,
-            HAChargerSession.session_energy.value,
-            HAChargerSession.meter_start.value,
+            HAChargerStatuses.status_connector,
+            HAChargerStatuses.error_code_connector,
+            HAChargerStatuses.stop_reason,
+            HAChargerSession.transaction_id,
+            HAChargerSession.session_time,
+            HAChargerSession.session_energy,
+            HAChargerSession.meter_start,
         ]
 
         def _mk_desc(metric: str, *, cat_diag: bool = False) -> OcppSensorDescription:
@@ -172,8 +172,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
                                 metric,
                                 cat_diag=metric
                                 in [
-                                    HAChargerStatuses.status_connector.value,
-                                    HAChargerStatuses.error_code_connector.value,
+                                    HAChargerStatuses.status_connector,
+                                    HAChargerStatuses.error_code_connector,
                                 ],
                             ),
                             connector_id=conn_id,
@@ -190,8 +190,8 @@ async def async_setup_entry(hass, entry, async_add_devices):
                             metric,
                             cat_diag=metric
                             in [
-                                HAChargerStatuses.status_connector.value,
-                                HAChargerStatuses.error_code_connector.value,
+                                HAChargerStatuses.status_connector,
+                                HAChargerStatuses.error_code_connector,
                             ],
                         ),
                         connector_id=None,
@@ -283,9 +283,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
             SensorDeviceClass.BATTERY,
             SensorDeviceClass.FREQUENCY,
         ] or self.metric in [
-            HAChargerStatuses.latency_ping.value,
-            HAChargerStatuses.latency_pong.value,
-            HAChargerSession.session_time.value,
+            HAChargerStatuses.latency_ping,
+            HAChargerStatuses.latency_pong,
+            HAChargerSession.session_time,
         ]:
             state_class = SensorStateClass.MEASUREMENT
 
@@ -315,9 +315,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         elif self.metric.lower().startswith("temperature"):
             device_class = SensorDeviceClass.TEMPERATURE
         elif self.metric.lower().startswith("timestamp") or self.metric in [
-            HAChargerDetails.config_response.value,
-            HAChargerDetails.data_response.value,
-            HAChargerStatuses.heartbeat.value,
+            HAChargerDetails.config_response,
+            HAChargerDetails.data_response,
+            HAChargerStatuses.heartbeat,
         ]:
             device_class = SensorDeviceClass.TIMESTAMP
         elif self.metric.lower().startswith("soc"):
@@ -332,7 +332,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         )
 
         # Special case for features - show profiles as labels from IntFlag
-        if self.metric == HAChargerDetails.features.value and value is not None:
+        if self.metric == HAChargerDetails.features and value is not None:
             if hasattr(value, "labels"):
                 self._attr_native_value = value.labels()
             else:

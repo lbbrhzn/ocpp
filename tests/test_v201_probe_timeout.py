@@ -145,7 +145,7 @@ async def test_the_feature_metric_is_still_written(hass):
 
     await cp.fetch_supported_features()
 
-    assert cp._attr_supported_features == cp._metrics[(0, cdet.features.value)].value
+    assert cp._attr_supported_features == cp._metrics[(0, cdet.features)].value
     assert Profiles.SMART in cp._attr_supported_features
 
 

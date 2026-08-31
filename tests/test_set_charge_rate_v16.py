@@ -133,9 +133,9 @@ async def test_cpmax_exception_falls_back_to_txdefault_accepted_returns_true(
 
     # Allow both A and stack level
     async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
             return "Current"  # supports Amps
-        if key == ckey.charge_profile_max_stack_level.value:
+        if key == ckey.charge_profile_max_stack_level:
             return "2"
         pytest.fail(f"Unexpected get_configuration key: {key}")
 
@@ -169,9 +169,9 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     """4) CPMax rejected -> TxDefault accepted -> return True."""
 
     async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
             return "Current"
-        if key == ckey.charge_profile_max_stack_level.value:
+        if key == ckey.charge_profile_max_stack_level:
             return "3"
         pytest.fail(f"Unexpected get_configuration key: {key}")
 
@@ -214,18 +214,18 @@ def test_allowed_charging_rate_units_tokens():
 
 def _schedule_limit(req):
     profile = req.cs_charging_profiles
-    schedule = profile[om.charging_schedule.value]
-    period = schedule[om.charging_schedule_period.value][0]
-    return schedule[om.charging_rate_unit.value], period[om.limit.value]
+    schedule = profile[om.charging_schedule]
+    period = schedule[om.charging_schedule_period][0]
+    return schedule[om.charging_rate_unit], period[om.limit]
 
 
 async def _accept_first_profile(cp, monkeypatch, units: str):
     captured = []
 
     async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
             return units
-        if key == ckey.charge_profile_max_stack_level.value:
+        if key == ckey.charge_profile_max_stack_level:
             return "1"
         pytest.fail(f"Unexpected get_configuration key: {key}")
 

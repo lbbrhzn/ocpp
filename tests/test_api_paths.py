@@ -234,7 +234,7 @@ async def test_get_available_paths(hass):
 
     # specific connector via per-connector metric, charger available
     cp = _install_dummy_cp(cs, status=STATE_OK)
-    meas = cstat.status_connector.value
+    meas = cstat.status_connector
     cp._metrics[(1, meas)] = M("Charging", None)
     assert cs.get_available("test_cpid", connector_id=1) is True
 
