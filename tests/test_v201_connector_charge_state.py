@@ -89,11 +89,11 @@ def _mk_cp(hass):
 
 
 def _connector_status(cp, global_idx: int = 1):
-    return cp._metrics[(global_idx, cstat.status_connector.value)].value
+    return cp._metrics[(global_idx, cstat.status_connector)].value
 
 
 def _station_status(cp):
-    return cp._metrics[(0, cstat.status_connector.value)].value
+    return cp._metrics[(0, cstat.status_connector)].value
 
 
 def _tx_event(cp, charging_state: ChargingStateEnumType, connector_id: int = 1):
@@ -250,7 +250,7 @@ async def test_a_transaction_event_for_connector_zero_is_not_mapped(hass):
 
     assert dict(cp._evse_to_global) == before
     assert cp._tx_start_time == {}
-    assert cp._metrics[(1, csess.transaction_id.value)].value is None
+    assert cp._metrics[(1, csess.transaction_id)].value is None
     assert _connector_status(cp) is None
     # the charging state is still station-level news
     assert _station_status(cp) == ChargePointStatusv16.charging.value

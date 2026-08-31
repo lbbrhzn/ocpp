@@ -37,10 +37,6 @@ lint.ignore = [
     "D411",  # Missing blank line before section
     "E501",  # line too long
     "E731",  # do not assign a lambda expression, use a def
-    "UP042", # Class inherits from both str and enum.Enum. Migrating the
-             # existing (str, Enum) classes to StrEnum changes __str__ and
-             # __format__ behaviour for members that are compared and
-             # serialised as strings throughout, so it needs its own change.
 ]
 
 [lint.flake8-pytest-style]

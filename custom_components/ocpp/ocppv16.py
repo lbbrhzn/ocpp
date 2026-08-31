@@ -181,7 +181,7 @@ class ChargePoint(cp):
 
     async def get_heartbeat_interval(self):
         """Retrieve heartbeat interval from the charger and store it."""
-        await self.get_configuration(ckey.heartbeat_interval.value)
+        await self.get_configuration(ckey.heartbeat_interval)
 
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
@@ -217,7 +217,7 @@ class ChargePoint(cp):
 
         all_measurands = self.settings.monitored_variables or ""
         autodetect_measurands = bool(self.settings.monitored_variables_autoconfig)
-        key = ckey.meter_values_sampled_data.value
+        key = ckey.meter_values_sampled_data
 
         desired_csv = all_measurands.strip().strip(",")
         cfg_ok = {ConfigurationStatus.accepted, ConfigurationStatus.reboot_required}
@@ -312,27 +312,27 @@ class ChargePoint(cp):
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
         await self.configure(
-            ckey.meter_value_sample_interval.value,
+            ckey.meter_value_sample_interval,
             str(self.settings.meter_interval),
         )
         await self.configure(
-            ckey.clock_aligned_data_interval.value,
+            ckey.clock_aligned_data_interval,
             str(self.settings.idle_interval),
         )
 
     async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""
         features = prof.NONE
-        req = call.GetConfiguration(key=[ckey.supported_feature_profiles.value])
+        req = call.GetConfiguration(key=[ckey.supported_feature_profiles])
         resp = await self.call(req)
         try:
-            feature_list = (resp.configuration_key[0][om.value.value]).split(",")
+            feature_list = (resp.configuration_key[0][om.value]).split(",")
         except (IndexError, KeyError, TypeError):
             feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
-            feature_list = [om.feature_profile_core.value]
+            feature_list = [om.feature_profile_core]
 
         if self.settings.force_smart_charging:
             _LOGGER.warning("Force Smart Charging feature profile")
@@ -340,17 +340,17 @@ class ChargePoint(cp):
 
         for item in feature_list:
             item = item.strip().replace(" ", "")
-            if item == om.feature_profile_core.value:
+            if item == om.feature_profile_core:
                 features |= prof.CORE
-            elif item == om.feature_profile_firmware.value:
+            elif item == om.feature_profile_firmware:
                 features |= prof.FW
-            elif item == om.feature_profile_smart.value:
+            elif item == om.feature_profile_smart:
                 features |= prof.SMART
-            elif item == om.feature_profile_reservation.value:
+            elif item == om.feature_profile_reservation:
                 features |= prof.RES
-            elif item == om.feature_profile_remote.value:
+            elif item == om.feature_profile_remote:
                 features |= prof.REM
-            elif item == om.feature_profile_auth.value:
+            elif item == om.feature_profile_auth:
                 features |= prof.AUTH
             else:
                 _LOGGER.warning("Unknown feature profile detected ignoring: %s", item)
@@ -374,7 +374,7 @@ class ChargePoint(cp):
     async def trigger_status_notification(self):
         """Trigger status notifications for all connectors."""
         try:
-            n = int(self._metrics[0][cdet.connectors.value].value or 1)
+            n = int(self._metrics[0][cdet.connectors].value or 1)
         except Exception:
             n = 1
 
@@ -398,7 +398,7 @@ class ChargePoint(cp):
                 if cid > 0:
                     _LOGGER.warning("Failed with response: %s", status)
                     # Reduce to the last known-good connector index.
-                    self._metrics[0][cdet.connectors.value].value = max(1, cid - 1)
+                    self._metrics[0][cdet.connectors].value = max(1, cid - 1)
                     return False
                 # If connector 0 is rejected, continue probing numbered connectors.
 
@@ -537,7 +537,7 @@ class ChargePoint(cp):
 
         # Determine allowed unit (default to Amps if not reported)
         units_resp = await self.get_configuration(
-            ckey.charging_schedule_allowed_charging_rate_unit.value
+            ckey.charging_schedule_allowed_charging_rate_unit
         )
         if not units_resp:
             _LOGGER.debug("Charging rate unit not reported; assuming Amps")
@@ -580,7 +580,7 @@ class ChargePoint(cp):
 
         try:
             stack_level_resp = await self.get_configuration(
-                ckey.charge_profile_max_stack_level.value
+                ckey.charge_profile_max_stack_level
             )
             stack_level = int(stack_level_resp)
         except Exception:
@@ -589,10 +589,8 @@ class ChargePoint(cp):
         # Helper to build a simple relative schedule with one period
         def _mk_schedule(_units: str, _limit: float) -> dict:
             return {
-                om.charging_rate_unit.value: _units,
-                om.charging_schedule_period.value: [
-                    {om.start_period.value: 0, om.limit.value: _limit}
-                ],
+                om.charging_rate_unit: _units,
+                om.charging_schedule_period: [{om.start_period: 0, om.limit: _limit}],
             }
 
         # Helper to generate a unique, stable chargingProfileId per purpose+connector
@@ -613,13 +611,13 @@ class ChargePoint(cp):
             req = call.SetChargingProfile(
                 connector_id=0,
                 cs_charging_profiles={
-                    om.charging_profile_id.value: _profile_id(
+                    om.charging_profile_id: _profile_id(
                         ChargingProfilePurposeType.charge_point_max_profile.value, 0
                     ),
-                    om.stack_level.value: stack_level,
-                    om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose.value: ChargingProfilePurposeType.charge_point_max_profile.value,
-                    om.charging_schedule.value: _mk_schedule(units_value, limit_value),
+                    om.stack_level: stack_level,
+                    om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                    om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
+                    om.charging_schedule: _mk_schedule(units_value, limit_value),
                 },
             )
             resp = await self.call(req)
@@ -651,17 +649,15 @@ class ChargePoint(cp):
                 req = call.SetChargingProfile(
                     connector_id=target_cid,
                     cs_charging_profiles={
-                        om.charging_profile_id.value: _profile_id(
+                        om.charging_profile_id: _profile_id(
                             ChargingProfilePurposeType.tx_profile.value, target_cid
                         ),
-                        om.stack_level.value: txp_stack,
-                        om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                        om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_profile.value,
-                        om.charging_schedule.value: _mk_schedule(
-                            units_value, limit_value
-                        ),
+                        om.stack_level: txp_stack,
+                        om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                        om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
+                        om.charging_schedule: _mk_schedule(units_value, limit_value),
                         # Bind to the ongoing transaction
-                        om.transaction_id.value: active_tx_id,
+                        om.transaction_id: active_tx_id,
                     },
                 )
                 resp = await self.call(req)
@@ -680,13 +676,13 @@ class ChargePoint(cp):
             req = call.SetChargingProfile(
                 connector_id=target_cid,
                 cs_charging_profiles={
-                    om.charging_profile_id.value: _profile_id(
+                    om.charging_profile_id: _profile_id(
                         ChargingProfilePurposeType.tx_default_profile.value, target_cid
                     ),
-                    om.stack_level.value: tx_stack,
-                    om.charging_profile_kind.value: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose.value: ChargingProfilePurposeType.tx_default_profile.value,
-                    om.charging_schedule.value: _mk_schedule(units_value, limit_value),
+                    om.stack_level: tx_stack,
+                    om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                    om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
+                    om.charging_schedule: _mk_schedule(units_value, limit_value),
                 },
             )
             resp = await self.call(req)
@@ -745,7 +741,7 @@ class ChargePoint(cp):
             target_str = "Operative" if state else "Inoperative"
             scope_str = "station" if conn == 0 else "connector"
 
-            metric_key = (conn, cstat.status_connector.value)
+            metric_key = (conn, cstat.status_connector)
             metric = self._metrics.get(metric_key)
 
             if status == AvailabilityStatus.scheduled:
@@ -843,7 +839,7 @@ class ChargePoint(cp):
 
     async def reset(self, typ: str = ResetType.hard):
         """Hard reset charger unless soft reset requested."""
-        self._metrics[0][cstat.reconnects.value].value = 0
+        self._metrics[0][cstat.reconnects].value = 0
         req = call.Reset(typ)
         resp = await self.call(req)
         if resp.status == ResetStatus.accepted:
@@ -931,10 +927,8 @@ class ChargePoint(cp):
                 data,
                 resp.data,
             )
-            self._metrics[0][cdet.data_response.value].value = datetime.now(tz=UTC)
-            self._metrics[0][cdet.data_response.value].extra_attr = {
-                message_id: resp.data
-            }
+            self._metrics[0][cdet.data_response].value = datetime.now(tz=UTC)
+            self._metrics[0][cdet.data_response].extra_attr = {message_id: resp.data}
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
@@ -959,14 +953,14 @@ class ChargePoint(cp):
                 result = {}
                 for entry in resp.configuration_key:
                     entry_key = entry.get("key", "")
-                    entry_value = entry.get(om.value.value, "")
+                    entry_value = entry.get(om.value, "")
                     result[entry_key] = entry_value
                 _LOGGER.debug("Get Configuration returned %d keys", len(result))
                 return result
-            value = resp.configuration_key[0][om.value.value]
+            value = resp.configuration_key[0][om.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
-            self._metrics[0][cdet.config_response.value].value = datetime.now(tz=UTC)
-            self._metrics[0][cdet.config_response.value].extra_attr = {key: value}
+            self._metrics[0][cdet.config_response].value = datetime.now(tz=UTC)
+            self._metrics[0][cdet.config_response].extra_attr = {key: value}
             return value
         if resp.unknown_key:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
@@ -995,7 +989,7 @@ class ChargePoint(cp):
         for key_value in resp.configuration_key:
             # If the key already has the targeted value we don't need to set
             # it.
-            if key_value[om.key.value] == key and key_value[om.value.value] == value:
+            if key_value[om.key] == key and key_value[om.value] == value:
                 return
 
             if key_value.get(om.readonly.name, False):
@@ -1042,12 +1036,12 @@ class ChargePoint(cp):
         tx_has_id: bool = transaction_id not in (None, 0)
 
         # Restore missing per-connector meter_start / active_transaction_id from HA if possible.
-        ms_key = (connector_id, csess.meter_start.value)
-        tx_key = (connector_id, csess.transaction_id.value)
-        session_key = (connector_id, csess.session_time.value)
+        ms_key = (connector_id, csess.meter_start)
+        tx_key = (connector_id, csess.transaction_id)
+        session_key = (connector_id, csess.session_time)
 
         if self._metrics[ms_key].value is None:
-            value = self.get_ha_metric(csess.meter_start.value, connector_id)
+            value = self.get_ha_metric(csess.meter_start, connector_id)
             if value is None:
                 m = self._metrics.get((connector_id, DEFAULT_MEASURAND))
                 value = m.value if m is not None else None
@@ -1056,7 +1050,7 @@ class ChargePoint(cp):
                     value = float(value)
                     _LOGGER.debug(
                         "%s[%s] was None, restored value=%s from HA.",
-                        csess.meter_start.value,
+                        csess.meter_start,
                         connector_id,
                         value,
                     )
@@ -1065,7 +1059,7 @@ class ChargePoint(cp):
             self._metrics[ms_key].value = value
 
         if self._metrics[tx_key].value is None:
-            value = self.get_ha_metric(csess.transaction_id.value, connector_id)
+            value = self.get_ha_metric(csess.transaction_id, connector_id)
             if value is None:
                 value = transaction_id if transaction_id else None
             else:
@@ -1073,7 +1067,7 @@ class ChargePoint(cp):
                     value = int(value)
                     _LOGGER.debug(
                         "%s[%s] was None, restored value=%s from HA.",
-                        csess.transaction_id.value,
+                        csess.transaction_id,
                         connector_id,
                         value,
                     )
@@ -1100,8 +1094,7 @@ class ChargePoint(cp):
         tx_ended: bool = bool(transaction_id) and (
             transaction_id == int(self._ended_tx.get(connector_id, 0) or 0)
             or any(
-                sampled_value.get(om.context.value)
-                == ReadingContext.transaction_end.value
+                sampled_value.get(om.context) == ReadingContext.transaction_end.value
                 for bucket in meter_value
                 for sampled_value in bucket.get(om.sampled_value.name, [])
             )
@@ -1155,17 +1148,17 @@ class ChargePoint(cp):
         for bucket in meter_value:
             measurands: list[MeasurandValue] = []
             for sampled_value in bucket.get(om.sampled_value.name, []):
-                measurand = sampled_value.get(om.measurand.value, None)
-                value = sampled_value.get(om.value.value, None)
+                measurand = sampled_value.get(om.measurand, None)
+                value = sampled_value.get(om.value, None)
                 # Where an empty string is supplied convert to 0
                 try:
                     value = float(value)
                 except (ValueError, TypeError):
                     value = 0.0
-                unit = sampled_value.get(om.unit.value, None)
-                phase = sampled_value.get(om.phase.value, None)
-                location = sampled_value.get(om.location.value, None)
-                context = sampled_value.get(om.context.value, None)
+                unit = sampled_value.get(om.unit, None)
+                phase = sampled_value.get(om.phase, None)
+                location = sampled_value.get(om.location, None)
+                context = sampled_value.get(om.context, None)
                 measurands.append(
                     MeasurandValue(measurand, value, phase, unit, context, location)
                 )
@@ -1225,13 +1218,11 @@ class ChargePoint(cp):
         )
 
         if connector_id == 0 or connector_id is None:
-            self._metrics[(0, cstat.status.value)].value = status
-            self._metrics[(0, cstat.error_code.value)].value = error_code
+            self._metrics[(0, cstat.status)].value = status
+            self._metrics[(0, cstat.error_code)].value = error_code
         else:
-            self._metrics[(connector_id, cstat.status_connector.value)].value = status
-            self._metrics[
-                (connector_id, cstat.error_code_connector.value)
-            ].value = error_code
+            self._metrics[(connector_id, cstat.status_connector)].value = status
+            self._metrics[(connector_id, cstat.error_code_connector)].value = error_code
 
             if status in (
                 ChargePointStatus.suspended_ev.value,
@@ -1245,7 +1236,7 @@ class ChargePoint(cp):
     @on(Action.firmware_status_notification)
     def on_firmware_status(self, status, **kwargs):
         """Handle firmware status notification."""
-        self._metrics[0][cstat.firmware_status.value].value = status
+        self._metrics[0][cstat.firmware_status].value = status
         self.hass.async_create_task(self.update(self.settings.cpid))
         self.hass.async_create_task(self.notify_ha(f"Firmware upload status: {status}"))
         return call_result.FirmwareStatusNotification()
@@ -1276,9 +1267,9 @@ class ChargePoint(cp):
     @on(Action.authorize)
     def on_authorize(self, id_tag, **kwargs):
         """Handle an Authorization request."""
-        self._metrics[0][cstat.id_tag.value].value = id_tag
+        self._metrics[0][cstat.id_tag].value = id_tag
         auth_status = self.get_authorization_status(id_tag)
-        return call_result.Authorize(id_tag_info={om.status.value: auth_status})
+        return call_result.Authorize(id_tag_info={om.status: auth_status})
 
     @on(Action.start_transaction)
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
@@ -1290,34 +1281,28 @@ class ChargePoint(cp):
             self._ended_tx.pop(connector_id, None)
             self._active_tx[connector_id] = tx_id
             self.active_transaction_id = tx_id
-            self._metrics[(connector_id, cstat.id_tag.value)].value = id_tag
-            self._metrics[(connector_id, cstat.stop_reason.value)].value = ""
-            self._metrics[(connector_id, csess.transaction_id.value)].value = tx_id
+            self._metrics[(connector_id, cstat.id_tag)].value = id_tag
+            self._metrics[(connector_id, cstat.stop_reason)].value = ""
+            self._metrics[(connector_id, csess.transaction_id)].value = tx_id
             try:
                 meter_start_kwh = float(meter_start) / 1000.0
             except Exception:
                 meter_start_kwh = 0.0
-            self._metrics[
-                (connector_id, csess.meter_start.value)
-            ].value = meter_start_kwh
-            self._metrics[(connector_id, csess.meter_start.value)].unit = HA_ENERGY_UNIT
+            self._metrics[(connector_id, csess.meter_start)].value = meter_start_kwh
+            self._metrics[(connector_id, csess.meter_start)].unit = HA_ENERGY_UNIT
 
-            self._metrics[(connector_id, csess.session_time.value)].value = 0
-            self._metrics[
-                (connector_id, csess.session_time.value)
-            ].unit = UnitOfTime.MINUTES
-            self._metrics[(connector_id, csess.session_energy.value)].value = 0.0
-            self._metrics[
-                (connector_id, csess.session_energy.value)
-            ].unit = HA_ENERGY_UNIT
+            self._metrics[(connector_id, csess.session_time)].value = 0
+            self._metrics[(connector_id, csess.session_time)].unit = UnitOfTime.MINUTES
+            self._metrics[(connector_id, csess.session_energy)].value = 0.0
+            self._metrics[(connector_id, csess.session_energy)].unit = HA_ENERGY_UNIT
 
             result = call_result.StartTransaction(
-                id_tag_info={om.status.value: AuthorizationStatus.accepted.value},
+                id_tag_info={om.status: AuthorizationStatus.accepted.value},
                 transaction_id=tx_id,
             )
         else:
             result = call_result.StartTransaction(
-                id_tag_info={om.status.value: auth_status},
+                id_tag_info={om.status: auth_status},
                 transaction_id=0,
             )
 
@@ -1343,13 +1328,13 @@ class ChargePoint(cp):
         self._ended_tx[conn] = int(transaction_id or 0)
         self._active_tx[conn] = 0
         self.active_transaction_id = 0
-        self._metrics[(conn, cstat.id_tag.value)].value = ""
-        self._metrics[(conn, csess.transaction_id.value)].value = 0
-        self._metrics[(conn, cstat.stop_reason.value)].value = kwargs.get(
+        self._metrics[(conn, cstat.id_tag)].value = ""
+        self._metrics[(conn, csess.transaction_id)].value = 0
+        self._metrics[(conn, cstat.stop_reason)].value = kwargs.get(
             om.reason.name, None
         )
 
-        ms_key = (conn, csess.meter_start.value)
+        ms_key = (conn, csess.meter_start)
         if (
             self._metrics[ms_key].value is not None
             and not self._charger_reports_session_energy
@@ -1360,29 +1345,29 @@ class ChargePoint(cp):
                 )
             except Exception:
                 session_kwh = 0.0
-            self._metrics[(conn, csess.session_energy.value)].value = session_kwh
+            self._metrics[(conn, csess.session_energy)].value = session_kwh
 
         self._zero_flow_measurands(conn)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(
-            id_tag_info={om.status.value: AuthorizationStatus.accepted.value}
+            id_tag_info={om.status: AuthorizationStatus.accepted.value}
         )
 
     @on(Action.data_transfer)
     def on_data_transfer(self, vendor_id, **kwargs):
         """Handle a Data transfer request."""
         _LOGGER.debug("Data transfer received from %s: %s", self.id, kwargs)
-        self._metrics[0][cdet.data_transfer.value].value = datetime.now(tz=UTC)
-        self._metrics[0][cdet.data_transfer.value].extra_attr = {vendor_id: kwargs}
+        self._metrics[0][cdet.data_transfer].value = datetime.now(tz=UTC)
+        self._metrics[0][cdet.data_transfer].extra_attr = {vendor_id: kwargs}
         return call_result.DataTransfer(status=DataTransferStatus.accepted.value)
 
     @on(Action.heartbeat)
     def on_heartbeat(self, **kwargs):
         """Handle a Heartbeat."""
         now = datetime.now(tz=UTC)
-        self._metrics[0][cstat.heartbeat.value].value = now
-        self._async_refresh_metric_entities([cstat.heartbeat.value])
+        self._metrics[0][cstat.heartbeat].value = now
+        self._async_refresh_metric_entities([cstat.heartbeat])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     def _zero_flow_measurands(self, connector_id: int) -> None:

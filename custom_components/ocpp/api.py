@@ -564,12 +564,12 @@ class CentralSystem:
         status_val = None
         with contextlib.suppress(Exception):
             status_val = m[
-                (self._norm_conn(connector_id), cstat.status_connector.value)
+                (self._norm_conn(connector_id), cstat.status_connector)
             ].value
 
         if not status_val:
             try:
-                flat = m[cstat.status_connector.value]
+                flat = m[cstat.status_connector]
                 if hasattr(flat, "extra_attr"):
                     status_val = flat.extra_attr.get(
                         self._norm_conn(connector_id)

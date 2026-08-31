@@ -310,7 +310,7 @@ class ChargePoint(cp):
         # would mask a faulted connector via the flattened sensor's fallback
         # chain.
         if evse_id == 0 and connector_id == 0:
-            self._metrics[(0, cstat.status.value)].value = ConnectorStatusEnumType(
+            self._metrics[(0, cstat.status)].value = ConnectorStatusEnumType(
                 connector_status
             ).value
             return
@@ -351,16 +351,14 @@ class ChargePoint(cp):
         # follow only carry chargingState when it changes - so letting it
         # overwrite Charging would turn charge_control off for the rest of the
         # session. Every other status is real news and still applies.
-        current = self._metrics[(global_idx, cstat.status_connector.value)].value
+        current = self._metrics[(global_idx, cstat.status_connector)].value
         downgrades_live_charge = (
             translated == ChargePointStatusv16.preparing
             and current in self._CHARGING_STATES
             and self._has_live_transaction(evse_id, connector_id)
         )
         if not downgrades_live_charge:
-            self._metrics[
-                (global_idx, cstat.status_connector.value)
-            ].value = translated.value
+            self._metrics[(global_idx, cstat.status_connector)].value = translated.value
 
         evse_status = self._aggregate_evse_status(evse_id)
         if evse_status is not None:
@@ -837,12 +835,12 @@ class ChargePoint(cp):
             if evse < 1 or evse > total:
                 _LOGGER.info("Requested EVSE %s is out of range (1..%s)", evse, total)
                 return False
-            val = self._metrics[(evse, csess.transaction_id.value)].value
+            val = self._metrics[(evse, csess.transaction_id)].value
             tx_id = str(val) if val else None
         else:
             # Global stop: find the first active transaction across EVSEs
             for evse in range(1, total + 1):
-                val = self._metrics[(evse, csess.transaction_id.value)].value
+                val = self._metrics[(evse, csess.transaction_id)].value
                 if val:
                     tx_id = str(val)
                     break
@@ -963,8 +961,8 @@ class ChargePoint(cp):
         # the write the sensor keeps whatever an earlier session left -
         # heartbeats were answered here but recorded nowhere.
         now = datetime.now(tz=UTC)
-        self._metrics[(0, cstat.heartbeat.value)].value = now
-        self._async_refresh_metric_entities([cstat.heartbeat.value])
+        self._metrics[(0, cstat.heartbeat)].value = now
+        self._async_refresh_metric_entities([cstat.heartbeat])
         # Deliberately not mirrored: 1.6 replies with whole seconds
         # (strftime %H:%M:%SZ); 2.0.1 keeps its pre-existing isoformat
         # reply, microseconds and all - both are valid RFC 3339.
@@ -988,7 +986,7 @@ class ChargePoint(cp):
         if evse_id >= 1:
             self._evse_status_v16[evse_id] = evse_status_v16
         derived = self._derive_station_status()
-        self._metrics[(0, cstat.status_connector.value)].value = (
+        self._metrics[(0, cstat.status_connector)].value = (
             derived if derived is not None else evse_status_v16.value
         )
         if connector_id is not None and evse_id >= 1 and connector_id >= 1:
@@ -997,7 +995,7 @@ class ChargePoint(cp):
             # real one, so it must not reach the metric from here either.
             global_idx = self._pair_to_global(evse_id, connector_id)
             self._metrics[
-                (global_idx, cstat.status_connector.value)
+                (global_idx, cstat.status_connector)
             ].value = evse_status_v16.value
         self.hass.async_create_task(self.update(self.settings.cpid))
 
@@ -1248,7 +1246,7 @@ class ChargePoint(cp):
 
         if (tx_event_type == TransactionEventEnumType.started.value) or (
             (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[(global_idx, csess.meter_start.value)].value is None)
+            and (self._metrics[(global_idx, csess.meter_start)].value is None)
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
@@ -1257,10 +1255,10 @@ class ChargePoint(cp):
                         energy_value = cp.get_energy_kwh(measurand_item)
                         energy_unit = HA_ENERGY_UNIT if measurand_item.unit else None
                         self._metrics[
-                            (global_idx, csess.meter_start.value)
+                            (global_idx, csess.meter_start)
                         ].value = energy_value
                         self._metrics[
-                            (global_idx, csess.meter_start.value)
+                            (global_idx, csess.meter_start)
                         ].unit = energy_unit
 
         self.process_measurands(converted_values, True, global_idx)
@@ -1340,7 +1338,7 @@ class ChargePoint(cp):
                     known = self._known_occupancy(evse_id, evse_conn_id)
                     if known is not None:
                         self._metrics[
-                            (global_idx, cstat.status_connector.value)
+                            (global_idx, cstat.status_connector)
                         ].value = self._connector_status_v16(known).value
                 else:
                     self._report_evse_status(
@@ -1352,29 +1350,25 @@ class ChargePoint(cp):
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
             id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
-            self._metrics[(global_idx, cstat.id_tag.value)].value = id_tag_string
+            self._metrics[(global_idx, cstat.id_tag)].value = id_tag_string
 
         if event_type == TransactionEventEnumType.started.value:
             self._tx_start_time[global_idx] = t
             tx_id: str = transaction_info["transaction_id"]
-            self._metrics[(global_idx, csess.transaction_id.value)].value = tx_id
-            self._metrics[(global_idx, csess.session_time.value)].value = 0
-            self._metrics[
-                (global_idx, csess.session_time.value)
-            ].unit = UnitOfTime.MINUTES
+            self._metrics[(global_idx, csess.transaction_id)].value = tx_id
+            self._metrics[(global_idx, csess.session_time)].value = 0
+            self._metrics[(global_idx, csess.session_time)].unit = UnitOfTime.MINUTES
         else:
             if self._tx_start_time.get(global_idx):
                 elapsed = (t - self._tx_start_time[global_idx]).total_seconds()
                 duration_minutes: int = int((elapsed + 59) // 60)
+                self._metrics[(global_idx, csess.session_time)].value = duration_minutes
                 self._metrics[
-                    (global_idx, csess.session_time.value)
-                ].value = duration_minutes
-                self._metrics[
-                    (global_idx, csess.session_time.value)
+                    (global_idx, csess.session_time)
                 ].unit = UnitOfTime.MINUTES
             if event_type == TransactionEventEnumType.ended.value:
-                self._metrics[(global_idx, csess.transaction_id.value)].value = ""
-                self._metrics[(global_idx, cstat.id_tag.value)].value = ""
+                self._metrics[(global_idx, csess.transaction_id)].value = ""
+                self._metrics[(global_idx, cstat.id_tag)].value = ""
                 self._tx_start_time.pop(global_idx, None)
 
         if not offline:

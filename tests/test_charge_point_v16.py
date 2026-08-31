@@ -790,7 +790,7 @@ async def test_clear_profile_v16(hass, socket_enabled, cp_id, port, setup_config
         # Minimal clear: no filters -> clears any CS/CP max profiles
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_clear_profile.value,
+            csvcs.service_clear_profile,
             service_data={"devid": cpid},
             blocking=True,
         )
@@ -1458,7 +1458,7 @@ async def test_get_diagnostics_and_data_transfer_v16(
         upload_url = "https://example.test/diag"
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
+            csvcs.service_get_diagnostics,
             service_data={"devid": cpid, "upload_url": upload_url},
             blocking=True,
         )
@@ -1469,7 +1469,7 @@ async def test_get_diagnostics_and_data_transfer_v16(
         payload = '{"hello":"world"}'
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_data_transfer.value,
+            csvcs.service_data_transfer,
             service_data={
                 "devid": cpid,
                 "vendor_id": vendor_id,
@@ -1490,7 +1490,7 @@ async def test_get_diagnostics_and_data_transfer_v16(
         cp.accept = False
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_data_transfer.value,
+            csvcs.service_data_transfer,
             service_data={
                 "devid": cpid,
                 "vendor_id": "VendorX",
@@ -1506,7 +1506,7 @@ async def test_get_diagnostics_and_data_transfer_v16(
         caplog.set_level(logging.WARNING)
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
+            csvcs.service_get_diagnostics,
             service_data={"devid": cpid, "upload_url": "not-a-valid-url"},
             blocking=True,
         )
@@ -1533,7 +1533,7 @@ async def test_get_diagnostics_and_data_transfer_v16(
         # Valid URL, but without FW support the handler should skip/return gracefully
         await hass.services.async_call(
             OCPP_DOMAIN,
-            csvcs.service_get_diagnostics.value,
+            csvcs.service_get_diagnostics,
             service_data={"devid": cpid, "upload_url": "https://example.com/diag2"},
             blocking=True,
         )
@@ -2903,7 +2903,7 @@ async def test_trigger_status_single_accepts(
 
             srv_cp = cs.charge_points[cp_id]
             # force single connector
-            srv_cp._metrics[0][cdet.connectors.value].value = 1
+            srv_cp._metrics[0][cdet.connectors].value = 1
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -2916,7 +2916,7 @@ async def test_trigger_status_single_accepts(
             ok = await srv_cp.trigger_status_notification()
             assert ok is True
             assert attempts == [1]
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -2949,7 +2949,7 @@ async def test_trigger_status_multi_all_accepts(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 2
+            srv_cp._metrics[0][cdet.connectors].value = 2
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -2962,7 +2962,7 @@ async def test_trigger_status_multi_all_accepts(
             ok = await srv_cp.trigger_status_notification()
             assert ok is True
             assert attempts == [0, 1, 2]
-            assert srv_cp._metrics[0][cdet.connectors.value].value == 2
+            assert srv_cp._metrics[0][cdet.connectors].value == 2
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -2995,7 +2995,7 @@ async def test_trigger_status_reject_zero_but_accept_rest(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 2
+            srv_cp._metrics[0][cdet.connectors].value = 2
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -3011,7 +3011,7 @@ async def test_trigger_status_reject_zero_but_accept_rest(
             assert ok is True
             assert attempts == [0, 1, 2]
             # should not downgrade connector count because only cid=0 rejected
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 2
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 2
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -3044,7 +3044,7 @@ async def test_trigger_status_reject_nonzero_adjusts_and_stops(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 3
+            srv_cp._metrics[0][cdet.connectors].value = 3
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -3060,7 +3060,7 @@ async def test_trigger_status_reject_nonzero_adjusts_and_stops(
             assert ok is False
             assert attempts == [0, 1, 2]
             # reduced to cid-1 => 1
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -3093,7 +3093,7 @@ async def test_trigger_status_timeout_on_zero_continues(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 2
+            srv_cp._metrics[0][cdet.connectors].value = 2
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -3108,7 +3108,7 @@ async def test_trigger_status_timeout_on_zero_continues(
             ok = await srv_cp.trigger_status_notification()
             assert ok is True
             assert attempts == [0, 1, 2]
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 2
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 2
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -3141,7 +3141,7 @@ async def test_trigger_status_timeout_on_nonzero_adjusts_and_stops(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 2
+            srv_cp._metrics[0][cdet.connectors].value = 2
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -3157,7 +3157,7 @@ async def test_trigger_status_timeout_on_nonzero_adjusts_and_stops(
             assert ok is False
             # Should stop after the failing connector
             assert attempts == [0, 1, 2]
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -4022,10 +4022,10 @@ async def test_set_charge_rate_with_active_transaction(
             # Mock get_configuration so set_charge_rate doesn't hit srv.call for these
             async def fake_get_configuration(key: str = "") -> str:
                 # units: pretend charger supports Amps
-                if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+                if key == ckey.charging_schedule_allowed_charging_rate_unit:
                     return "A"  # same as om.current.value
                 # stack level
-                if key == ckey.charge_profile_max_stack_level.value:
+                if key == ckey.charge_profile_max_stack_level:
                     return "2"
                 return ""
 
@@ -4106,9 +4106,9 @@ async def test_set_charge_rate_exception_paths(
             srv._attr_supported_features = {prof.SMART}
 
             async def fake_get_configuration(key: str = "") -> str:
-                if key == ckey.charging_schedule_allowed_charging_rate_unit.value:
+                if key == ckey.charging_schedule_allowed_charging_rate_unit:
                     return "A"
-                if key == ckey.charge_profile_max_stack_level.value:
+                if key == ckey.charge_profile_max_stack_level:
                     return "2"
                 return ""
 
@@ -4390,7 +4390,7 @@ async def test_on_meter_values_exception_branches_are_handled(
             conn = 1
 
             # 1) Install a Metric subclass that trips the first int(...) then returns 0
-            tx_key = (conn, csess.transaction_id.value)
+            tx_key = (conn, csess.transaction_id)
             with contextlib.suppress(Exception):
                 del srv._active_tx[conn]
             srv._metrics[tx_key] = FlakyTxMetric()
@@ -4472,7 +4472,7 @@ async def test_on_meter_values_exception_branches_with_restore(
 
             with contextlib.suppress(Exception):
                 del srv._active_tx[conn]
-            srv._metrics[(conn, csess.transaction_id.value)] = FlakyTxMetric()
+            srv._metrics[(conn, csess.transaction_id)] = FlakyTxMetric()
             srv.num_connectors = BadInt()
             srv.active_transaction_id = BadInt()
 
@@ -4574,7 +4574,7 @@ async def test_change_availability_conn0_rejected_falls_back_to_conn1(
             assert conn_ids[:2] == [0, 1], f"Unexpected call order/targets: {conn_ids}"
 
             # Optionally assert that no pending marker was set for this Accepted outcome
-            m = srv._metrics.get((1, cstat.status_connector.value))
+            m = srv._metrics.get((1, cstat.status_connector))
             if m is not None:
                 assert "availability_pending" not in getattr(m, "extra_attr", {})
 
@@ -4998,7 +4998,7 @@ class ChargePoint(cpclass):
     @on(Action.get_configuration)
     def on_get_configuration(self, key, **kwargs):
         """Handle a get configuration requests."""
-        if key[0] == ckey.supported_feature_profiles.value:
+        if key[0] == ckey.supported_feature_profiles:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5012,17 +5012,17 @@ class ChargePoint(cpclass):
             else:
                 # use to test TypeError handling
                 return call_result.GetConfiguration(unknown_key=[key[0]])
-        if key[0] == ckey.heartbeat_interval.value:
+        if key[0] == ckey.heartbeat_interval:
             return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "300"}]
             )
-        if key[0] == ckey.number_of_connectors.value:
+        if key[0] == ckey.number_of_connectors:
             return call_result.GetConfiguration(
                 configuration_key=[
                     {"key": key[0], "readonly": False, "value": f"{self.no_connectors}"}
                 ]
             )
-        if key[0] == ckey.web_socket_ping_interval.value:
+        if key[0] == ckey.web_socket_ping_interval:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5031,7 +5031,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 return call_result.GetConfiguration(unknown_key=[key[0]])
-        if key[0] == ckey.meter_values_sampled_data.value:
+        if key[0] == ckey.meter_values_sampled_data:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5044,7 +5044,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 pass
-        if key[0] == ckey.meter_value_sample_interval.value:
+        if key[0] == ckey.meter_value_sample_interval:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5055,7 +5055,7 @@ class ChargePoint(cpclass):
                 return call_result.GetConfiguration(
                     configuration_key=[{"key": key[0], "readonly": True, "value": "60"}]
                 )
-        if key[0] == ckey.charging_schedule_allowed_charging_rate_unit.value:
+        if key[0] == ckey.charging_schedule_allowed_charging_rate_unit:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5064,7 +5064,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 return call_result.GetConfiguration(unknown_key=[key[0]])
-        if key[0] == ckey.authorize_remote_tx_requests.value:
+        if key[0] == ckey.authorize_remote_tx_requests:
             if self.accept is True:
                 return call_result.GetConfiguration(
                     configuration_key=[
@@ -5073,7 +5073,7 @@ class ChargePoint(cpclass):
                 )
             else:
                 return call_result.GetConfiguration(unknown_key=[key[0]])
-        if key[0] == ckey.charge_profile_max_stack_level.value:
+        if key[0] == ckey.charge_profile_max_stack_level:
             return call_result.GetConfiguration(
                 configuration_key=[{"key": key[0], "readonly": False, "value": "3"}]
             )
@@ -5085,7 +5085,7 @@ class ChargePoint(cpclass):
     def on_change_configuration(self, key, **kwargs):
         """Handle a get configuration request."""
         if self.accept is True:
-            if key == ckey.meter_values_sampled_data.value:
+            if key == ckey.meter_values_sampled_data:
                 return call_result.ChangeConfiguration(
                     ConfigurationStatus.reboot_required
                 )

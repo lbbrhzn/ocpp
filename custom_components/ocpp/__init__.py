@@ -227,63 +227,63 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         await _route("handle_get_diagnostics", call)
 
     services = [
-        csvcs.service_configure.value,
-        csvcs.service_get_configuration.value,
-        csvcs.service_data_transfer.value,
-        csvcs.service_trigger_custom_message.value,
-        csvcs.service_clear_profile.value,
-        csvcs.service_set_charge_rate.value,
-        csvcs.service_update_firmware.value,
-        csvcs.service_get_diagnostics.value,
+        csvcs.service_configure,
+        csvcs.service_get_configuration,
+        csvcs.service_data_transfer,
+        csvcs.service_trigger_custom_message,
+        csvcs.service_clear_profile,
+        csvcs.service_set_charge_rate,
+        csvcs.service_update_firmware,
+        csvcs.service_get_diagnostics,
     ]
 
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_configure.value,
+        csvcs.service_configure,
         _route_configure,
         CONF_SERVICE_DATA_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_get_configuration.value,
+        csvcs.service_get_configuration,
         _route_get_configuration,
         GCONF_SERVICE_DATA_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_data_transfer.value,
+        csvcs.service_data_transfer,
         _route_data_transfer,
         TRANS_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_trigger_custom_message.value,
+        csvcs.service_trigger_custom_message,
         _route_trigger_custom_message,
         CUSTMSG_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_clear_profile.value,
+        csvcs.service_clear_profile,
         _route_clear_profile,
         CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_set_charge_rate.value,
+        csvcs.service_set_charge_rate,
         _route_set_charge_rate,
         CHRGR_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_update_firmware.value,
+        csvcs.service_update_firmware,
         _route_update_firmware,
         UFW_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
-        csvcs.service_get_diagnostics.value,
+        csvcs.service_get_diagnostics,
         _route_get_diagnostics,
         GDIAG_SERVICE_DATA_SCHEMA,
     )
