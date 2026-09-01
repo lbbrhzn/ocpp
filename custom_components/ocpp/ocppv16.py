@@ -87,8 +87,7 @@ _DEFAULT_LIMIT_WATTS = 22000
 _DEFAULT_LINE_VOLTAGE = 230.0
 _DEFAULT_PHASES = 1
 
-# Upper bound for the connector count a charger reports: a corrupted value
-# would otherwise create a huge number of entities and hang Home Assistant.
+# Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
 _MAX_CONNECTORS = 10
 
 _AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
