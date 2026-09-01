@@ -87,6 +87,9 @@ _DEFAULT_LIMIT_WATTS = 22000
 _DEFAULT_LINE_VOLTAGE = 230.0
 _DEFAULT_PHASES = 1
 
+# Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
+_MAX_CONNECTORS = 10
+
 _AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
 _WATTS_UNIT_TOKENS = frozenset({"power", "w", "watt", "watts"})
 _PHASE_KEY_GROUPS = (
@@ -173,7 +176,7 @@ class ChargePoint(cp):
                     try:
                         n = int(str(v).strip())
                         if n > 0:
-                            return n
+                            return min(n, _MAX_CONNECTORS)
                     except (ValueError, TypeError):
                         pass
 
