@@ -17,6 +17,7 @@ from custom_components.ocpp import (
 from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CPIDS,
+    CONF_CSID,
     CONF_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DOMAIN,
@@ -405,6 +406,56 @@ async def test_remove_config_entry_device_refuses_central_system(
         "CP_1_nosub"
     ]
     assert dr.async_get_device({(DOMAIN, "test_csid_1")}) is not None
+    assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is not None
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_refuses_central_system_collision(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """A device whose identifier collides with the central system is refused.
+
+    When CONF_CSID equals a charge point's cp_id, setup registers both
+    devices under that identifier and Home Assistant merges them into a
+    single device.  The hook must refuse to remove it: matching it as a
+    charge point would silently drop the entry from CONF_CPIDS.
+    """
+    data = deepcopy(MOCK_CONFIG_DATA_1)
+    # Collide the central system id with the charge point key.
+    data[CONF_CSID] = "CP_1_nosub"
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        entry_id="test_remove_collision",
+        title="test_remove_collision",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    victim = dr.async_get_device({(DOMAIN, "CP_1_nosub")})
+    assert victim is not None
+
+    # The collision merged the central system and charge point devices:
+    # the main device carries both identifiers, so removing it as a
+    # charge point would silently drop the entry from CONF_CPIDS.
+    assert (DOMAIN, "test_cpid_9001") in victim.identifiers
+
+    assert not await async_remove_config_entry_device(hass, config_entry, victim)
+    assert "Refusing to remove device" in caplog.text
+
+    # Entry data and registry are untouched.
+    assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == [
+        "CP_1_nosub"
+    ]
     assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is not None
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)

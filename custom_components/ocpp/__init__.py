@@ -515,6 +515,20 @@ async def async_remove_config_entry_device(
     matches no configured charge point is refused, so it can never be
     removed by accident.
     """
+    # The central system device is registered with (DOMAIN, csid).  If a
+    # charge point's cp_id or cpid equals the csid, setup registers both
+    # under that identifier and Home Assistant merges them into a single
+    # device.  Removing it would silently drop the charge point from
+    # CONF_CPIDS, so refuse anything carrying the central system identifier.
+    csid = entry.data.get(CONF_CSID)
+    if csid is not None and (DOMAIN, str(csid)) in device_entry.identifiers:
+        _LOGGER.warning(
+            "Refusing to remove device %s: it is the central system or shares "
+            "its identifier with one",
+            device_entry.name,
+        )
+        return False
+
     for cp_data in entry.data.get(CONF_CPIDS, []):
         for cp_id, _settings in cp_data.items():
             if (DOMAIN, cp_id) not in device_entry.identifiers:
