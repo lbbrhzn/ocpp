@@ -201,3 +201,75 @@ async def test_a_rejected_profile_still_raises(hass, kwargs):
         await cp.set_charge_rate(**kwargs)
 
     assert "charger said no" in str(excinfo.value.translation_placeholders)
+
+
+# --- #2101: the managed station profile must target EVSE 0 -------------------
+#
+# ChargingStationMaxProfile describes the whole station and OCPP 2.0.1 requires
+# it on evseId 0. The managed path used to route it to whatever EVSE conn_id
+# mapped to, so a compliant charger could refuse every call that passed a
+# positive connector. The invariant: every integration-generated
+# ChargingStationMaxProfile is sent with evse_id=0. A caller-supplied profile
+# keeps the requested connector's mapping, because its purpose decides which
+# EVSE is valid.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"limit_amps": 16}, {"limit_watts": 5000}],
+    ids=["amps", "watts"],
+)
+async def test_a_managed_limit_targets_the_station_whatever_the_connector(hass, kwargs):
+    """A managed limit below the maximum goes to EVSE 0, whichever connector is named.
+
+    Seeding global 2 -> EVSE 7 makes the wrong answer distinct from both 0
+    and the mapper's own (n, 1) fallback, so this cannot pass by coincidence:
+    the old code sent this request to EVSE 7.
+    """
+    cp = _mk_cp(hass)
+    cp._global_to_evse = {2: (7, 1)}
+
+    assert await cp.set_charge_rate(conn_id=2, **kwargs) is True
+
+    # Exactly one request and nothing behind it: a future rejection fallback
+    # must be a deliberate change that updates this line.
+    assert _sent(cp) == ["SetChargingProfile"]
+    req = cp.sent[0]
+    assert req.evse_id == 0
+    assert (
+        req.charging_profile["charging_profile_purpose"]
+        == ChargingProfilePurposeEnumType.charging_station_max_profile.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_custom_profile_keeps_the_requested_connectors_evse(hass):
+    """A caller-supplied profile still goes where conn_id maps.
+
+    The escape hatch is unchanged: a TxDefaultProfile may legitimately
+    target a positive EVSE, so it is sent to the mapped EVSE, here 7.
+    """
+    cp = _mk_cp(hass)
+    cp._global_to_evse = {2: (7, 1)}
+    profile = {
+        "id": 5,
+        "stack_level": 1,
+        "charging_profile_purpose": (
+            ChargingProfilePurposeEnumType.tx_default_profile.value
+        ),
+        "charging_profile_kind": "Relative",
+        "charging_schedule": [
+            {
+                "id": 5,
+                "charging_rate_unit": "A",
+                "charging_schedule_period": [{"start_period": 0, "limit": 10}],
+            }
+        ],
+    }
+
+    assert await cp.set_charge_rate(conn_id=2, profile=profile) is True
+
+    assert _sent(cp) == ["SetChargingProfile"]
+    assert cp.sent[0].evse_id == 7
+    assert cp.sent[0].charging_profile is profile

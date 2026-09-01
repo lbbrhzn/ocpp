@@ -699,8 +699,15 @@ class ChargePoint(cp):
     ) -> bool:
         """Set a charging profile with defined limit (OCPP 2.x).
 
-        - conn_id=0 (default) targets the Charging Station (evse_id=0).
-        - conn_id>0 targets the specific EVSE corresponding to the global connector index.
+        - A caller-supplied ``profile`` is sent to the EVSE mapped from
+          ``conn_id`` (0 = the Charging Station, evse_id 0); which EVSE is
+          valid depends on the profile's purpose.
+        - A managed ``limit_amps``/``limit_watts`` request below the maximum
+          builds a ChargingStationMaxProfile. OCPP 2.0.1 requires that profile
+          on evse_id 0, so ``conn_id`` is not used for it. This mirrors 1.6,
+          which sends its ChargePointMaxProfile on connector 0.
+        - A request at or above the maximum, or with no limit at all, clears
+          the station profile with ClearChargingProfile instead of sending one.
 
         Returns whether the charger honoured the request. Callers treat the
         result as a success flag - number.py logs a rejection when it is
@@ -710,11 +717,13 @@ class ChargePoint(cp):
         carries the charger's own status message.
         """
 
-        evse_target = 0
-        if conn_id and conn_id > 0:
-            with contextlib.suppress(Exception):
-                evse_target, _ = self._global_to_pair(int(conn_id))
         if profile is not None:
+            # A caller-supplied profile is an escape hatch: its purpose decides
+            # which EVSE is valid, so honour the requested connector's mapping.
+            evse_target = 0
+            if conn_id and conn_id > 0:
+                with contextlib.suppress(Exception):
+                    evse_target, _ = self._global_to_pair(int(conn_id))
             req = call.SetChargingProfile(evse_target, profile)
             resp: call_result.SetChargingProfile = await self.call(req)
             if resp.status != ChargingProfileStatusEnumType.accepted:
@@ -765,9 +774,10 @@ class ChargePoint(cp):
             "charging_schedule": [schedule],
         }
 
-        req: call.SetChargingProfile = call.SetChargingProfile(
-            evse_target, charging_profile
-        )
+        # ChargingStationMaxProfile describes the whole station and OCPP 2.0.1
+        # requires it on evseId 0, so conn_id has no meaning for it. 1.6 sends
+        # its ChargePointMaxProfile on connector 0 for the same reason.
+        req: call.SetChargingProfile = call.SetChargingProfile(0, charging_profile)
         resp: call_result.SetChargingProfile = await self.call(req)
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
