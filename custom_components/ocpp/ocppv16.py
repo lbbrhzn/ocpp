@@ -87,7 +87,9 @@ _DEFAULT_LIMIT_WATTS = 22000
 _DEFAULT_LINE_VOLTAGE = 230.0
 _DEFAULT_PHASES = 1
 
-_MAX_CONNECTORS = 100
+# Upper bound for the connector count a charger reports: a corrupted value
+# would otherwise create a huge number of entities and hang Home Assistant.
+_MAX_CONNECTORS = 10
 
 _AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
 _WATTS_UNIT_TOKENS = frozenset({"power", "w", "watt", "watts"})
@@ -140,39 +142,10 @@ class ChargePoint(cp):
         self._active_tx: dict[int, int] = {}  # connector_id -> transaction_id
         self._ended_tx: dict[int, int] = {}  # connector_id -> last stopped tx
 
-    def _sane_connectors(self, value, source: str) -> int | None:
-        """Return value as int if within 1.._MAX_CONNECTORS, else None (with a warning)."""
-        try:
-            n = int(str(value).strip())
-        except (ValueError, TypeError):
-            _LOGGER.warning(
-                "%s: %s NumberOfConnectors=%r is not an integer",
-                self.id,
-                source,
-                value,
-            )
-            return None
-        if 0 < n <= self._MAX_CONNECTORS:
-            return n
-        _LOGGER.warning(
-            "%s: %s NumberOfConnectors=%s is outside 1..%s (possibly corrupted)",
-            self.id,
-            source,
-            n,
-            self._MAX_CONNECTORS,
-        )
-        return None
-
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
-        # Normalise the configured fallback with the same bound as the charger value.
-        configured = self._sane_connectors(
-            getattr(self.settings, "num_connectors", 1), "configured"
-        )
-        if configured is None:
-            configured = 1
-
         resp = None
+
         try:
             req = call.GetConfiguration(key=["NumberOfConnectors"])
             resp = await self.call(req)
@@ -182,6 +155,7 @@ class ChargePoint(cp):
         cfg = None
         if resp is not None:
             cfg = getattr(resp, "configuration_key", None)
+
             if (
                 cfg is None
                 and isinstance(resp, list | tuple)
@@ -200,17 +174,14 @@ class ChargePoint(cp):
                     k = kv.get("key")
                     v = kv.get("value")
                 if k == "NumberOfConnectors" and v not in (None, ""):
-                    reported = self._sane_connectors(v, "charger-reported")
-                    if reported is not None:
-                        return reported
-                    _LOGGER.warning(
-                        "%s: using configured NumberOfConnectors=%s instead",
-                        self.id,
-                        configured,
-                    )
-                    return configured
+                    try:
+                        n = int(str(v).strip())
+                        if n > 0:
+                            return min(n, _MAX_CONNECTORS)
+                    except (ValueError, TypeError):
+                        pass
 
-        return configured
+        return 1
 
     async def get_heartbeat_interval(self):
         """Retrieve heartbeat interval from the charger and store it."""
