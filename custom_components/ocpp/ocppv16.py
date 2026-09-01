@@ -279,22 +279,25 @@ class ChargePoint(cp):
                 _LOGGER.debug(
                     "'%s' measurands set manually to %s", self.id, desired_csv
                 )
-                if getattr(resp, "status", None) in cfg_ok:
-                    effective_csv = desired_csv
-                else:
-                    _LOGGER.debug(
-                        "'%s' manual measurands set not accepted (status=%s); using charger's value",
-                        self.id,
-                        getattr(resp, "status", None),
-                    )
-                    effective_csv = await self.get_configuration(key)
+                accepted_full = getattr(resp, "status", None) in cfg_ok
             except Exception as ex:
+                _LOGGER.debug("Manual measurands set raised for '%s': %s", self.id, ex)
+                accepted_full = False
+
+            if accepted_full:
+                effective_csv = desired_csv
+            else:
                 _LOGGER.debug(
-                    "Manual measurands set failed for '%s': %s; using charger's value",
+                    "'%s' manual measurands set not accepted (status=%s); "
+                    "negotiating largest accepted subset",
                     self.id,
-                    ex,
+                    getattr(resp, "status", None) if "resp" in locals() else None,
                 )
-                effective_csv = await self.get_configuration(key)
+                tokens = [t.strip() for t in desired_csv.split(",") if t.strip()]
+                accepted_items = await self._negotiate_measurand_subset(
+                    key, tokens, cfg_ok
+                )
+                effective_csv = ",".join(accepted_items)
         else:
             effective_csv = await self.get_configuration(key)
 
@@ -308,6 +311,62 @@ class ChargePoint(cp):
             _LOGGER.debug("'%s' measurands not configurable by integration", self.id)
 
         return effective_csv
+
+    async def _negotiate_measurand_subset(
+        self, key: str, tokens: list[str], cfg_ok: set
+    ) -> list[str]:
+        """Find the largest subset of `tokens` the charger accepts via ChangeConfiguration.
+
+        Some chargers (e.g. Teltonika TeltoCharge EVC10100) reject the
+        MeterValuesSampledData CSV outright if it contains a single
+        unsupported measurand, rather than accepting the supported subset.
+        Binary-search (divide and conquer) the token list: split it in half,
+        test each half, and recurse into halves that are rejected. A
+        single-token half that is rejected is dropped entirely. This finds
+        the accepted subset in O(log n) charger round-trips for the common
+        case instead of the O(n) of testing one measurand at a time.
+        """
+        if not tokens:
+            return []
+
+        async def _try(candidate: list[str]) -> bool:
+            if not candidate:
+                return True
+            try:
+                resp = await self.call(
+                    call.ChangeConfiguration(key=key, value=",".join(candidate))
+                )
+            except Exception as ex:
+                _LOGGER.debug(
+                    "'%s' measurand subset probe raised for %s: %s",
+                    self.id,
+                    candidate,
+                    ex,
+                )
+                return False
+            return getattr(resp, "status", None) in cfg_ok
+
+        if len(tokens) == 1:
+            return tokens if await _try(tokens) else []
+
+        if await _try(tokens):
+            return tokens
+
+        mid = len(tokens) // 2
+        left = await self._negotiate_measurand_subset(key, tokens[:mid], cfg_ok)
+        right = await self._negotiate_measurand_subset(key, tokens[mid:], cfg_ok)
+        combined = left + right
+
+        if len(combined) > 1:
+            # Each half was independently verified above, but a charger with
+            # cross-measurand interactions could still reject the union even
+            # though every half passes alone (e.g. a max-active-measurands
+            # limit). Confirm the recombined set is itself accepted before
+            # trusting it as a whole.
+            if not await _try(combined):
+                return left if left else right
+
+        return combined
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
