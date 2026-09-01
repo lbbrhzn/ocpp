@@ -10,6 +10,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from homeassistant.const import STATE_ON
 from homeassistant.exceptions import HomeAssistantError
 import websockets
 
@@ -2327,6 +2328,58 @@ async def test_set_availability_exception_branch(
             cp_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cp_task
+            await ws.close()
+
+
+@pytest.mark.timeout(15)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [
+        {
+            "port": 9397,
+            "cp_id": "CP_availability_status_fallback",
+            "cms": "cms_availability_status_fallback",
+        }
+    ],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_availability_status_fallback"])
+@pytest.mark.parametrize("port", [9397])
+async def test_availability_switch_falls_back_from_real_v16_status_handler(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """A connector-1 notification drives availability without mirroring Status."""
+    cs = setup_config_entry
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            server = cs.charge_points[cp_id]
+
+            assert server._metrics[(0, cstat.status)].value is None
+            await client.call(
+                call.StatusNotification(
+                    connector_id=1,
+                    error_code=ChargePointErrorCode.no_error,
+                    status=ChargePointStatus.available,
+                    timestamp=datetime.now(tz=UTC).isoformat(),
+                )
+            )
+            await hass.async_block_till_done()
+
+            state = hass.states.get("switch.test_cpid_availability")
+            assert state is not None
+            assert state.state == STATE_ON
+            assert server._metrics[(0, cstat.status)].value is None
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
             await ws.close()
 
 

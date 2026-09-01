@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from ocpp.v16.enums import ChargePointStatus
 
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE
 from homeassistant.exceptions import HomeAssistantError
@@ -18,6 +19,7 @@ from custom_components.ocpp.enums import (
 )
 from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.chargepoint import SetVariableResult
+from custom_components.ocpp.switch import ChargePointSwitch, SWITCHES
 
 from tests.const import MOCK_CONFIG_DATA
 
@@ -247,6 +249,102 @@ async def test_get_available_paths(hass):
 
     # fall back to charger status if no info
     assert cs.get_available("agg", connector_id=3) is True  # charger STATE_OK
+
+
+@pytest.mark.asyncio
+async def test_single_connector_availability_status_missing(hass):
+    """Keep the switch off until either status source reports."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    _install_dummy_cp(cs, num_connectors=1)
+    switch_desc = next(desc for desc in SWITCHES if desc.key == "availability")
+    entity = ChargePointSwitch(cs, "test_cpid", switch_desc)
+
+    assert cs.get_availability_status("test_cpid") is None
+    assert entity.is_on is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", list(ChargePointStatus))
+async def test_single_connector_availability_status_fallback(hass, status):
+    """Fallback changes the status source without redefining switch semantics."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, num_connectors=1)
+    switch_desc = next(desc for desc in SWITCHES if desc.key == "availability")
+    entity = ChargePointSwitch(cs, "test_cpid", switch_desc)
+
+    cp._metrics[(1, cstat.status_connector)] = M(status.value, None)
+
+    assert cs.get_availability_status("test_cpid") == status.value
+    assert entity.is_on is (status is ChargePointStatus.available)
+
+
+@pytest.mark.asyncio
+async def test_station_status_takes_precedence_for_availability(hass):
+    """Never override a reported station status with connector 1."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, num_connectors=1)
+    switch_desc = next(desc for desc in SWITCHES if desc.key == "availability")
+    entity = ChargePointSwitch(cs, "test_cpid", switch_desc)
+
+    cp._metrics[(0, cstat.status)] = M("Unavailable", None)
+    cp._metrics[(1, cstat.status_connector)] = M("Available", None)
+    assert cs.get_availability_status("test_cpid") == "Unavailable"
+    assert entity.is_on is False
+
+    cp._metrics[(0, cstat.status)].value = "Available"
+    cp._metrics[(1, cstat.status_connector)].value = "Unavailable"
+    assert cs.get_availability_status("test_cpid") == "Available"
+    assert entity.is_on is True
+
+
+@pytest.mark.asyncio
+async def test_availability_status_does_not_fallback_for_multiple_connectors(hass):
+    """Keep station status unknown when either topology source says multi."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, num_connectors=2)
+    cp._metrics[(1, cstat.status_connector)] = M("Available", None)
+
+    assert cs.get_availability_status("test_cpid") is None
+
+    # Runtime discovery starts at one; the configured count must still prevent
+    # a transient fallback while a known multi-connector charger reconnects.
+    cp.num_connectors = 1
+    cp.settings = SimpleNamespace(num_connectors=2)
+    assert cs.get_availability_status("test_cpid") is None
+    assert cs.get_availability_status("missing") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("switch_key", "connector_status"),
+    [
+        ("charge_control", ChargePointStatus.charging.value),
+        ("connnector_availability", ChargePointStatus.preparing.value),
+    ],
+)
+async def test_other_switches_keep_using_their_metric_path(
+    hass, monkeypatch, switch_key, connector_status
+):
+    """The availability resolver must not intercept other switch types."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, num_connectors=1)
+    cp._metrics[(1, cstat.status_connector)] = M(connector_status, None)
+
+    def unexpected_availability_lookup(*args, **kwargs):
+        raise AssertionError("availability resolver used by another switch")
+
+    monkeypatch.setattr(cs, "get_availability_status", unexpected_availability_lookup)
+    switch_desc = next(desc for desc in SWITCHES if desc.key == switch_key)
+    entity = ChargePointSwitch(
+        cs, "test_cpid", switch_desc, connector_id=1, flatten_single=True
+    )
+
+    assert entity.is_on is True
 
 
 @pytest.mark.asyncio

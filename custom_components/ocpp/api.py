@@ -409,6 +409,44 @@ class CentralSystem:
 
         return None
 
+    def get_availability_status(self, id: str):
+        """Return the status that drives the charger availability switch.
+
+        A station-level status is authoritative when the charger reports one.
+        Some single-connector chargers only send StatusNotification for
+        connector 1, so use that connector's status only while the station
+        status is absent. Never apply this fallback to a charger known to have
+        multiple connectors.
+        """
+        _, _, cp, runtime_connectors = self._get_metrics(id)
+        if cp is None:
+            return None
+
+        station_status = self.get_metric(id, cstat.status, connector_id=0)
+        if station_status is not None:
+            # Metrics carry no observation timestamp, so presence is the only
+            # reliable precedence signal; once reported, station status stays
+            # authoritative over the connector fallback.
+            return station_status
+
+        configured_connectors = getattr(
+            getattr(cp, "settings", None), "num_connectors", 1
+        )
+        try:
+            configured_connectors = int(configured_connectors)
+        except (TypeError, ValueError):
+            configured_connectors = 1
+        if configured_connectors < 1:
+            configured_connectors = 1
+
+        # During startup the runtime count begins at one until discovery
+        # finishes. If either source already identifies a multi-connector
+        # charger, remain conservative and do not borrow connector 1's state.
+        if max(runtime_connectors, configured_connectors) != 1:
+            return None
+
+        return self.get_metric(id, cstat.status_connector, connector_id=1)
+
     def del_metric(self, id: str, measurand: str, connector_id: int | None = None):
         """Set given measurand to None."""
         cp_id, m, cp, n_connectors = self._get_metrics(id)
