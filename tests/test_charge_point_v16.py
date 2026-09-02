@@ -1575,10 +1575,12 @@ async def test_monitor_connection_timeout_branch(
 
         from custom_components.ocpp import chargepoint as cp_mod
 
-        async def noop_task(_coro):
-            return None
-
-        monkeypatch.setattr(srv_cp.hass, "async_create_task", noop_task, raising=True)
+        monkeypatch.setattr(
+            cp_mod,
+            "async_dispatcher_send",
+            lambda *args, **kwargs: None,
+            raising=True,
+        )
 
         async def fast_sleep(_):
             return None  # skip the initial sleep(10) and interval sleeps

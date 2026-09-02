@@ -199,8 +199,12 @@ async def test_async_update_device_info_updates_metrics_and_registry(hass):
     from homeassistant.helpers import device_registry
 
     dr = device_registry.async_get(hass)
-    dev = dr.async_get_device({(DOMAIN, "CP_ID"), (DOMAIN, "test_cpid")})
-    assert dev is not None
+    devs = dr.async_get_devices(
+        identifiers={(DOMAIN, "CP_ID"), (DOMAIN, "test_cpid")},
+        config_entry_id=entry.entry_id,
+    )
+    assert devs
+    dev = devs[0]
     assert dev.manufacturer == "Acme"
     assert dev.model == "Model X"
     assert dev.sw_version == "1.2.3"
