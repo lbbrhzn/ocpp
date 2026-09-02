@@ -112,6 +112,9 @@
         "set_charge_rate_error": {
             "message": "Failed to set charging current limit: {message}"
         },
+        "invalid_custom_profile": {
+            "message": "Invalid custom charging profile: {message}"
+        },
         "unavailable": {
             "message": "Charger is currently unavailable: {message}"
         },

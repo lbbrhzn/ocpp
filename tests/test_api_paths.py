@@ -1,6 +1,8 @@
 """Test exceptions paths in api.py."""
 
 import contextlib
+import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -9,9 +11,11 @@ from ocpp.v16.enums import ChargePointStatus
 
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import template as template_helper
+from homeassistant.util.yaml.objects import NodeStrClass
 from websockets import NegotiationError
 
-from custom_components.ocpp.api import CentralSystem
+from custom_components.ocpp.api import CHRGR_SERVICE_DATA_SCHEMA, CentralSystem
 from custom_components.ocpp.const import DOMAIN
 from custom_components.ocpp.enums import (
     HAChargerServices as csvcs,
@@ -118,9 +122,17 @@ def _install_dummy_cp(
     cs: CentralSystem, *, cpid="test_cpid", cp_id="CP_DUMMY", **kw
 ) -> DummyCP:
     cp = DummyCP(**kw)
+    cp.id = cp_id
     cs.charge_points[cp_id] = cp
     cs.cpids[cpid] = cp_id
     return cp
+
+
+def _available_central_system(hass) -> tuple[CentralSystem, DummyCP]:
+    """Create a central system with one available charge point."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    return cs, _install_dummy_cp(cs, cpid="ok", cp_id="CP_OK")
 
 
 @pytest.mark.asyncio
@@ -479,6 +491,307 @@ async def test_check_charger_available_decorator_and_services(hass):
         SimpleNamespace(data={"devid": "ok", "ocpp_key": "Foo"}),
     )
     assert resp == {"value": "value-for:Foo"}
+
+
+@pytest.mark.asyncio
+async def test_custom_profile_mapping_bypasses_string_parsing(hass):
+    """A structured profile reaches the charge point as the same mapping."""
+    cs, cp = _available_central_system(hass)
+    profile = {"id": 1, "transactionId": "session'42"}
+
+    await cs.handle_set_charge_rate(
+        SimpleNamespace(data={"devid": "ok", "conn_id": 2, "custom_profile": profile})
+    )
+
+    assert cp.calls == [("set_charge_rate", {"profile": profile, "conn_id": 2})]
+    assert cp.calls[0][1]["profile"] is profile
+
+
+@pytest.mark.asyncio
+async def test_custom_profile_literal_yaml_string_is_parsed(hass):
+    """Annotated YAML strings must not be sent raw to the OCPP layer."""
+    cs, cp = _available_central_system(hass)
+    profile = NodeStrClass('{"id":1,"transactionId":"session\'42"}')
+    data = CHRGR_SERVICE_DATA_SCHEMA(
+        {"devid": "ok", "conn_id": 1, "custom_profile": profile}
+    )
+
+    assert data["custom_profile"] is profile
+    await cs.handle_set_charge_rate(SimpleNamespace(data=data))
+
+    assert cp.calls == [
+        (
+            "set_charge_rate",
+            {
+                "profile": {"id": 1, "transactionId": "session'42"},
+                "conn_id": 1,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_valid_json_custom_profile_preserves_apostrophe(hass):
+    """A legal apostrophe in a JSON string must not prevent dispatch."""
+    cs, cp = _available_central_system(hass)
+
+    await cs.handle_set_charge_rate(
+        SimpleNamespace(
+            data={
+                "devid": "ok",
+                "custom_profile": '{"id":1,"transactionId":"session\'42"}',
+            }
+        )
+    )
+
+    assert cp.calls == [
+        (
+            "set_charge_rate",
+            {
+                "profile": {"id": 1, "transactionId": "session'42"},
+                "conn_id": 0,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_valid_json_custom_profile_cannot_redirect_fields(hass):
+    """Charger text inside valid JSON remains data rather than structure."""
+    cs, cp = _available_central_system(hass)
+    transaction_id = "x','id':2,'transactionId':'y"
+
+    await cs.handle_set_charge_rate(
+        SimpleNamespace(
+            data={
+                "devid": "ok",
+                "custom_profile": (
+                    "{\"id\":1,\"transactionId\":\"x','id':2,'transactionId':'y\"}"
+                ),
+            }
+        )
+    )
+
+    assert cp.calls == [
+        (
+            "set_charge_rate",
+            {
+                "profile": {"id": 1, "transactionId": transaction_id},
+                "conn_id": 0,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_template_result_mapping_stays_structured(hass):
+    """The service schema must not turn a rendered mapping back into text."""
+    cs, cp = _available_central_system(hass)
+    transaction_id = "x','id':2,'transactionId':'y"
+    profile = {"id": 1, "transactionId": transaction_id}
+    wrapper = template_helper._parse_result(repr(profile))
+
+    assert isinstance(wrapper, dict)
+    data = CHRGR_SERVICE_DATA_SCHEMA(
+        {"devid": "ok", "conn_id": 2, "custom_profile": wrapper}
+    )
+    assert data["custom_profile"] is wrapper
+
+    await cs.handle_set_charge_rate(SimpleNamespace(data=data))
+
+    assert cp.calls == [("set_charge_rate", {"profile": profile, "conn_id": 2})]
+    assert cp.calls[0][1]["profile"] is wrapper
+
+
+@pytest.mark.asyncio
+async def test_legacy_custom_profile_logs_payload_free_debug(hass, caplog):
+    """Keep legacy parsing while making its use diagnosable without payloads."""
+    cs, cp = _available_central_system(hass)
+    transaction_id = "legacy-session"
+    custom_profile = f"{{'id':2,'transactionId':'{transaction_id}'}}"
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.ocpp"):
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": custom_profile})
+        )
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "legacy single-quote compatibility" in record.getMessage()
+    ]
+    assert cp.calls == [
+        (
+            "set_charge_rate",
+            {
+                "profile": {"id": 2, "transactionId": transaction_id},
+                "conn_id": 0,
+            },
+        )
+    ]
+    assert len(messages) == 1
+    assert "CP_OK" in messages[0]
+    assert custom_profile not in messages[0]
+    assert transaction_id not in messages[0]
+
+
+@pytest.mark.asyncio
+async def test_invalid_custom_profile_reports_original_json_position(hass):
+    """Syntax errors describe the caller's JSON and never dispatch a limit."""
+    cs, cp = _available_central_system(hass)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(
+                data={
+                    "devid": "ok",
+                    "custom_profile": "{'id':",
+                    "limit_amps": 16,
+                }
+            )
+        )
+
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    message = exc_info.value.translation_placeholders["message"]
+    assert "Expecting property name enclosed in double quotes" in message
+    assert "line 1, column 2" in message
+    assert "legacy single-quote compatibility parsing also failed" in message
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_without_apostrophe_skips_legacy_fallback(hass):
+    """Plain malformed JSON reports its location without claiming a fallback."""
+    cs, cp = _available_central_system(hass)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": '{"id":'})
+        )
+
+    message = exc_info.value.translation_placeholders["message"]
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    assert "Expecting value" in message
+    assert "line 1, column 7" in message
+    assert "legacy" not in message
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [ValueError, RecursionError])
+async def test_json_parser_limit_error_is_translated(hass, monkeypatch, error_type):
+    """Non-syntax decoder limits must not escape as unexpected errors."""
+    cs, cp = _available_central_system(hass)
+
+    def exceed_parser_limit(_custom_profile):
+        raise error_type("parser detail must not reach the caller")
+
+    monkeypatch.setattr("custom_components.ocpp.api.json.loads", exceed_parser_limit)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": '{"id":1}'})
+        )
+
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    assert exc_info.value.translation_placeholders["message"] == (
+        "JSON could not be decoded within parser limits"
+    )
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [ValueError, RecursionError])
+async def test_legacy_json_parser_limit_error_is_translated(
+    hass, monkeypatch, error_type
+):
+    """A parser limit in the legacy candidate retains the original location."""
+    cs, cp = _available_central_system(hass)
+    parse_attempts = 0
+
+    def exceed_legacy_parser_limit(custom_profile):
+        nonlocal parse_attempts
+        parse_attempts += 1
+        if parse_attempts == 1:
+            raise json.JSONDecodeError(
+                "Expecting property name enclosed in double quotes",
+                custom_profile,
+                1,
+            )
+        raise error_type("parser detail must not reach the caller")
+
+    monkeypatch.setattr(
+        "custom_components.ocpp.api.json.loads", exceed_legacy_parser_limit
+    )
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": "{'id':1}"})
+        )
+
+    message = exc_info.value.translation_placeholders["message"]
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    assert "Expecting property name enclosed in double quotes" in message
+    assert "line 1, column 2" in message
+    assert "compatibility parsing exceeded JSON parser limits" in message
+    assert "parser detail" not in message
+    assert parse_attempts == 2
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unexpected_custom_profile_type_is_rejected(hass):
+    """Keep direct handler calls from forwarding an unsupported value type."""
+    cs, cp = _available_central_system(hass)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": ["profile"]})
+        )
+
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    assert exc_info.value.translation_placeholders["message"] == (
+        "expected a mapping or JSON object, got list"
+    )
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_non_object_is_rejected_without_success_log(hass, caplog):
+    """A syntactically compatible scalar is not a successful legacy profile."""
+    cs, cp = _available_central_system(hass)
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="custom_components.ocpp"),
+        pytest.raises(HomeAssistantError),
+    ):
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": "['profile']"})
+        )
+
+    assert not any(
+        "legacy single-quote compatibility" in record.getMessage()
+        for record in caplog.records
+    )
+    assert cp.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom_profile", ["null", "[]", "42", "true", '"text"'])
+async def test_non_object_custom_profile_is_rejected(hass, custom_profile):
+    """Only JSON objects can cross the custom-profile service boundary."""
+    cs, cp = _available_central_system(hass)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": custom_profile})
+        )
+
+    assert exc_info.value.translation_key == "invalid_custom_profile"
+    assert "expected a JSON object" in str(
+        exc_info.value.translation_placeholders["message"]
+    )
+    assert cp.calls == []
 
 
 def test_del_metric_variants(hass):

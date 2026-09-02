@@ -115,6 +115,9 @@
         "set_charge_rate_error": {
             "message": "Failed to set charging current limit: {message}"
         },
+        "invalid_custom_profile": {
+            "message": "Invalid custom charging profile: {message}"
+        },
         "not_found": {
             "message": "No charger found for device id {message}. Check the devid matches the HA charger id (cpid) or the OCPP charger id."
         },
