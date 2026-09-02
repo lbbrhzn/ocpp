@@ -504,3 +504,47 @@ async def test_remove_config_entry_device_last_charge_point(
     await hass.async_block_till_done()
     assert config_entry.entry_id not in hass.data[DOMAIN]
     assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_refuses_unknown_device(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """An unknown device identifier must be refused.
+
+    The hook should log a warning and leave the entry untouched when the
+    device does not match any configured charge point.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=deepcopy(MOCK_CONFIG_DATA_1),
+        entry_id="test_remove_unknown",
+        title="test_remove_unknown",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Create a fake device entry with an identifier that does not match any
+    # configured charge point.
+    from homeassistant.helpers import device_registry as dr
+
+    device_registry = dr.async_get(hass)
+    fake_device = device_registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, "unknown_cp_id")},
+        name="Unknown",
+    )
+
+    assert not await async_remove_config_entry_device(hass, config_entry, fake_device)
+    assert "matches no configured charge point" in caplog.text
+
+    # Entry data must be untouched.
+    assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == ["CP_1_nosub"]
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
