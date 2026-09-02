@@ -694,7 +694,15 @@ class ChargePoint(cp):
         dr = device_registry.async_get(self.hass)
 
         identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
-        root_dev = dr.async_get_device(identifiers)
+        root_dev = next(
+            iter(
+                dr.async_get_devices(
+                    identifiers=identifiers,
+                    config_entry_id=self.entry.entry_id,
+                )
+            ),
+            None,
+        )
         if root_dev is None:
             return
 
