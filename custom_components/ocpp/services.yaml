@@ -39,7 +39,7 @@ set_charge_rate:
       default: 22000
     conn_id:
       name: Connector identifier
-      description: Optional, 0 = all connectors (default), 1 is first connector
+      description: Selects the target connector, or mapped EVSE on OCPP 2.x, for custom_profile. Managed limits first target the whole charging station; OCPP 1.6 may use this connector for fallback profiles.
       required: false
       advanced: true
       example: 0

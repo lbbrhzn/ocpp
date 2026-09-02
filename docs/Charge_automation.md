@@ -50,7 +50,7 @@ On **OCPP 1.6** it first tries a station-wide `ChargePointMaxProfile` on connect
 
 So on a charger that accepts the station-wide profile, calling this on a short interval repeatedly exercises whatever storage path that firmware uses, and the limit can outlive the transaction rather than being session-scoped.
 
-On **OCPP 2.0.1** it always writes `ChargingStationMaxProfile` — there is no TxProfile fallback. Note also that the station-wide profile belongs on EVSE 0; passing a positive `conn_id` here targets an EVSE the charger may refuse it on.
+On **OCPP 2.0.1** a limit below the maximum writes a `ChargingStationMaxProfile` to EVSE 0, as the specification requires for a station-wide profile. A limit at or above the configured maximum current, or 22 kW for a watt limit, or a call with no limit at all, clears that profile instead of sending one. There is no TxProfile fallback, and `conn_id` is not used for this managed limit — it only selects the EVSE for a `custom_profile`.
 
 ```yaml
 - action: ocpp.set_charge_rate
