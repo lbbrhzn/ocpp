@@ -232,6 +232,12 @@ async def test_update_returns_early_when_root_device_missing(
                 def async_get_device(self, identifiers):
                     return None
 
+                def async_get_devices(
+                    self, *, identifiers=None, connections=None, config_entry_id=None
+                ):
+                    dev = self.async_get_device(identifiers)
+                    return [dev] if dev is not None else []
+
                 @property
                 def devices(self):
                     """Fake devices."""
@@ -338,6 +344,12 @@ async def test_update_traverses_children_and_skips_visited(
 
                 def async_get_device(self, identifiers):
                     return root
+
+                def async_get_devices(
+                    self, *, identifiers=None, connections=None, config_entry_id=None
+                ):
+                    dev = self.async_get_device(identifiers)
+                    return [dev] if dev is not None else []
 
                 @property
                 def devices(self):
