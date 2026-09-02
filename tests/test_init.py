@@ -539,11 +539,13 @@ async def test_remove_config_entry_device_refuses_unknown_device(
         name="Unknown",
     )
 
+    data_before = deepcopy(config_entry.data)
+
     assert not await async_remove_config_entry_device(hass, config_entry, fake_device)
     assert "matches no configured charge point" in caplog.text
 
-    # Entry data must be untouched.
-    assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == ["CP_1_nosub"]
+    # Entry data must be untouched in full, not just charge-point identifiers.
+    assert config_entry.data == data_before
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
