@@ -43,6 +43,7 @@ class OcppSwitchDescription(SwitchEntityDescription):
     metric_condition: list[str] | None = None
     default_state: bool = False
     per_connector: bool = False
+    single_connector_status_fallback: bool = False
 
 
 SWITCHES: Final[list[OcppSwitchDescription]] = [
@@ -70,6 +71,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         metric_condition=[ChargePointStatus.available.value],
         default_state=True,
         per_connector=False,
+        single_connector_status_fallback=True,
     ),
     OcppSwitchDescription(
         key="connnector_availability",
@@ -217,18 +219,21 @@ class ChargePointSwitch(SwitchEntity):
         """Return true if the switch is on."""
         """Test metric state against condition if present"""
         if self.entity_description.metric_state is not None:
-            metric_conn = (
-                self.connector_id
-                if (
-                    self.entity_description.metric_state
-                    == HAChargerStatuses.status_connector
-                    or self.entity_description.per_connector
+            if self.entity_description.single_connector_status_fallback:
+                resp = self.central_system.get_availability_status(self.cpid)
+            else:
+                metric_conn = (
+                    self.connector_id
+                    if (
+                        self.entity_description.metric_state
+                        == HAChargerStatuses.status_connector
+                        or self.entity_description.per_connector
+                    )
+                    else None
                 )
-                else None
-            )
-            resp = self.central_system.get_metric(
-                self.cpid, self.entity_description.metric_state, metric_conn
-            )
+                resp = self.central_system.get_metric(
+                    self.cpid, self.entity_description.metric_state, metric_conn
+                )
             if self.entity_description.metric_condition is not None:
                 self._state = resp in self.entity_description.metric_condition
             else:
