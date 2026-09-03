@@ -1044,6 +1044,38 @@ class ChargePoint(cp):
                     if is_eair and idx != best_eair_idx:
                         continue
 
+                    # A transaction-bound EAIR sample below meter_start cannot
+                    # be a lifetime register reading: the charger is reporting
+                    # SESSION energy in MeterValues while StartTransaction
+                    # reported a lifetime meter_start, so the meter_start == 0
+                    # detection above never fired. Switch mode here, before
+                    # skip_eair is evaluated, so the sample is neither written to
+                    # the lifetime metric nor published as a negative on a
+                    # total_increasing sensor.
+                    if (
+                        is_eair
+                        and is_transaction
+                        and not self._charger_reports_session_energy
+                    ):
+                        ms_metric = self._metrics[(target_cid, csess.meter_start)]
+                        if (
+                            ms_metric.value is not None
+                            and ms_metric.unit == unit
+                            and value < ms_metric.value
+                        ):
+                            _LOGGER.warning(
+                                "%s[%s]: Energy.Active.Import.Register sample "
+                                "%s %s is below meter_start %s %s. Treating this "
+                                "charger as reporting session energy directly.",
+                                csess.session_energy,
+                                target_cid,
+                                value,
+                                unit,
+                                ms_metric.value,
+                                ms_metric.unit,
+                            )
+                            self._charger_reports_session_energy = True
+
                     # Determine whether to skip writing EAIR to the main metric:
                     # - Skip only if this is an EAIR reading,
                     # - AND the charger reports session energy (meter_start == 0),
@@ -1100,46 +1132,12 @@ class ChargePoint(cp):
                                     (target_cid, csess.session_energy)
                                 ].unit = unit
                             elif ms_metric.unit == unit:
-                                derived = round(1000 * (value - ms_metric.value)) / 1000
-                                if derived < 0:
-                                    # A transaction-bound EAIR sample below
-                                    # meter_start cannot be a lifetime register
-                                    # reading. The charger is reporting SESSION
-                                    # energy in MeterValues while StartTransaction
-                                    # reported a lifetime meter_start, so the
-                                    # meter_start == 0 detection above never
-                                    # fired. Switch to session-energy mode and
-                                    # use the sample as-is, rather than
-                                    # publishing a negative to a
-                                    # total_increasing sensor.
-                                    _LOGGER.warning(
-                                        "%s[%s]: Energy.Active.Import.Register "
-                                        "sample %s %s is below meter_start %s %s "
-                                        "(would give session energy %s). Treating "
-                                        "this charger as reporting session energy "
-                                        "directly.",
-                                        csess.session_energy,
-                                        target_cid,
-                                        value,
-                                        unit,
-                                        ms_metric.value,
-                                        ms_metric.unit,
-                                        derived,
-                                    )
-                                    self._charger_reports_session_energy = True
-                                    self._metrics[
-                                        (target_cid, csess.session_energy)
-                                    ].value = value
-                                    self._metrics[
-                                        (target_cid, csess.session_energy)
-                                    ].unit = unit
-                                else:
-                                    self._metrics[
-                                        (target_cid, csess.session_energy)
-                                    ].value = derived
-                                    self._metrics[
-                                        (target_cid, csess.session_energy)
-                                    ].unit = unit
+                                self._metrics[
+                                    (target_cid, csess.session_energy)
+                                ].value = round(1000 * (value - ms_metric.value)) / 1000
+                                self._metrics[
+                                    (target_cid, csess.session_energy)
+                                ].unit = unit
                 else:
                     unprocessed.append(sampled_value)
 

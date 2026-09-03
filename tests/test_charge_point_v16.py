@@ -4112,6 +4112,15 @@ async def test_eair_session_relative_against_lifetime_meter_start(
             assert s1 >= 0, f"session energy went negative: {s1}"
             assert s1 == pytest.approx(0.113, rel=1e-6)
 
+            # The session-relative sample must NOT land on the lifetime
+            # register metric. (Read only after the fact: _metrics is a
+            # defaultdict, so reading a key beforehand creates it and changes
+            # the behaviour under test.)
+            eair = cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+            assert eair != pytest.approx(0.113, rel=1e-6), (
+                f"lifetime register was overwritten with the session value: {eair}"
+            )
+
             # Subsequent samples keep tracking the session, still positive.
             mv2 = call.MeterValues(
                 connector_id=1,
