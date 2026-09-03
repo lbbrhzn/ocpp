@@ -275,6 +275,8 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        self._post_connect_task: asyncio.Task | None = None
+        self._post_connect_connection = None
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
         self._targeted_refresh_ready = False
@@ -336,9 +338,12 @@ class ChargePoint(cp):
             "Feature profiles returned: %s", self._attr_supported_features.labels()
         )
 
-    async def post_connect(self):
+    async def post_connect(self, connection=None):
         """Logic to be executed right after a charger connects."""
+        connection = self._connection if connection is None else connection
         try:
+            if self._connection is not connection:
+                return
             _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
             await self.fetch_supported_features()
@@ -362,8 +367,12 @@ class ChargePoint(cp):
             # if an entry differs this will unload/reload and stop/restart the central system/websocket
             self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
 
+            if self._connection is not connection:
+                return
             await self.set_standard_configuration()
 
+            if self._connection is not connection:
+                return
             self.post_connect_success = True
             _LOGGER.debug("'%s' post connection setup completed successfully", self.id)
 
@@ -402,6 +411,27 @@ class ChargePoint(cp):
             raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
+
+    def _schedule_post_connect(self):
+        """Coalesce post-connect setup for the currently owned connection."""
+        connection = self._connection
+        task = self._post_connect_task
+        if task is not None and not task.done():
+            if self._post_connect_connection is connection:
+                return task
+            task.cancel()
+
+        task = self.hass.async_create_task(self.post_connect(connection))
+        self._post_connect_task = task
+        self._post_connect_connection = connection
+
+        def _clear(completed):
+            if self._post_connect_task is completed:
+                self._post_connect_task = None
+                self._post_connect_connection = None
+
+        task.add_done_callback(_clear)
+        return task
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -503,7 +533,7 @@ class ChargePoint(cp):
         # after 10s to allow for when a boot notification has not been received
         await asyncio.sleep(MONITOR_BACKSTOP_DELAY)
         if not self.post_connect_success:
-            self.hass.async_create_task(self.post_connect())
+            self._schedule_post_connect()
 
         while connection.state is State.OPEN:
             try:
@@ -610,6 +640,10 @@ class ChargePoint(cp):
         await self.stop()
         self.status = STATE_OK
         self._connection = connection
+        if self._ocpp_version == OcppVersion.V16:
+            self.post_connect_success = False
+            self.received_boot_notification = False
+            self.triggered_boot_notification = False
         self._metrics[(0, cstat.reconnects)].value += 1
         # post connect now handled on receiving boot notification or with backstop in monitor connection
         await self.run([super().start(), self.monitor_connection()])
@@ -639,7 +673,7 @@ class ChargePoint(cp):
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
-                self.hass.async_create_task(self.post_connect())
+                self._schedule_post_connect()
 
     def _async_refresh_metric_entities(
         self, metrics: list[str], *, fallback_to_full_update: bool = True

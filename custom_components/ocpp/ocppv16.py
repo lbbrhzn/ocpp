@@ -1,5 +1,6 @@
 """Representation of a OCPP 1.6 charging station."""
 
+import asyncio
 from datetime import datetime, timedelta, UTC
 import logging
 
@@ -57,6 +58,7 @@ from .enums import (
 from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
+    DEFAULT_HEARTBEAT_INTERVAL,
     DEFAULT_MEASURAND,
     DEFAULT_MAX_CURRENT,
     HA_ENERGY_UNIT,
@@ -64,6 +66,11 @@ from .const import (
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
+_TIMING_CALL_TIMEOUT = 10
+
+
+class _StaleTimingSession(Exception):
+    """Stop timing setup that belongs to a replaced websocket session."""
 
 
 def _to_message_trigger(name: str) -> MessageTrigger | None:
@@ -312,12 +319,129 @@ class ChargePoint(cp):
 
         return effective_csv
 
+    async def _timing_call(self, request, connection):
+        """Make one bounded call only while the expected session is current."""
+        if self._connection is not connection:
+            raise _StaleTimingSession
+        response = await asyncio.wait_for(
+            self.call(request), timeout=_TIMING_CALL_TIMEOUT
+        )
+        if self._connection is not connection:
+            raise _StaleTimingSession
+        return response
+
+    async def _configure_timing_key(self, key, value: int, connection) -> None:
+        """Set one timing key when needed and verify accepted changes."""
+        target = str(value)
+        try:
+            response = await self._timing_call(
+                call.GetConfiguration(key=[key]), connection
+            )
+            if key in (getattr(response, "unknown_key", None) or []):
+                _LOGGER.warning("Timing key %s is unknown (not supported)", key)
+                return
+
+            entry = next(
+                (
+                    item
+                    for item in (getattr(response, "configuration_key", None) or [])
+                    if (item.get("key") if isinstance(item, dict) else item.key) == key
+                ),
+                None,
+            )
+            if entry is None:
+                _LOGGER.warning("Timing key %s was not returned by the charger", key)
+                return
+            current = entry.get("value") if isinstance(entry, dict) else entry.value
+            readonly = (
+                entry.get("readonly", False)
+                if isinstance(entry, dict)
+                else getattr(entry, "readonly", False)
+            )
+            if str(current) == target:
+                _LOGGER.debug("Timing key %s already verified as %s", key, target)
+                return
+            if readonly:
+                _LOGGER.warning(
+                    "Timing key %s is read-only (current value %s)", key, current
+                )
+                return
+
+            changed = await self._timing_call(
+                call.ChangeConfiguration(key=key, value=target), connection
+            )
+            status = getattr(changed, "status", None)
+            if status not in (
+                ConfigurationStatus.accepted,
+                ConfigurationStatus.reboot_required,
+            ):
+                _LOGGER.warning(
+                    "Timing key %s was %s while setting it to %s", key, status, target
+                )
+                return
+            if status == ConfigurationStatus.reboot_required:
+                self._requires_reboot = True
+                _LOGGER.warning(
+                    "Timing key %s requires a charger reboot to apply %s", key, target
+                )
+
+            verified = await self._timing_call(
+                call.GetConfiguration(key=[key]), connection
+            )
+            readback = next(
+                (
+                    item
+                    for item in (getattr(verified, "configuration_key", None) or [])
+                    if (item.get("key") if isinstance(item, dict) else item.key) == key
+                ),
+                None,
+            )
+            actual = (
+                readback.get("value")
+                if isinstance(readback, dict)
+                else getattr(readback, "value", None)
+            )
+            if str(actual) == target:
+                _LOGGER.debug("Timing key %s read back as %s", key, target)
+            else:
+                _LOGGER.warning(
+                    "Timing key %s readback was %s after requesting %s",
+                    key,
+                    actual,
+                    target,
+                )
+        except asyncio.CancelledError:
+            raise
+        except _StaleTimingSession:
+            raise
+        except Exception as ex:
+            _LOGGER.warning("Timing key %s setup failed non-fatally: %s", key, ex)
+
+    async def configure_connection_timing(self, connection=None) -> bool:
+        """Apply and verify opted-in OCPP 1.6 charger timing settings."""
+        connection = self._connection if connection is None else connection
+        values = [
+            (ckey.heartbeat_interval, self.settings.heartbeat_interval),
+            (
+                ckey.web_socket_ping_interval,
+                self.settings.charger_websocket_ping_interval,
+            ),
+            (ckey.meter_value_sample_interval, self.settings.meter_interval),
+        ]
+        for key, value in values:
+            if value is None:
+                continue
+            try:
+                await self._configure_timing_key(key, value, connection)
+            except _StaleTimingSession:
+                _LOGGER.debug("Stopping stale timing setup for '%s'", self.id)
+                return False
+        return self._connection is connection
+
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
-        await self.configure(
-            ckey.meter_value_sample_interval,
-            str(self.settings.meter_interval),
-        )
+        if not await self.configure_connection_timing():
+            return
         await self.configure(
             ckey.clock_aligned_data_interval,
             str(self.settings.idle_interval),
@@ -1198,7 +1322,7 @@ class ChargePoint(cp):
         """Handle a boot notification."""
         resp = call_result.BootNotification(
             current_time=datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            interval=3600,
+            interval=self.settings.heartbeat_interval or DEFAULT_HEARTBEAT_INTERVAL,
             status=RegistrationStatus.accepted.value,
         )
         self.received_boot_notification = True

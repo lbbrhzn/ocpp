@@ -28,6 +28,8 @@
                     "cpid": "Charge point identity",
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
+                    "heartbeat_interval": "OCPP heartbeat interval requested from this charger (seconds)",
+                    "charger_websocket_ping_interval": "Charger-generated WebSocket ping interval (seconds, optional)",
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
@@ -140,6 +142,8 @@
                 "data": {
                     "max_current": "Maximum charging current",
                     "meter_interval": "Charging sample interval (seconds)",
+                    "heartbeat_interval": "OCPP heartbeat interval requested from this charger (seconds)",
+                    "charger_websocket_ping_interval": "Charger-generated WebSocket ping interval (seconds, optional)",
                     "monitored_variables_autoconfig": "Automatic detection of OCPP Measurands",
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",

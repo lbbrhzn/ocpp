@@ -27,6 +27,14 @@ OCPP integration can automatically detect supported measurands. However, some ch
 
 For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices.
 
+### OCPP 1.6 charger timing
+
+Each configured OCPP 1.6 charge point has its own timing options. `OCPP heartbeat interval requested from this charger` controls both the interval returned in `BootNotification.conf` and, when the option is explicitly stored, the charger's `HeartbeatInterval` configuration key. Its default remains 3600 seconds for compatibility with existing installations.
+
+`Charger-generated WebSocket ping interval` controls the optional charger-side `WebSocketPingInterval` key. Leaving it blank does not read or change that key. This is different from `Websocket ping interval` in the central-system settings, which controls Home Assistant's own connection-monitoring pings.
+
+`Charging sample interval` continues to control `MeterValueSampleInterval`. Timing values are read before any change, already-matching values are left alone, and accepted changes are read back. Chargers that report a key as unknown, unsupported, read-only, rejected, or requiring a reboot remain connected; timing setup failures do not make charging unavailable.
+
 ## Understanding status
 
 Your charger exposes a connector status sensor:

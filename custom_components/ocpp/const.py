@@ -20,6 +20,8 @@ CONF_HOST = ha.CONF_HOST
 CONF_ID_TAG = "id_tag"
 CONF_ICON = ha.CONF_ICON
 CONF_IDLE_INTERVAL = "idle_interval"
+CONF_HEARTBEAT_INTERVAL = "heartbeat_interval"
+CONF_CHARGER_WEBSOCKET_PING_INTERVAL = "charger_websocket_ping_interval"
 CONF_MAX_CURRENT = "max_current"
 CONF_METER_INTERVAL = "meter_interval"
 CONF_MODE = ha.CONF_MODE
@@ -61,6 +63,7 @@ OCPP_1_6 = "ocpp1.6"
 OCPP_2_0 = "ocpp2"
 OCPP_VERSION_AUTO = "auto"
 DEFAULT_OCPP_VERSION = OCPP_VERSION_AUTO
+DEFAULT_HEARTBEAT_INTERVAL = 3600
 # Selectable values for the config-flow "OCPP version" field. "auto" advertises
 # every supported subprotocol (DEFAULT_SUBPROTOCOLS) and negotiates in that
 # order, so a charger offering several versions gets the first entry; any other
@@ -186,6 +189,8 @@ class ChargerSystemSettings:
     skip_schema_validation: bool
     force_smart_charging: bool
     enable_ha_notifications: bool = DEFAULT_ENABLE_HA_NOTIFICATIONS
+    heartbeat_interval: int | None = None
+    charger_websocket_ping_interval: int | None = None
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
 

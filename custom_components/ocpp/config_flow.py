@@ -17,7 +17,9 @@ from .const import (
     CONF_CPIDS,
     CONF_CSID,
     CONF_ENABLE_HA_NOTIFICATIONS,
+    CONF_CHARGER_WEBSOCKET_PING_INTERVAL,
     CONF_FORCE_SMART_CHARGING,
+    CONF_HEARTBEAT_INTERVAL,
     CONF_HOST,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -38,6 +40,7 @@ from .const import (
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENABLE_HA_NOTIFICATIONS,
+    DEFAULT_HEARTBEAT_INTERVAL,
     DEFAULT_FORCE_SMART_CHARGING,
     DEFAULT_HOST,
     DEFAULT_IDLE_INTERVAL,
@@ -97,6 +100,12 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
             default=DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
         ): bool,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
+        vol.Required(
+            CONF_HEARTBEAT_INTERVAL, default=DEFAULT_HEARTBEAT_INTERVAL
+        ): vol.All(int, vol.Range(min=1)),
+        vol.Optional(CONF_CHARGER_WEBSOCKET_PING_INTERVAL, default=None): vol.Any(
+            None, vol.All(int, vol.Range(min=1))
+        ),
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
         vol.Required(
             CONF_SKIP_SCHEMA_VALIDATION, default=DEFAULT_SKIP_SCHEMA_VALIDATION
@@ -439,6 +448,16 @@ class OCPPOptionsFlow(OptionsFlow):
                     CONF_METER_INTERVAL,
                     default=current.get(CONF_METER_INTERVAL, DEFAULT_METER_INTERVAL),
                 ): int,
+                vol.Required(
+                    CONF_HEARTBEAT_INTERVAL,
+                    default=current.get(
+                        CONF_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_INTERVAL
+                    ),
+                ): vol.All(int, vol.Range(min=1)),
+                vol.Optional(
+                    CONF_CHARGER_WEBSOCKET_PING_INTERVAL,
+                    default=current.get(CONF_CHARGER_WEBSOCKET_PING_INTERVAL),
+                ): vol.Any(None, vol.All(int, vol.Range(min=1))),
                 vol.Required(
                     CONF_IDLE_INTERVAL,
                     default=current.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL),
