@@ -789,6 +789,8 @@ class ChargePoint(cp):
             resp,
         )
         if resp.status == RemoteStartStopStatus.accepted:
+            # Reset id tag if set by on authorize (RFID)
+            self._metrics[0][cstat.id_tag.value].value = self._remote_id_tag
             return True
         else:
             _LOGGER.warning("Failed with response: %s", resp.status)
