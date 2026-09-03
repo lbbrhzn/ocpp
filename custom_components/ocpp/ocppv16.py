@@ -194,7 +194,24 @@ class ChargePoint(cp):
         await self.get_configuration(ckey.heartbeat_interval)
 
     async def get_supported_measurands(self) -> str:
-        """Get comma-separated list of measurands supported by the charger."""
+        """Get measurands without allowing its writes to cross sessions."""
+        context = getattr(self, "_post_connect_connection_context", None)
+        connection = context.get() if context is not None else None
+        if connection is None:
+            try:
+                connection = self._connection
+            except AttributeError:
+                return await ChargePoint._get_supported_measurands_unlocked(self)
+        async with self._timing_connection_lock:
+            if self._connection is not connection:
+                raise _StaleTimingSession
+            result = await ChargePoint._get_supported_measurands_unlocked(self)
+            if self._connection is not connection:
+                raise _StaleTimingSession
+            return result
+
+    async def _get_supported_measurands_unlocked(self) -> str:
+        """Get comma-separated measurands while the session lock is held."""
 
         def _filter_measurands(raw_csv: str) -> str:
             """Keep only compliant measurands found as tokens in the charger's string."""

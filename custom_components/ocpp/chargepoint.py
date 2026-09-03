@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 import logging
@@ -277,6 +278,9 @@ class ChargePoint(cp):
         self.post_connect_success = False
         self._post_connect_task: asyncio.Task | None = None
         self._post_connect_connection = None
+        self._post_connect_connection_context = ContextVar(
+            f"ocpp_post_connect_session_{id}", default=None
+        )
         self._timing_connection_lock = asyncio.Lock()
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
@@ -342,6 +346,7 @@ class ChargePoint(cp):
     async def post_connect(self, connection=None):
         """Logic to be executed right after a charger connects."""
         connection = self._connection if connection is None else connection
+        session_token = self._post_connect_connection_context.set(connection)
         try:
             if self._connection is not connection:
                 return
@@ -355,6 +360,8 @@ class ChargePoint(cp):
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
+            if self._connection is not connection:
+                return
             updated_entry = {**self.entry.data}
             for i in range(len(updated_entry[CONF_CPIDS])):
                 if self.id in updated_entry[CONF_CPIDS][i]:
@@ -380,7 +387,8 @@ class ChargePoint(cp):
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
             try:
-                await self.set_availability()
+                if not await self._run_on_connection(connection, self.set_availability):
+                    return
             except asyncio.CancelledError:
                 raise
             except Exception as ex:
@@ -389,15 +397,23 @@ class ChargePoint(cp):
             if prof.REM in self._attr_supported_features:
                 if self.received_boot_notification is False:
                     try:
-                        await asyncio.wait_for(
-                            self.trigger_boot_notification(), timeout=3
-                        )
+                        if not await self._run_on_connection(
+                            connection,
+                            lambda: asyncio.wait_for(
+                                self.trigger_boot_notification(), timeout=3
+                            ),
+                        ):
+                            return
                     except Exception as ex:
                         _LOGGER.debug("trigger_boot_notification ignored: %s", ex)
                 try:
-                    await asyncio.wait_for(
-                        self.trigger_status_notification(), timeout=3
-                    )
+                    if not await self._run_on_connection(
+                        connection,
+                        lambda: asyncio.wait_for(
+                            self.trigger_status_notification(), timeout=3
+                        ),
+                    ):
+                        return
                 except Exception as ex:
                     _LOGGER.debug("trigger_status_notification ignored: %s", ex)
 
@@ -412,6 +428,16 @@ class ChargePoint(cp):
             raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
+        finally:
+            self._post_connect_connection_context.reset(session_token)
+
+    async def _run_on_connection(self, connection, operation):
+        """Run one post-connect operation without crossing session generations."""
+        async with self._timing_connection_lock:
+            if self._connection is not connection:
+                return False
+            await operation()
+            return self._connection is connection
 
     def _schedule_post_connect(self):
         """Coalesce post-connect setup for the currently owned connection."""

@@ -502,6 +502,86 @@ async def test_reconnect_cannot_replace_connection_during_timing_call():
     assert server._connection is new_connection
 
 
+async def test_post_connect_mutation_helper_fences_replacement_session():
+    """Optional post-connect mutations cannot run across a reconnect."""
+    old_connection = object()
+    new_connection = object()
+    server = BaseChargePoint.__new__(BaseChargePoint)
+    server._connection = old_connection
+    server._timing_connection_lock = asyncio.Lock()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    observed = []
+
+    async def mutation():
+        entered.set()
+        await release.wait()
+        observed.append(server._connection)
+
+    async def replace_connection():
+        async with server._timing_connection_lock:
+            server._connection = new_connection
+
+    mutation_task = asyncio.create_task(
+        server._run_on_connection(old_connection, mutation)
+    )
+    await entered.wait()
+    replacement = asyncio.create_task(replace_connection())
+    await asyncio.sleep(0)
+
+    try:
+        assert server._connection is old_connection
+    finally:
+        release.set()
+        await asyncio.gather(mutation_task, replacement, return_exceptions=True)
+
+    assert observed == [old_connection]
+    assert server._connection is new_connection
+
+
+async def test_measurand_change_cannot_cross_into_replacement_session():
+    """MeterValuesSampledData writes remain on the post-connect session."""
+    old_connection = object()
+    new_connection = object()
+    desired = "Energy.Active.Import.Register"
+    settings = _legacy_settings(
+        monitored_variables=desired,
+        monitored_variables_autoconfig=True,
+    )
+    server = _server(settings, old_connection)
+    server.get_configuration = AsyncMock(return_value=desired)
+    server.configure = AsyncMock()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    sent_on = []
+
+    async def paused_call(request):
+        assert isinstance(request, call.ChangeConfiguration)
+        entered.set()
+        await release.wait()
+        sent_on.append(server._connection)
+        return call_result.ChangeConfiguration(status=ConfigurationStatus.accepted)
+
+    async def replace_connection():
+        async with server._timing_connection_lock:
+            server._connection = new_connection
+
+    server.call = paused_call
+    setup = asyncio.create_task(server.get_supported_measurands())
+    await entered.wait()
+    replacement = asyncio.create_task(replace_connection())
+    await asyncio.sleep(0)
+
+    try:
+        assert server._connection is old_connection
+    finally:
+        release.set()
+        await asyncio.gather(setup, replacement, return_exceptions=True)
+
+    assert sent_on == [old_connection]
+    assert server._connection is new_connection
+
+
 @pytest.mark.parametrize(
     ("ocpp_version", "expected_success"), [("1.6", False), ("2.0.1", True)]
 )
