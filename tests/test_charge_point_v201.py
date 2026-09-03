@@ -3,10 +3,12 @@
 import asyncio
 import copy
 from datetime import datetime, timedelta, UTC
+import json
 
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import template as template_helper
 from ocpp.v16.enums import Measurand
 
 from custom_components.ocpp.const import CONF_CPIDS, CONF_CPID, DOMAIN
@@ -985,8 +987,61 @@ async def _test_charge_profiles(
         ],
     }
 
-    await set_number(hass, cpid, "maximum_current", 12)
+    transaction_id = "x','id':2,'transactionId':'y"
+
+    def custom_tx_profile(profile_id: int) -> dict:
+        return {
+            "id": profile_id,
+            "stackLevel": 1,
+            "chargingProfilePurpose": "TxProfile",
+            "chargingProfileKind": "Relative",
+            "transactionId": transaction_id,
+            "chargingSchedule": [
+                {
+                    "id": 1,
+                    "chargingRateUnit": "A",
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 6}],
+                }
+            ],
+        }
+
+    json_profile = custom_tx_profile(3)
+    error = await _set_charge_rate_service(
+        hass,
+        {
+            "devid": cpid,
+            "conn_id": 1,
+            "custom_profile": json.dumps(json_profile),
+        },
+    )
+    assert error is None
     assert len(cp.charge_profiles_set) == 4
+    assert cp.charge_profiles_set[-1].evse_id == 1
+    assert cp.charge_profiles_set[-1].charging_profile["id"] == 3
+    assert (
+        cp.charge_profiles_set[-1].charging_profile["transaction_id"] == transaction_id
+    )
+
+    wrapped_profile = template_helper._parse_result(repr(custom_tx_profile(4)))
+    assert isinstance(wrapped_profile, dict)
+    error = await _set_charge_rate_service(
+        hass,
+        {
+            "devid": cpid,
+            "conn_id": 1,
+            "custom_profile": wrapped_profile,
+        },
+    )
+    assert error is None
+    assert len(cp.charge_profiles_set) == 5
+    assert cp.charge_profiles_set[-1].evse_id == 1
+    assert cp.charge_profiles_set[-1].charging_profile["id"] == 4
+    assert (
+        cp.charge_profiles_set[-1].charging_profile["transaction_id"] == transaction_id
+    )
+
+    await set_number(hass, cpid, "maximum_current", 12)
+    assert len(cp.charge_profiles_set) == 6
     assert cp.charge_profiles_set[-1].evse_id == 0
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 1,

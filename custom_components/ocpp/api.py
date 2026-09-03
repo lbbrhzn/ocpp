@@ -81,7 +81,10 @@ CHRGR_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Optional("limit_amps"): cv.positive_float,
         vol.Optional("limit_watts"): cv.positive_int,
         vol.Optional("conn_id"): cv.positive_int,
-        vol.Optional("custom_profile"): vol.Any(cv.string, dict),
+        # Keep a mapping returned by Home Assistant's template engine as a
+        # mapping. cv.string deliberately unwraps ResultWrapper dictionaries
+        # to their rendered text, so it must be tried after dict.
+        vol.Optional("custom_profile"): vol.Any(dict, cv.string),
     }
 )
 CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
@@ -99,6 +102,72 @@ CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
 
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+
+def _invalid_custom_profile(message: str) -> HomeAssistantError:
+    """Create a caller-visible error without exposing the supplied profile."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="invalid_custom_profile",
+        translation_placeholders={"message": message},
+    )
+
+
+def _json_error_message(error: json.JSONDecodeError) -> str:
+    """Describe a JSON syntax error without including the input document."""
+    return f"invalid JSON: {error.msg} at line {error.lineno}, column {error.colno}"
+
+
+def _parse_custom_profile(custom_profile: dict | str, cp_id: str) -> dict:
+    """Return a custom profile mapping, preserving valid JSON verbatim."""
+    if isinstance(custom_profile, dict):
+        return custom_profile
+
+    if not isinstance(custom_profile, str):
+        raise _invalid_custom_profile(
+            f"expected a mapping or JSON object, got {type(custom_profile).__name__}"
+        )
+
+    used_legacy_fallback = False
+    try:
+        profile = json.loads(custom_profile)
+    except json.JSONDecodeError as original_error:
+        if "'" not in custom_profile:
+            raise _invalid_custom_profile(
+                _json_error_message(original_error)
+            ) from original_error
+
+        try:
+            profile = json.loads(custom_profile.replace("'", '"'))
+        except json.JSONDecodeError as legacy_error:
+            raise _invalid_custom_profile(
+                f"{_json_error_message(original_error)}; "
+                "legacy single-quote compatibility parsing also failed"
+            ) from legacy_error
+        except (ValueError, RecursionError) as legacy_error:
+            raise _invalid_custom_profile(
+                f"{_json_error_message(original_error)}; legacy single-quote "
+                "compatibility parsing exceeded JSON parser limits"
+            ) from legacy_error
+        used_legacy_fallback = True
+    except (ValueError, RecursionError) as parser_error:
+        raise _invalid_custom_profile(
+            "JSON could not be decoded within parser limits"
+        ) from parser_error
+
+    if not isinstance(profile, dict):
+        raise _invalid_custom_profile(
+            f"expected a JSON object, got {type(profile).__name__}"
+        )
+
+    if used_legacy_fallback:
+        _LOGGER.debug(
+            "%s: parsed custom_profile using legacy single-quote compatibility; "
+            "prefer a mapping or valid JSON object",
+            cp_id,
+        )
+
+    return profile
 
 
 class CentralSystem:
@@ -760,20 +829,18 @@ class CentralSystem:
 
     @check_charger_available
     async def handle_set_charge_rate(self, call, cp):
-        """Handle the data transfer service call."""
+        """Handle the charge-rate service call."""
         amps = call.data.get("limit_amps", None)
         watts = call.data.get("limit_watts", None)
-        id = call.data.get("conn_id", 0)
+        conn_id = call.data.get("conn_id", 0)
         custom_profile = call.data.get("custom_profile", None)
         if custom_profile is not None:
-            if type(custom_profile) is str:
-                custom_profile = custom_profile.replace("'", '"')
-                custom_profile = json.loads(custom_profile)
-            await cp.set_charge_rate(profile=custom_profile, conn_id=id)
+            profile = _parse_custom_profile(custom_profile, cp.id)
+            await cp.set_charge_rate(profile=profile, conn_id=conn_id)
         elif watts is not None:
-            await cp.set_charge_rate(limit_watts=watts, conn_id=id)
+            await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)
         elif amps is not None:
-            await cp.set_charge_rate(limit_amps=amps, conn_id=id)
+            await cp.set_charge_rate(limit_amps=amps, conn_id=conn_id)
 
     @check_charger_available
     async def handle_configure(self, call, cp) -> ServiceResponse:
