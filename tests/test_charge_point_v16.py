@@ -4051,6 +4051,110 @@ async def test_eair_monotonic_increments_single_connector(
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",
+    [{"port": 9398, "cp_id": "CP_eair_session_relative", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_session_relative"])
+@pytest.mark.parametrize("port", [9398])
+async def test_eair_session_relative_against_lifetime_meter_start(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Session energy must never go negative when EAIR is session-relative.
+
+    Some chargers report a LIFETIME register in StartTransaction but
+    SESSION-relative energy in the MeterValues that follow. The
+    ``meter_start == 0`` detection never fires for them, so the else-branch
+    derives ``session = EAIR - meter_start`` and produces a large negative
+    value on a ``total_increasing`` sensor.
+
+    Once a tx-bound sample lands below ``meter_start`` the charger cannot be
+    reporting a lifetime register, so we switch to session-energy mode and use
+    the sample as-is.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+
+            # StartTransaction reports the LIFETIME register: 4076447 Wh.
+            await client.send_start_transaction(meter_start=4076447)
+            txid = client.active_transactionId
+
+            # First in-transaction sample is SESSION-relative: 113 Wh.
+            # Naively this derives 0.113 - 4076.447 = -4076.334 kWh.
+            mv1 = call.MeterValues(
+                connector_id=1,
+                transaction_id=txid,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "113",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            assert await client.call(mv1) is not None
+            s1 = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s1 is not None
+            assert s1 >= 0, f"session energy went negative: {s1}"
+            assert s1 == pytest.approx(0.113, rel=1e-6)
+
+            # The session-relative sample must NOT land on the lifetime
+            # register metric. (Read only after the fact: _metrics is a
+            # defaultdict, so reading a key beforehand creates it and changes
+            # the behaviour under test.)
+            eair = cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+            assert eair != pytest.approx(0.113, rel=1e-6), (
+                f"lifetime register was overwritten with the session value: {eair}"
+            )
+
+            # Subsequent samples keep tracking the session, still positive.
+            mv2 = call.MeterValues(
+                connector_id=1,
+                transaction_id=txid,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "236",
+                                "measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            assert await client.call(mv2) is not None
+            s2 = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s2 >= 0, f"session energy went negative: {s2}"
+            assert s2 == pytest.approx(0.236, rel=1e-6)
+            assert s2 >= s1
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
     [{"port": 9351, "cp_id": "CP_set_rate_active_tx", "cms": "cms_services"}],
     indirect=True,
 )
