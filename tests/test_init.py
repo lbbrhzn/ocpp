@@ -342,7 +342,7 @@ async def test_remove_config_entry_device_removes_charge_point(
     await hass.async_block_till_done()
 
     dr = device_registry.async_get(hass)
-    victim = dr.async_get_device({(DOMAIN, "CP_1_nosub")})
+    victim = next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None)
     assert victim is not None
 
     assert await async_remove_config_entry_device(hass, config_entry, victim)
@@ -360,8 +360,8 @@ async def test_remove_config_entry_device_removes_charge_point(
 
     # The reload must not re-create the removed device, and the entry
     # stays loaded with its platforms intact.
-    assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is None
-    assert dr.async_get_device({(DOMAIN, "CP_2")}) is not None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None) is None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_2")}, config_entry_id=config_entry.entry_id)), None) is not None
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
     assert_platforms_hold(hass, config_entry.entry_id)
 
@@ -395,7 +395,7 @@ async def test_remove_config_entry_device_refuses_central_system(
     await hass.async_block_till_done()
 
     dr = device_registry.async_get(hass)
-    cs_device = dr.async_get_device({(DOMAIN, "test_csid_1")})
+    cs_device = next(iter(dr.async_get_devices(identifiers={(DOMAIN, "test_csid_1")}, config_entry_id=config_entry.entry_id)), None)
     assert cs_device is not None
 
     assert not await async_remove_config_entry_device(hass, config_entry, cs_device)
@@ -405,8 +405,8 @@ async def test_remove_config_entry_device_refuses_central_system(
     assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == [
         "CP_1_nosub"
     ]
-    assert dr.async_get_device({(DOMAIN, "test_csid_1")}) is not None
-    assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is not None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "test_csid_1")}, config_entry_id=config_entry.entry_id)), None) is not None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None) is not None
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
@@ -441,7 +441,7 @@ async def test_remove_config_entry_device_refuses_central_system_collision(
     await hass.async_block_till_done()
 
     dr = device_registry.async_get(hass)
-    victim = dr.async_get_device({(DOMAIN, "CP_1_nosub")})
+    victim = next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None)
     assert victim is not None
 
     # The collision merged the central system and charge point devices:
@@ -456,7 +456,7 @@ async def test_remove_config_entry_device_refuses_central_system_collision(
     assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == [
         "CP_1_nosub"
     ]
-    assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is not None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None) is not None
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
@@ -487,7 +487,7 @@ async def test_remove_config_entry_device_last_charge_point(
     await hass.async_block_till_done()
 
     dr = device_registry.async_get(hass)
-    victim = dr.async_get_device({(DOMAIN, "CP_1_nosub")})
+    victim = next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None)
     assert victim is not None
 
     assert await async_remove_config_entry_device(hass, config_entry, victim)
@@ -496,7 +496,7 @@ async def test_remove_config_entry_device_last_charge_point(
     dr.async_remove_device(victim.id)
     await hass.async_block_till_done()
 
-    assert dr.async_get_device({(DOMAIN, "CP_1_nosub")}) is None
+    assert next(iter(dr.async_get_devices(identifiers={(DOMAIN, "CP_1_nosub")}, config_entry_id=config_entry.entry_id)), None) is None
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
 
     # Unload must succeed for the never-forwarded platforms too.
@@ -539,7 +539,7 @@ async def test_remove_config_entry_device_refuses_unknown_device(
         name="Unknown",
     )
 
-    data_before = deepcopy(config_entry.data)
+    data_before = deepcopy(dict(config_entry.data))
 
     assert not await async_remove_config_entry_device(hass, config_entry, fake_device)
     assert "matches no configured charge point" in caplog.text

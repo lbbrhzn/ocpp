@@ -541,9 +541,7 @@ async def async_remove_config_entry_device(
             hass.config_entries.async_update_entry(
                 entry, data={**entry.data, CONF_CPIDS: [c for c in new_cpids if c]}
             )
-            _LOGGER.info(
-                "Removed charge point %s from entry %s", cp_id, entry.title
-            )
+            _LOGGER.info("Removed charge point %s from entry %s", cp_id, entry.title)
             return True
 
     _LOGGER.warning(
