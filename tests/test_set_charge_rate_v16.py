@@ -286,6 +286,35 @@ async def test_power_only_single_phase_uses_one_phase(cp_v16, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_power_only_single_phase_ignores_zero_phase_placeholders(
+    cp_v16, monkeypatch
+):
+    """Zero-valued L2/L3 placeholders must not make a charger three-phase."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "power")
+    voltage = Metric(230.0, "V")
+    voltage.extra_attr = {"L1-N": 230.0, "L2-N": 0.0, "L3-N": 0.0}
+    current = Metric(16.0, "A")
+    current.extra_attr = {"L1": 16.0, "L2": 0.0, "L3": 0.0}
+    cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
+    cp_v16._metrics[(1, Measurand.current_import.value)] = current
+
+    ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=1)
+    assert ok is True
+    unit, limit = _schedule_limit(captured[0])
+    assert unit == ChargingRateUnitType.watts.value
+    assert limit == 3680.0  # 16 A * 230 V * 1 active phase
+
+
+def test_phase_count_defaults_to_one_when_all_phase_values_are_zero(cp_v16):
+    """An idle placeholder-only sample keeps the conservative one-phase default."""
+    current = Metric(0.0, "A")
+    current.extra_attr = {"L1": 0.0, "L2": 0.0, "L3": 0.0}
+    cp_v16._metrics[(1, Measurand.current_import.value)] = current
+
+    assert cp_v16._phase_count(1) == 1
+
+
+@pytest.mark.asyncio
 async def test_power_only_ignores_uncorrelated_cached_power_and_current(
     cp_v16, monkeypatch
 ):
