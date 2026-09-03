@@ -539,6 +539,48 @@ async def test_post_connect_mutation_helper_fences_replacement_session():
     assert server._connection is new_connection
 
 
+async def test_initial_post_connect_requests_are_fenced_to_original_session():
+    """Feature, connector, and heartbeat discovery cannot cross sessions."""
+    old_connection = object()
+    new_connection = object()
+    server = BaseChargePoint.__new__(BaseChargePoint)
+    server._connection = old_connection
+    server._timing_connection_lock = asyncio.Lock()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    observed = []
+
+    async def fetch_features():
+        entered.set()
+        await release.wait()
+        observed.append(server._connection)
+
+    async def replace_connection():
+        async with server._timing_connection_lock:
+            server._connection = new_connection
+
+    server.fetch_supported_features = fetch_features
+    server.get_number_of_connectors = AsyncMock(return_value=1)
+    server.get_heartbeat_interval = AsyncMock()
+    discovery = asyncio.create_task(
+        server._fetch_post_connect_inventory(old_connection)
+    )
+    await entered.wait()
+    replacement = asyncio.create_task(replace_connection())
+    await asyncio.sleep(0)
+
+    try:
+        assert server._connection is old_connection
+    finally:
+        release.set()
+        await asyncio.gather(discovery, replacement, return_exceptions=True)
+
+    assert observed == [old_connection]
+    assert server._connection is new_connection
+    server.get_number_of_connectors.assert_not_awaited()
+    server.get_heartbeat_interval.assert_not_awaited()
+
+
 async def test_measurand_change_cannot_cross_into_replacement_session():
     """MeterValuesSampledData writes remain on the post-connect session."""
     old_connection = object()

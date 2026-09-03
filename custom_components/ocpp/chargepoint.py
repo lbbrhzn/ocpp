@@ -343,6 +343,18 @@ class ChargePoint(cp):
             "Feature profiles returned: %s", self._attr_supported_features.labels()
         )
 
+    async def _fetch_post_connect_inventory(self, connection):
+        """Fetch startup data while each request remains on its source session."""
+        if not await self._run_on_connection(connection, self.fetch_supported_features):
+            return False
+
+        async def get_connectors():
+            self.num_connectors = await self.get_number_of_connectors()
+
+        if not await self._run_on_connection(connection, get_connectors):
+            return False
+        return await self._run_on_connection(connection, self.get_heartbeat_interval)
+
     async def post_connect(self, connection=None):
         """Logic to be executed right after a charger connects."""
         connection = self._connection if connection is None else connection
@@ -352,12 +364,11 @@ class ChargePoint(cp):
                 return
             _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
-            await self.fetch_supported_features()
-            self.num_connectors = await self.get_number_of_connectors()
+            if not await self._fetch_post_connect_inventory(connection):
+                return
             for conn in range(1, self.num_connectors + 1):
                 self._init_connector_slots(conn)
             self._metrics[(0, cdet.connectors)].value = self.num_connectors
-            await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
             if self._connection is not connection:
