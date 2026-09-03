@@ -441,12 +441,16 @@ class ChargePoint(cp):
 
     async def set_standard_configuration(self):
         """Send configuration values to the charger."""
-        if not await self.configure_connection_timing():
+        connection = self._connection
+        if not await self.configure_connection_timing(connection):
             return
-        await self.configure(
-            ckey.clock_aligned_data_interval,
-            str(self.settings.idle_interval),
-        )
+        async with self._timing_connection_lock:
+            if self._connection is not connection:
+                return
+            await self.configure(
+                ckey.clock_aligned_data_interval,
+                str(self.settings.idle_interval),
+            )
 
     async def get_supported_features(self) -> prof:
         """Get features supported by the charger."""

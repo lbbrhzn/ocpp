@@ -341,6 +341,41 @@ async def test_stale_timing_setup_does_not_apply_idle_setting_to_new_session():
     server.configure.assert_not_awaited()
 
 
+async def test_idle_interval_send_cannot_cross_into_replacement_session():
+    """ClockAlignedDataInterval remains fenced after timing setup succeeds."""
+    old_connection = object()
+    new_connection = object()
+    server = _server(_legacy_settings(), old_connection)
+    server.configure_connection_timing = AsyncMock(return_value=True)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    sent_on = []
+
+    async def paused_configure(*args):
+        entered.set()
+        await release.wait()
+        sent_on.append(server._connection)
+
+    async def replace_connection():
+        async with server._timing_connection_lock:
+            server._connection = new_connection
+
+    server.configure = paused_configure
+    setup = asyncio.create_task(server.set_standard_configuration())
+    await entered.wait()
+    replacement = asyncio.create_task(replace_connection())
+    await asyncio.sleep(0)
+
+    try:
+        assert server._connection is old_connection
+    finally:
+        release.set()
+        await asyncio.gather(setup, replacement, return_exceptions=True)
+
+    assert sent_on == [old_connection]
+    assert server._connection is new_connection
+
+
 async def test_post_connect_scheduling_is_coalesced_per_connection():
     """Repeated boot notifications create one setup task for a session."""
     server = BaseChargePoint.__new__(BaseChargePoint)
