@@ -321,14 +321,15 @@ class ChargePoint(cp):
 
     async def _timing_call(self, request, connection):
         """Make one bounded call only while the expected session is current."""
-        if self._connection is not connection:
-            raise _StaleTimingSession
-        response = await asyncio.wait_for(
-            self.call(request), timeout=_TIMING_CALL_TIMEOUT
-        )
-        if self._connection is not connection:
-            raise _StaleTimingSession
-        return response
+        async with self._timing_connection_lock:
+            if self._connection is not connection:
+                raise _StaleTimingSession
+            response = await asyncio.wait_for(
+                self.call(request), timeout=_TIMING_CALL_TIMEOUT
+            )
+            if self._connection is not connection:
+                raise _StaleTimingSession
+            return response
 
     async def _configure_timing_key(self, key, value: int, connection) -> None:
         """Set one timing key when needed and verify accepted changes."""

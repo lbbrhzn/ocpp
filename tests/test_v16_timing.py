@@ -40,6 +40,7 @@ def _server(settings, connection=None):
     server.id = "CP_1"
     server.settings = settings
     server._connection = connection if connection is not None else object()
+    server._timing_connection_lock = asyncio.Lock()
     server._requires_reboot = False
     server.notify_ha = AsyncMock()
     return server
@@ -275,6 +276,36 @@ async def test_timeout_or_disconnect_does_not_abort_remaining_timing_keys(failur
     ]
 
 
+async def test_reboot_required_is_recorded_and_read_back(caplog):
+    """RebootRequired is non-fatal, observable, and still verifies readback."""
+    settings = _legacy_settings(heartbeat_interval=60)
+    connection = object()
+    server = _server(settings, connection)
+    reads = iter(["300", "60"])
+    requests = []
+
+    async def fake_call(request):
+        requests.append(request)
+        if isinstance(request, call.GetConfiguration):
+            return _configuration(request.key[0], next(reads))
+        if isinstance(request, call.ChangeConfiguration):
+            return call_result.ChangeConfiguration(
+                status=ConfigurationStatus.reboot_required
+            )
+        raise AssertionError(request)
+
+    server.call = fake_call
+
+    with caplog.at_level("WARNING"):
+        await server._configure_timing_key(
+            ConfigurationKey.heartbeat_interval, 60, connection
+        )
+
+    assert server._requires_reboot is True
+    assert sum(isinstance(item, call.GetConfiguration) for item in requests) == 2
+    assert "requires a charger reboot" in caplog.text
+
+
 async def test_stale_timing_setup_stops_before_writing_to_reconnected_session():
     """A read returning after reconnect cannot write or continue on the new socket."""
     settings = _legacy_settings(
@@ -340,6 +371,102 @@ async def test_post_connect_scheduling_is_coalesced_per_connection():
     await first
 
 
+async def test_replacement_connections_coalesce_behind_one_setup_runner():
+    """Repeated reconnects retain one runner and process only the latest session."""
+    server = BaseChargePoint.__new__(BaseChargePoint)
+    server._post_connect_task = None
+    server._post_connect_connection = None
+    server.post_connect_success = False
+    first_connection = object()
+    server._connection = first_connection
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+    server.hass = SimpleNamespace(async_create_task=asyncio.create_task)
+
+    async def cancellation_resistant_post_connect(connection=None):
+        calls.append(connection)
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    server.post_connect = cancellation_resistant_post_connect
+
+    tasks = [server._schedule_post_connect()]
+    await entered.wait()
+    latest_connection = first_connection
+    for _ in range(4):
+        latest_connection = object()
+        server._connection = latest_connection
+        tasks.append(server._schedule_post_connect())
+    await asyncio.sleep(0)
+
+    try:
+        assert len(set(tasks)) == 1
+        assert calls == [first_connection]
+    finally:
+        release.set()
+        await asyncio.gather(*set(tasks), return_exceptions=True)
+
+    assert calls == [first_connection, latest_connection]
+
+
+async def test_reconnect_cannot_replace_connection_during_timing_call():
+    """The session remains immutable from timing pre-check through send/response."""
+    from custom_components.ocpp.enums import HAChargerStatuses
+
+    old_connection = SimpleNamespace(state=None)
+    new_connection = SimpleNamespace(state=None)
+    server = _server(_legacy_settings(heartbeat_interval=60), old_connection)
+    server._ocpp_version = "1.6"
+    server.status = "ok"
+    server.post_connect_success = True
+    server.received_boot_notification = True
+    server.triggered_boot_notification = True
+    server._timing_connection_lock = asyncio.Lock()
+    server._metrics = {
+        (0, HAChargerStatuses.reconnects): SimpleNamespace(value=0),
+    }
+    entered_call = asyncio.Event()
+    release_call = asyncio.Event()
+    sent_on = []
+    server.stop = AsyncMock()
+
+    async def close_coroutines(tasks):
+        for coroutine in tasks:
+            coroutine.close()
+
+    async def paused_call(request):
+        entered_call.set()
+        await release_call.wait()
+        sent_on.append(server._connection)
+        return SimpleNamespace()
+
+    server.run = close_coroutines
+    server.call = paused_call
+
+    timing = asyncio.create_task(
+        server._timing_call(
+            call.GetConfiguration(key=[ConfigurationKey.heartbeat_interval]),
+            old_connection,
+        )
+    )
+    await entered_call.wait()
+    reconnect = asyncio.create_task(server.reconnect(new_connection))
+    await asyncio.sleep(0)
+
+    try:
+        assert server._connection is old_connection
+    finally:
+        release_call.set()
+        await asyncio.gather(timing, reconnect, return_exceptions=True)
+
+    assert sent_on == [old_connection]
+    assert server._connection is new_connection
+
+
 @pytest.mark.parametrize(
     ("ocpp_version", "expected_success"), [("1.6", False), ("2.0.1", True)]
 )
@@ -355,6 +482,7 @@ async def test_reconnect_rearms_timing_only_for_ocpp_16(ocpp_version, expected_s
     server.post_connect_success = True
     server.received_boot_notification = True
     server.triggered_boot_notification = True
+    server._timing_connection_lock = asyncio.Lock()
     server._metrics = {
         (0, HAChargerStatuses.reconnects): SimpleNamespace(value=0),
     }

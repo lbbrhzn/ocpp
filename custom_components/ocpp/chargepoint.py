@@ -277,6 +277,7 @@ class ChargePoint(cp):
         self.post_connect_success = False
         self._post_connect_task: asyncio.Task | None = None
         self._post_connect_connection = None
+        self._timing_connection_lock = asyncio.Lock()
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
         self._targeted_refresh_ready = False
@@ -415,15 +416,13 @@ class ChargePoint(cp):
     def _schedule_post_connect(self):
         """Coalesce post-connect setup for the currently owned connection."""
         connection = self._connection
+        self._post_connect_connection = connection
         task = self._post_connect_task
         if task is not None and not task.done():
-            if self._post_connect_connection is connection:
-                return task
-            task.cancel()
+            return task
 
-        task = self.hass.async_create_task(self.post_connect(connection))
+        task = self.hass.async_create_task(self._run_scheduled_post_connect())
         self._post_connect_task = task
-        self._post_connect_connection = connection
 
         def _clear(completed):
             if self._post_connect_task is completed:
@@ -432,6 +431,14 @@ class ChargePoint(cp):
 
         task.add_done_callback(_clear)
         return task
+
+    async def _run_scheduled_post_connect(self):
+        """Run at most one setup task while coalescing replacement sessions."""
+        while True:
+            connection = self._post_connect_connection
+            await self.post_connect(connection)
+            if self._post_connect_connection is connection:
+                return
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -637,13 +644,14 @@ class ChargePoint(cp):
         """Reconnect charge point."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
 
-        await self.stop()
-        self.status = STATE_OK
-        self._connection = connection
-        if self._ocpp_version == OcppVersion.V16:
-            self.post_connect_success = False
-            self.received_boot_notification = False
-            self.triggered_boot_notification = False
+        async with self._timing_connection_lock:
+            await self.stop()
+            self.status = STATE_OK
+            self._connection = connection
+            if self._ocpp_version == OcppVersion.V16:
+                self.post_connect_success = False
+                self.received_boot_notification = False
+                self.triggered_boot_notification = False
         self._metrics[(0, cstat.reconnects)].value += 1
         # post connect now handled on receiving boot notification or with backstop in monitor connection
         await self.run([super().start(), self.monitor_connection()])
