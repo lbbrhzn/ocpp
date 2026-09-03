@@ -479,7 +479,14 @@ class ChargePoint(cp):
         return _DEFAULT_LINE_VOLTAGE
 
     def _phase_count(self, conn_id: int) -> int:
-        """Count explicitly reported phases; conservatively default to one."""
+        """Count electrically active phases; conservatively default to one.
+
+        Some chargers publish placeholders for every phase even on a
+        single-phase installation.  Counting those keys turns a 16 A limit
+        into 16 A * 230 V * 3 for power-only chargers, although L2 and L3 are
+        explicitly reported as zero.  Count only phase values that carry a
+        meaningful voltage/current instead.
+        """
         measurands = (
             Measurand.voltage.value,
             Measurand.current_import.value,
@@ -490,9 +497,21 @@ class ChargePoint(cp):
             metric = self._lookup_metric(measurand, conn_id)
             if metric is None:
                 continue
-            keys = {str(k) for k in (metric.extra_attr or {})}
+            phase_values = {
+                str(key): value for key, value in (metric.extra_attr or {}).items()
+            }
+            threshold = 50.0 if measurand == Measurand.voltage.value else 0.1
             for group in _PHASE_KEY_GROUPS:
-                n = len(keys & group)
+                n = 0
+                for phase in group:
+                    if phase not in phase_values:
+                        continue
+                    try:
+                        value = abs(float(phase_values[phase]))
+                    except (TypeError, ValueError):
+                        continue
+                    if value >= threshold:
+                        n += 1
                 if n > best:
                     best = n
         return best if best > 0 else _DEFAULT_PHASES
