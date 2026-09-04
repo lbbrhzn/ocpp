@@ -353,7 +353,11 @@ async def test_remove_config_entry_device_removes_charge_point(
     )
     assert victim is not None
 
-    entity_before = live_entity(hass, MAX_CURRENT_EID, "number")
+    # The surviving sibling's entity is the reload probe: it must be a
+    # fresh object after the update-listener reload, while the removed
+    # charge point's entity must be gone.
+    sibling_eid = "number.test_cpid_9002_connector_1_maximum_current"
+    entity_before = live_entity(hass, sibling_eid, "number")
 
     assert await async_remove_config_entry_device(hass, config_entry, victim)
 
@@ -389,7 +393,9 @@ async def test_remove_config_entry_device_removes_charge_point(
         None,
     ) is not None
     assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
-    assert_rebuilt(entity_before, live_entity(hass, MAX_CURRENT_EID, "number"))
+    # The removed charge point's entity is gone; the sibling's was rebuilt.
+    assert live_entity(hass, MAX_CURRENT_EID, "number") is None
+    assert_rebuilt(entity_before, live_entity(hass, sibling_eid, "number"))
     assert_platforms_hold(hass, config_entry.entry_id)
 
     # Unload the entry and verify that the data has been removed
