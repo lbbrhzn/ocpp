@@ -27,6 +27,14 @@ OCPP integration can automatically detect supported measurands. However, some ch
 
 For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices.
 
+## Removing a charge point
+
+If you decommission a charger — or it was added by mistake — you can remove its device from Home Assistant: **Settings → Devices**, select the charger's device, open the menu (⋮) and choose **Delete**.
+
+Deleting the device removes that charge point from the integration's configuration together with all of its entities, and the integration reloads automatically. The central system itself, any other configured charge points and the websocket server are not affected; the central system device is protected and cannot be deleted this way.
+
+If a charger with the same OCPP charge point id connects again later — including one that is still powered on and reconnects after the reload — it is not re-added silently: the integration starts its normal discovery flow and asks you to configure it again.
+
 ## Understanding status
 
 Your charger exposes a connector status sensor:

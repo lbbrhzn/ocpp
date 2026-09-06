@@ -6,12 +6,18 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ocpp import CentralSystem, async_migrate_entry
+from custom_components.ocpp import (
+    CentralSystem,
+    async_migrate_entry,
+    async_remove_config_entry_device,
+)
 from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CPIDS,
+    CONF_CSID,
     CONF_ENABLE_HA_NOTIFICATIONS,
     DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DOMAIN,
@@ -299,6 +305,354 @@ async def test_migration_finds_a_non_slug_cpid(
     assert_platforms_hold(hass, config_entry.entry_id)
     migrated_key = next(iter(config_entry.data[CONF_CPIDS][0]))
     assert migrated_key == "CP_migration_2"
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_removes_charge_point(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """Removing a charge point device drops it from CONF_CPIDS and reloads.
+
+    Home Assistant calls this hook before removing the device from the
+    registry; it must strip the charge point from the entry data so the
+    reload triggered by the update listener does not re-create it, while
+    leaving every other charge point of the entry untouched.
+    """
+    data = deepcopy(MOCK_CONFIG_DATA_1)
+    first_cp_settings = next(iter(data[CONF_CPIDS][0].values()))
+    data[CONF_CPIDS].append(
+        {"CP_2": {**first_cp_settings, CONF_CPID: "test_cpid_9002"}}
+    )
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        entry_id="test_remove_cp",
+        title="test_remove_cp",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    victim = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, "CP_1_nosub")},
+                config_entry_id=config_entry.entry_id,
+            )
+        ),
+        None,
+    )
+    assert victim is not None
+
+    # The surviving sibling's entity is the reload probe: it must be a
+    # fresh object after the update-listener reload, while the removed
+    # charge point's entity must be gone.
+    sibling_eid = "number.test_cpid_9002_connector_1_maximum_current"
+    entity_before = live_entity(hass, sibling_eid, "number")
+
+    assert await async_remove_config_entry_device(hass, config_entry, victim)
+
+    # The removed charge point is gone from the entry data; its sibling
+    # survives with its settings intact.
+    remaining = config_entry.data[CONF_CPIDS]
+    assert [next(iter(item)) for item in remaining] == ["CP_2"]
+    assert remaining[0]["CP_2"][CONF_CPID] == "test_cpid_9002"
+
+    # Home Assistant removes the device from the registry after the hook
+    # returns True; mirror that, then let the update-listener reload run.
+    dr.async_remove_device(victim.id)
+    await hass.async_block_till_done()
+
+    # The reload must not re-create the removed device, and the entry
+    # stays loaded with its platforms intact.
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "CP_1_nosub")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is None
+    )
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "CP_2")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is not None
+    )
+    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+    # The removed charge point's entity is gone; the sibling's was rebuilt.
+    assert live_entity(hass, MAX_CURRENT_EID, "number") is None
+    assert_rebuilt(entity_before, live_entity(hass, sibling_eid, "number"))
+    assert_platforms_hold(hass, config_entry.entry_id)
+
+    # Unload the entry and verify that the data has been removed
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_refuses_central_system(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """The central system device must never be removable.
+
+    It matches no configured charge point, so the hook refuses and leaves
+    the entry data untouched - deleting it would orphan every charger.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=deepcopy(MOCK_CONFIG_DATA_1),
+        entry_id="test_remove_cs",
+        title="test_remove_cs",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    cs_device = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, "test_csid_1")},
+                config_entry_id=config_entry.entry_id,
+            )
+        ),
+        None,
+    )
+    assert cs_device is not None
+
+    assert not await async_remove_config_entry_device(hass, config_entry, cs_device)
+    assert "Refusing to remove device" in caplog.text
+
+    # Entry data and registry are untouched.
+    assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == [
+        "CP_1_nosub"
+    ]
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "test_csid_1")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is not None
+    )
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "CP_1_nosub")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is not None
+    )
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_refuses_central_system_collision(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """A device whose identifier collides with the central system is refused.
+
+    When CONF_CSID equals a charge point's cp_id, setup registers both
+    devices under that identifier and Home Assistant merges them into a
+    single device.  The hook must refuse to remove it: matching it as a
+    charge point would silently drop the entry from CONF_CPIDS.
+    """
+    data = deepcopy(MOCK_CONFIG_DATA_1)
+    # Collide the central system id with the charge point key.
+    data[CONF_CSID] = "CP_1_nosub"
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        entry_id="test_remove_collision",
+        title="test_remove_collision",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    victim = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, "CP_1_nosub")},
+                config_entry_id=config_entry.entry_id,
+            )
+        ),
+        None,
+    )
+    assert victim is not None
+
+    # The collision merged the central system and charge point devices:
+    # the main device carries both identifiers, so removing it as a
+    # charge point would silently drop the entry from CONF_CPIDS.
+    assert (DOMAIN, "test_cpid_9001") in victim.identifiers
+
+    assert not await async_remove_config_entry_device(hass, config_entry, victim)
+    assert "Refusing to remove device" in caplog.text
+
+    # Entry data and registry are untouched.
+    assert [next(iter(item)) for item in config_entry.data[CONF_CPIDS]] == [
+        "CP_1_nosub"
+    ]
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "CP_1_nosub")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is not None
+    )
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_last_charge_point(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """Removing the only charge point leaves a chargerless entry that still loads.
+
+    Setup skips forwarding platforms for an empty CONF_CPIDS and unload
+    mirrors that decision, so the entry must survive the reload without a
+    forward collision.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=deepcopy(MOCK_CONFIG_DATA_1),
+        entry_id="test_remove_last_cp",
+        title="test_remove_last_cp",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    victim = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, "CP_1_nosub")},
+                config_entry_id=config_entry.entry_id,
+            )
+        ),
+        None,
+    )
+    assert victim is not None
+
+    assert await async_remove_config_entry_device(hass, config_entry, victim)
+    assert config_entry.data[CONF_CPIDS] == []
+
+    dr.async_remove_device(victim.id)
+    await hass.async_block_till_done()
+
+    assert (
+        next(
+            iter(
+                dr.async_get_devices(
+                    identifiers={(DOMAIN, "CP_1_nosub")},
+                    config_entry_id=config_entry.entry_id,
+                )
+            ),
+            None,
+        )
+        is None
+    )
+    assert type(hass.data[DOMAIN][config_entry.entry_id]) is CentralSystem
+
+    # Unload must succeed for the never-forwarded platforms too.
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_remove_config_entry_device_refuses_unknown_device(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """An unknown device identifier must be refused.
+
+    The hook should log a warning and leave the entry untouched when the
+    device does not match any configured charge point.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=deepcopy(MOCK_CONFIG_DATA_1),
+        entry_id="test_remove_unknown",
+        title="test_remove_unknown",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Create a fake device entry with an identifier that does not match any
+    # configured charge point.
+    from homeassistant.helpers import device_registry as dr
+
+    device_registry = dr.async_get(hass)
+    fake_device = device_registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, "unknown_cp_id")},
+        name="Unknown",
+    )
+
+    data_before = deepcopy(dict(config_entry.data))
+
+    assert not await async_remove_config_entry_device(hass, config_entry, fake_device)
+    assert "matches no configured charge point" in caplog.text
+
+    # Entry data must be untouched in full, not just charge-point identifiers.
+    assert config_entry.data == data_before
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
