@@ -279,6 +279,8 @@ class ChargePoint(cp):
         # resolved; bounds the full-update fallback to the startup window.
         self._targeted_refresh_ready = False
         self.tasks = None
+        self._session = None
+        self._reconnect_token = None
         self._charger_reports_session_energy = False
 
         # Connector-aware, but backwards compatible:
@@ -575,8 +577,12 @@ class ChargePoint(cp):
     async def run(self, tasks):
         """Run a specified list of tasks."""
         self.tasks = [asyncio.ensure_future(task) for task in tasks]
+        # Capture ownership before yielding; a retiring run must never stop a
+        # replacement that has since overwritten self._connection/self.tasks.
+        self._session = None
+        session = self._get_session()
         try:
-            await asyncio.gather(*self.tasks)
+            await asyncio.gather(*session["tasks"])
         except TimeoutError:
             pass
         except WebSocketException as websocket_exception:
@@ -587,32 +593,148 @@ class ChargePoint(cp):
                 exc_info=True,
             )
         finally:
-            await self.stop()
+            await self._stop_session(session)
+
+    def _get_session(self):
+        """Snapshot the transport and task set, including stop before start."""
+        if self._session is None:
+            self._session = {
+                "connection": self._connection,
+                "tasks": tuple(self.tasks or ()),
+                "cleanup": None,
+            }
+        return self._session
+
+    async def _close_session(self, session, caller):
+        """Bound the aggregate close/child join; retain, never abandon, survivors."""
+        connection = session["connection"]
+        tasks = [task for task in session["tasks"] if task is not caller]
+
+        async def close():
+            try:
+                if connection.state is State.OPEN:
+                    _LOGGER.debug(f"Closing websocket to '{self.id}'")
+                    await connection.close()
+            finally:
+                for task in tasks:
+                    task.cancel()
+
+        close_task = asyncio.create_task(close())
+        retirement = session["retirement"] = (*session["tasks"], close_task)
+        if not hasattr(self, "_retirement_tasks"):
+            self._retirement_tasks = set()
+
+        def observed(task):
+            self._retirement_tasks.discard(task)
+            if not task.cancelled():
+                task.exception()
+
+        for task in retirement:
+            self._retirement_tasks.add(task)
+            task.add_done_callback(observed)
+        # asyncio.wait does not wait for cancellation acknowledgement. Unlike
+        # wait_for/gather, this deadline includes a hostile close implementation.
+        _, pending = await asyncio.wait(
+            [close_task, *tasks],
+            timeout=getattr(self, "_retirement_timeout", 10.0),
+        )
+        if pending:
+            session["fault"] = True
+            for task in pending:
+                task.cancel()
+            raise TimeoutError("OCPP session retirement timed out; replacement fenced")
+        close_task.result()
+
+    async def _stop_session(self, session):
+        """Share teardown and finish it even if a waiter is repeatedly cancelled."""
+        if session is self._session:
+            self.status = STATE_UNAVAILABLE
+        if session["cleanup"] is None:
+            session["cleanup"] = asyncio.create_task(
+                self._close_session(session, asyncio.current_task())
+            )
+            session["cleanup"].add_done_callback(
+                lambda task: None if task.cancelled() else task.exception()
+            )
+        elif asyncio.current_task() in session["tasks"]:
+            # An owned child's finally may call stop while the shared cleanup
+            # is gathering that child. Let it finish instead of forming a cycle;
+            # the external stopper / run finalizer still awaits full teardown.
+            return
+        cleanup = session["cleanup"]
+        cancelled = False
+        while not cleanup.done():
+            try:
+                # wait() leaves cleanup running when this waiter is cancelled.
+                # Unlike shield(), it doesn't install Python 3.14's late-error
+                # logger on cancellation; cleanup.result() below owns errors.
+                await asyncio.wait({cleanup})
+            except asyncio.CancelledError:
+                cancelled = True
+        # Observe errors even when cancellation raced completion. Teardown
+        # errors take precedence; otherwise preserve the waiter's cancellation.
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def stop(self):
-        """Close connection and cancel ongoing tasks."""
-        self.status = STATE_UNAVAILABLE
-        try:
-            if self._connection.state is State.OPEN:
-                _LOGGER.debug(f"Closing websocket to '{self.id}'")
-                await self._connection.close()
-        finally:
-            # Cancel regardless of how the close went: a close that raises or
-            # is cancelled must not leave monitor_connection running against a
-            # connection this charge point no longer owns.
-            for task in self.tasks or []:
-                task.cancel()
+        """Stop the current session and invalidate already pending reconnects."""
+        self._reconnect_token = None
+        await self._stop_session(self._get_session())
 
     async def reconnect(self, connection: ServerConnection):
-        """Reconnect charge point."""
+        """Retire the previous session before publishing the newest replacement."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
-
-        await self.stop()
-        self.status = STATE_OK
-        self._connection = connection
-        self._metrics[(0, cstat.reconnects)].value += 1
-        # post connect now handled on receiving boot notification or with backstop in monitor connection
-        await self.run([super().start(), self.monitor_connection()])
+        token = self._reconnect_token = object()
+        candidate = {"connection": connection, "tasks": (), "cleanup": None}
+        installed = False
+        try:
+            session = self._get_session()
+            cleanup = session["cleanup"]
+            if (
+                cleanup is not None
+                and cleanup.done()
+                and any(
+                    not task.done()
+                    for task in session.get("retirement", session["tasks"])
+                )
+            ):
+                session["fault"] = True
+                self.status = STATE_UNAVAILABLE
+                raise TimeoutError(
+                    "OCPP retirement survivors still active; replacement fenced"
+                )
+            if (
+                cleanup is not None
+                and cleanup.done()
+                and (cleanup.cancelled() or cleanup.exception() is not None)
+            ):
+                # A failed close must reject this attempt, not poison every
+                # future reconnect. Keep old waiters' teardown outcome intact.
+                self._session = None
+                session = self._get_session()
+            await self._stop_session(session)
+            if any(
+                not task.done() for task in session.get("retirement", session["tasks"])
+            ):
+                session["fault"] = True
+                raise TimeoutError(
+                    "OCPP retirement survivors still active; replacement fenced"
+                )
+            # No await between checking admission, installing, and run capturing
+            # its task set. An overlapping reconnect supersedes this candidate;
+            # an explicit stop invalidates every request already in progress.
+            if self._reconnect_token is not token:
+                return
+            self.status = STATE_OK
+            self._connection = connection
+            self._metrics[(0, cstat.reconnects)].value += 1
+            installed = True
+            # post connect remains handled by boot notification / monitor backstop
+            await self.run([super().start(), self.monitor_connection()])
+        finally:
+            if not installed:
+                await self._stop_session(candidate)
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str

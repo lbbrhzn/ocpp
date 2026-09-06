@@ -365,10 +365,8 @@ async def test_handle_call_wraps_notimplementederror_and_sends(hass):
 # stop() must always cancel tasks
 # -----------------------------
 def _mk_task():
-    """Return a task-like object that records cancellation."""
-    task = SimpleNamespace(cancelled=False)
-    task.cancel = lambda t=task: setattr(t, "cancelled", True)
-    return task
+    """Return real owned work so cancellation and settlement are exercised."""
+    return asyncio.create_task(asyncio.Event().wait())
 
 
 @pytest.mark.asyncio
@@ -392,7 +390,7 @@ async def test_stop_cancels_tasks_when_close_fails(hass):
     with pytest.raises(OSError):
         await cp.stop()
 
-    assert all(task.cancelled for task in cp.tasks), (
+    assert all(task.cancelled() for task in cp.tasks), (
         "tasks must be cancelled even when the websocket close raises"
     )
     assert cp.status == STATE_UNAVAILABLE
@@ -419,7 +417,7 @@ async def test_stop_cancels_tasks_when_close_is_cancelled(hass):
     with pytest.raises(asyncio.CancelledError):
         await cp.stop()
 
-    assert all(task.cancelled for task in cp.tasks), (
+    assert all(task.cancelled() for task in cp.tasks), (
         "tasks must be cancelled even when the websocket close is cancelled"
     )
     assert cp.status == STATE_UNAVAILABLE
@@ -452,4 +450,4 @@ async def test_stop_closes_connection_and_cancels_tasks(hass):
     await cp.stop()
 
     assert closed == [True]
-    assert all(task.cancelled for task in cp.tasks)
+    assert all(task.cancelled() for task in cp.tasks)
