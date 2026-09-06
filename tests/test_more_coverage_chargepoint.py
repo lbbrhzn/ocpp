@@ -164,6 +164,7 @@ async def test_run_handles_timeout_and_other_exception(
             stopped = {"count": 0}
 
             async def fake_stop_session(session):
+                """Count finalization of the runner's captured session."""
                 stopped["count"] += 1
 
             monkeypatch.setattr(srv, "_stop_session", fake_stop_session, raising=True)

@@ -58,11 +58,13 @@ async def lifecycle(hass, monkeypatch):
     releases = []
 
     async def receive(self):
+        """Signal runner admission and wait for its captured socket to end."""
         connection = self._connection
         started.setdefault(connection, asyncio.Event()).set()
         await connection.ended.wait()
 
     async def monitor():
+        """Keep the monitor bound to the socket captured at startup."""
         connection = cp._connection
         await connection.ended.wait()
 
@@ -70,16 +72,19 @@ async def lifecycle(hass, monkeypatch):
     monkeypatch.setattr(cp, "monitor_connection", monitor)
 
     def spawn(coro, name=None):
+        """Track a runner so fixture teardown can cancel and join it."""
         task = asyncio.create_task(coro, name=name)
         runners.append(task)
         return task
 
     def socket():
+        """Register a controllable socket for unconditional fixture cleanup."""
         connection = Socket()
         sockets.append(connection)
         return connection
 
     async def began(connection):
+        """Require the replacement's receive task to reach its startup barrier."""
         await ticks()
         assert connection in started, "replacement runner never started"
 
@@ -104,17 +109,17 @@ async def test_stale_finalizer_cannot_close_replacement(lifecycle, monkeypatch):
     old = cp._connection
     entered, release = asyncio.Event(), asyncio.Event()
     releases.append(release)
-    # Instrument the cleanup boundary on both upstream and fixed source.
-    method = "_stop_session" if hasattr(cp, "_stop_session") else "stop"
-    original = getattr(cp, method)
+    # Fail loudly if the session-owned cleanup boundary is removed or renamed.
+    original = cp._stop_session
 
     async def paused(*args):
+        """Hold only the old runner's finalizer until replacement admission."""
         if asyncio.current_task().get_name() == "old-run":
             entered.set()
             await release.wait()
         return await original(*args)
 
-    monkeypatch.setattr(cp, method, paused)
+    monkeypatch.setattr(cp, "_stop_session", paused)
     old_runner = spawn(cp.start(), "old-run")
     await began(old)
     new = socket()
@@ -132,6 +137,12 @@ async def test_stale_finalizer_cannot_close_replacement(lifecycle, monkeypatch):
     assert cp.status == "ok"
     assert not replacement.done()
     assert all(not task.done() for task in cp.tasks)
+
+
+async def test_retirement_tracking_exists_before_start(hass):
+    """A fresh owner exposes an empty survivor registry before any teardown."""
+    cp = _mk_cp(hass)
+    assert cp._retirement_tasks == set()
 
 
 async def test_clean_reconnect_and_stop(lifecycle):
@@ -229,6 +240,7 @@ async def test_hostile_child_is_retained_observed_and_fences_retry(lifecycle):
     releases.append(release)
 
     async def hostile():
+        """Resist retirement cancellation, then fail after explicit release."""
         entered.set()
         try:
             await asyncio.Event().wait()
@@ -264,15 +276,63 @@ async def test_hostile_child_is_retained_observed_and_fences_retry(lifecycle):
     await asyncio.gather(runner, return_exceptions=True)
     await ticks()
     assert child not in cp._retirement_tasks
-    # CPython's exception-observation flag: mere strong retention is insufficient.
-    assert not child._log_traceback
+    assert child.done()
+    error = child.exception()
+    assert isinstance(error, RuntimeError)
+    assert str(error) == "injected late survivor failure"
     new = socket()
     spawn(cp.reconnect(new))
     await began(new)
     assert new.state is State.OPEN
 
 
-@pytest.mark.parametrize("production_deadline", [False, True])
+async def test_retirement_callback_retrieves_late_failure(lifecycle):
+    """Prove owner observation without a gather or test retrieving the exception."""
+    cp, _, _, _, releases = lifecycle
+    entered, release = asyncio.Event(), asyncio.Event()
+    releases.append(release)
+    observations = []
+
+    class ObservedTask(asyncio.Task):
+        """Record calls to the public exception API without CPython internals."""
+
+        def exception(self):
+            """Record outcome retrieval by the owner before returning the error."""
+            error = super().exception()
+            observations.append(error)
+            return error
+
+    async def hostile():
+        """Fail only after retirement has timed out and abandoned its join."""
+        entered.set()
+        while not release.is_set():
+            with suppress(asyncio.CancelledError):
+                await release.wait()
+        raise RuntimeError("late callback failure")
+
+    child = ObservedTask(hostile())
+    session = {"connection": cp._connection, "tasks": (child,), "cleanup": None}
+    try:
+        await entered.wait()
+        with pytest.raises(TimeoutError):
+            await cp._close_session(session, asyncio.current_task())
+        assert child in cp._retirement_tasks
+        assert not observations
+        release.set()
+        await ticks()
+        assert child.done()
+        assert child not in cp._retirement_tasks
+        assert len(observations) == 1
+        assert isinstance(observations[0], RuntimeError)
+        assert str(observations[0]) == "late callback failure"
+    finally:
+        release.set()
+        await asyncio.gather(child, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "production_deadline", [False, pytest.param(True, marks=pytest.mark.slow)]
+)
 async def test_hostile_close_has_aggregate_deadline(lifecycle, production_deadline):
     """Even a close that suppresses cancellation is retained and bounded."""
     cp, socket, spawn, _, releases = lifecycle
@@ -284,6 +344,7 @@ async def test_hostile_close_has_aggregate_deadline(lifecycle, production_deadli
     budget = 10.0 if production_deadline else 0.05
 
     async def close():
+        """Keep the transport close pending despite repeated cancellation."""
         old.close_entered.set()
         while not release.is_set():
             with suppress(asyncio.CancelledError):
@@ -320,6 +381,7 @@ async def test_child_stop_cannot_self_join_or_publish_early(lifecycle, child_ini
     releases.append(release)
 
     async def child():
+        """Exercise child-initiated stop or joining an external teardown."""
         entered.set()
         if child_initiates:
             await cp.stop()
@@ -344,15 +406,57 @@ async def test_child_stop_cannot_self_join_or_publish_early(lifecycle, child_ini
         assert rejected.state is State.CLOSED
 
 
+async def test_reconnect_waiting_for_child_stop_rejects_surviving_initiator(lifecycle):
+    """Recheck child settlement after joining an in-progress successful cleanup."""
+    cp, socket, spawn, _, releases = lifecycle
+    old = cp._connection
+    old.close_release.clear()
+    stopped, release = asyncio.Event(), asyncio.Event()
+    releases.append(release)
+
+    async def child():
+        """Initiate teardown, then remain alive beyond its successful completion."""
+        await cp.stop()
+        stopped.set()
+        await release.wait()
+
+    runner = spawn(cp.run([child()]))
+    await asyncio.wait_for(old.close_entered.wait(), 1)
+    session = cp._session
+    cleanup = session["cleanup"]
+    assert not cleanup.done()
+    rejected = socket()
+    reconnect = spawn(cp.reconnect(rejected))
+    await ticks()
+    assert not reconnect.done()
+    assert session["cleanup"] is cleanup
+    old.close_release.set()
+    await asyncio.wait_for(stopped.wait(), 1)
+    with pytest.raises(TimeoutError, match="retirement survivors still active"):
+        await asyncio.wait_for(reconnect, 1)
+    assert cleanup.done() and cleanup.exception() is None
+    assert not cp.tasks[0].done()
+    assert cp.tasks[0] in cp._retirement_tasks
+    assert cp._connection is old
+    assert cp.status == STATE_UNAVAILABLE
+    assert cp._metrics[(0, cstat.reconnects)].value == 0
+    assert rejected.state is State.CLOSED
+    assert rejected.closes == 1
+    release.set()
+    await asyncio.wait_for(runner, 1)
+    await ticks()
+    assert not cp._retirement_tasks
+
+
 async def test_localhost_idle_reconnect_keeps_replacement_open(hass, socket_enabled):
-    """Exercise real recv, Ping/Pong and Close on loopback, without OCPP calls."""
+    """Exercise real recv, client Ping/Pong and Close without OCPP calls."""
     cp = _mk_cp(hass)
     cp.post_connect_success = True
-    cp.cs_settings.websocket_ping_interval = 0.01
-    cp.cs_settings.websocket_ping_timeout = 1
+
     accepted = asyncio.Queue()
 
     async def handler(connection):
+        """Expose each accepted loopback socket until its peer closes."""
         await accepted.put(connection)
         await connection.wait_closed()
 

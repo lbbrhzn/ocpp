@@ -281,6 +281,7 @@ class ChargePoint(cp):
         self.tasks = None
         self._session = None
         self._reconnect_token = None
+        self._retirement_tasks: set[asyncio.Task] = set()
         self._charger_reports_session_energy = False
 
         # Connector-aware, but backwards compatible:
@@ -611,6 +612,7 @@ class ChargePoint(cp):
         tasks = [task for task in session["tasks"] if task is not caller]
 
         async def close():
+            """Close this session's socket and cancel only its captured children."""
             try:
                 if connection.state is State.OPEN:
                     _LOGGER.debug(f"Closing websocket to '{self.id}'")
@@ -621,10 +623,9 @@ class ChargePoint(cp):
 
         close_task = asyncio.create_task(close())
         retirement = session["retirement"] = (*session["tasks"], close_task)
-        if not hasattr(self, "_retirement_tasks"):
-            self._retirement_tasks = set()
 
         def observed(task):
+            """Retrieve a retired task's outcome before releasing owner tracking."""
             self._retirement_tasks.discard(task)
             if not task.cancelled():
                 task.exception()
@@ -639,7 +640,6 @@ class ChargePoint(cp):
             timeout=getattr(self, "_retirement_timeout", 10.0),
         )
         if pending:
-            session["fault"] = True
             for task in pending:
                 task.cancel()
             raise TimeoutError("OCPP session retirement timed out; replacement fenced")
@@ -699,7 +699,6 @@ class ChargePoint(cp):
                     for task in session.get("retirement", session["tasks"])
                 )
             ):
-                session["fault"] = True
                 self.status = STATE_UNAVAILABLE
                 raise TimeoutError(
                     "OCPP retirement survivors still active; replacement fenced"
@@ -717,7 +716,6 @@ class ChargePoint(cp):
             if any(
                 not task.done() for task in session.get("retirement", session["tasks"])
             ):
-                session["fault"] = True
                 raise TimeoutError(
                     "OCPP retirement survivors still active; replacement fenced"
                 )

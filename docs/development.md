@@ -19,6 +19,10 @@ transports exercise delayed finalizers, overlapping reconnects, repeated cancell
 close failures, child-initiated stop, and cancellation-resistant cleanup. A separate
 loopback WebSocket test uses real receive, Ping/Pong and Close without a charger.
 One regression deliberately exercises the production 10-second retirement deadline.
+That parameter is marked `slow`, but remains included in default runs and CI.
+For quick local iteration only, add `-m 'not slow'`; run the unfiltered suite before
+submitting changes. The loopback Ping/Pong is client-initiated, not a test of the
+integration's delayed monitor ping loop.
 
 A runner's cleanup owns its captured socket and children, not a replacement's mutable
 fields. Retirement has one aggregate deadline for socket close and child settlement.
