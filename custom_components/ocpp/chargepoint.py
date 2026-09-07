@@ -694,15 +694,12 @@ class ChargePoint(cp):
         dr = device_registry.async_get(self.hass)
 
         identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
-        root_dev = next(
-            iter(
-                dr.async_get_devices(
-                    identifiers=identifiers,
-                    config_entry_id=self.entry.entry_id,
-                )
-            ),
-            None,
-        )
+        # `DeviceRegistry.async_get_devices()` does not exist; use the singular
+        # lookup, which matches any of the given identifiers, and keep the
+        # original config entry filter.
+        root_dev = dr.async_get_device(identifiers=identifiers)
+        if root_dev is not None and self.entry.entry_id not in root_dev.config_entries:
+            root_dev = None
         if root_dev is None:
             return
 
