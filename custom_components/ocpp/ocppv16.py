@@ -1,13 +1,17 @@
 """Representation of a OCPP 1.6 charging station."""
 
 from datetime import datetime, timedelta, UTC
+import hashlib
 import logging
+import math
 
 import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import UnitOfTime
+from homeassistant.helpers.storage import Store
+from homeassistant.util import slugify
 import voluptuous as vol
 from websockets.asyncio.server import ServerConnection
 
@@ -59,6 +63,7 @@ from .const import (
     ChargerSystemSettings,
     DEFAULT_MEASURAND,
     DEFAULT_MAX_CURRENT,
+    DOMAIN,
     HA_ENERGY_UNIT,
     MEASURANDS,
 )
@@ -89,6 +94,44 @@ _DEFAULT_PHASES = 1
 
 # Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
 _MAX_CONNECTORS = 10
+
+# Persisted transaction identity: the last id handed out (so ids stay unique
+# across restarts) and each running transaction's start time (so a session
+# adopted after a restart keeps its real duration). Best effort by design: a
+# handler never waits for the write, because charging must not depend on
+# Home Assistant's disk.
+_TX_STORE_VERSION = 1
+_TX_STORE_SAVE_DELAY = 1.0
+
+# Connector statuses that prove a transaction is running, and ones that prove
+# the connector has none. Anything else - Faulted, Preparing - says nothing
+# either way about a transaction the connector was holding.
+_TX_RUNNING_STATUSES = (
+    ChargePointStatus.charging.value,
+    ChargePointStatus.suspended_ev.value,
+    ChargePointStatus.suspended_evse.value,
+)
+_TX_ENDED_STATUSES = (
+    ChargePointStatus.available.value,
+    ChargePointStatus.finishing.value,
+    ChargePointStatus.unavailable.value,
+    ChargePointStatus.reserved.value,
+)
+# Ids adopted from a charger above this are outside the range the integration
+# allocates in, so there is nothing to stay clear of.
+_TX_ID_CEILING = 2**31 - 2
+
+
+def tx_store_key(entry_id: str, cp_id: str) -> str:
+    """Return the storage key for a charge point's transaction state.
+
+    slugify alone would collide: "CP-A", "CP_A" and "CP A" all become "cp_a",
+    and two chargers of one entry would then overwrite each other's state. A
+    digest of the raw id keeps the key readable and distinct.
+    """
+    digest = hashlib.sha256(cp_id.encode()).hexdigest()[:8]
+    return f"{DOMAIN}.v16_transactions.{entry_id}.{slugify(cp_id)}_{digest}"
+
 
 _AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
 _WATTS_UNIT_TOKENS = frozenset({"power", "w", "watt", "watts"})
@@ -140,6 +183,369 @@ class ChargePoint(cp):
         )
         self._active_tx: dict[int, int] = {}  # connector_id -> transaction_id
         self._ended_tx: dict[int, int] = {}  # connector_id -> last stopped tx
+        # Transaction identity and timing (#2123). The id was int(time.time())
+        # and doubled as the session start epoch: two connectors starting in
+        # the same second collided, and a charger-supplied id adopted by the
+        # self-heal path made the session timer count from a bogus reference.
+        self._last_tx_id: int = 0
+        self._tx_started_at: dict[int, float] = {}  # connector_id -> epoch
+        # Connectors whose transaction state could not be resolved from a
+        # StopTransaction: timer frozen, settled by the next status report.
+        self._tx_indeterminate: set[int] = set()
+        # connector_id -> (tx_id, started_at) as persisted before a restart
+        self._persisted_tx: dict[int, tuple[int, float]] = {}
+        # Payloads of StopTransactions that could not be attributed yet, each
+        # with the held connectors it could belong to. One is applied only when
+        # a settled connector is its sole possible owner; otherwise the final
+        # figures are omitted rather than knowingly cross-applied.
+        self._pending_stops: list[dict] = []
+        # Not atomic on purpose: Home Assistant's atomic writes fsync, which it
+        # documents as able to block for seconds, and this state is best
+        # effort - the loader tolerates a torn file and the clock still bounds
+        # new ids. An fsync per session on an SD-card install is not worth it.
+        self._tx_store = Store(
+            hass, _TX_STORE_VERSION, tx_store_key(entry.entry_id, id)
+        )
+        self._tx_store_load = None
+
+    # ------------------------------------------------------------------
+    # Transaction identity, timing and containment (#2123)
+    # ------------------------------------------------------------------
+
+    async def start(self):
+        """Start the charge point once its persisted transaction state is in.
+
+        The message loop would otherwise race the load: a StartTransaction
+        could allocate an id below the persisted ceiling, and MeterValues
+        could settle on an estimated start for the very session whose real
+        start was persisted. Writes stay asynchronous; only the one-time load
+        is waited for, and a broken store resolves immediately.
+        """
+        await self._async_tx_store_ready()
+        await super().start()
+
+    async def _async_tx_store_ready(self) -> None:
+        """Wait for the one-time load; safe to call repeatedly."""
+        self._ensure_tx_store_loaded()
+        await self._tx_store_load
+
+    def _ensure_tx_store_loaded(self) -> None:
+        """Start loading persisted transaction state once, without blocking.
+
+        start() awaits the load before the first message; handlers call this
+        as a backstop for paths that bypass start(), where the reconciliation
+        in the loader repairs anything decided before it finished.
+        """
+        if self._tx_store_load is None:
+            self._tx_store_load = self.hass.async_create_task(
+                self._async_load_tx_store()
+            )
+
+    async def _async_load_tx_store(self) -> None:
+        """Adopt the persisted last id and start times, tolerating any failure."""
+        try:
+            data = await self._tx_store.async_load()
+        except Exception as ex:  # a broken store must never stop charging
+            _LOGGER.warning("%s: could not load transaction state: %s", self.id, ex)
+            data = None
+        if not isinstance(data, dict):
+            return
+        try:
+            persisted_last = int(data.get("last_tx_id", 0) or 0)
+        except (TypeError, ValueError):
+            persisted_last = 0
+        # Never hand out an id at or below one returned before the restart.
+        self._last_tx_id = max(self._last_tx_id, persisted_last)
+        connectors = data.get("connectors", {})
+        if not isinstance(connectors, dict):
+            return
+        for key, item in connectors.items():
+            try:
+                conn, tx, started = (
+                    int(key),
+                    int(item["tx_id"]),
+                    float(item["started_at"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            self._note_transaction_id(tx)
+            # NaN and infinities parse as floats but would make every later
+            # session-time calculation raise; treat them as no start at all,
+            # which leaves the session with an estimated start instead.
+            if not math.isfinite(started) or started <= 0:
+                continue
+            self._persisted_tx[conn] = (tx, started)
+            # A session adopted before this finished settled on an estimated
+            # start; if it is the persisted one, give it its real start.
+            metric = self._metrics[(conn, csess.session_time)]
+            if self._active_tx.get(conn) == tx and metric.extra_attr.get(
+                "start_time_estimated"
+            ):
+                self._set_session_start(conn, started, estimated=False)
+
+    def _note_transaction_id(self, transaction_id) -> None:
+        """Keep allocations clear of an id that is live on some connector.
+
+        A transaction restored from Home Assistant state or adopted from
+        MeterValues is live but was not allocated here; without this, a
+        StartTransaction in the same second could hand out its id again.
+        """
+        try:
+            tx = int(transaction_id or 0)
+        except (TypeError, ValueError):
+            return
+        if 0 < tx <= _TX_ID_CEILING:
+            self._last_tx_id = max(self._last_tx_id, tx)
+
+    def _tx_store_snapshot(self) -> dict:
+        """Serialise what a restart needs: the last id and running sessions."""
+        return {
+            "last_tx_id": int(self._last_tx_id),
+            "connectors": {
+                str(conn): {
+                    "tx_id": int(tx),
+                    "started_at": float(self._tx_started_at[conn]),
+                }
+                for conn, tx in self._active_tx.items()
+                if tx and conn in self._tx_started_at
+            },
+        }
+
+    def _schedule_tx_store_save(self) -> None:
+        """Persist best-effort: coalesced, and never awaited by a handler."""
+        try:
+            self._tx_store.async_delay_save(
+                self._tx_store_snapshot, _TX_STORE_SAVE_DELAY
+            )
+        except Exception as ex:
+            _LOGGER.debug("%s: transaction state not persisted: %s", self.id, ex)
+
+    def _allocate_transaction_id(self) -> int:
+        """Return an id unique for this charge point, even within one second."""
+        tx_id = max(int(time.time()), self._last_tx_id + 1)
+        self._last_tx_id = tx_id
+        return tx_id
+
+    def _set_session_start(
+        self, connector_id: int, started_at: float, *, estimated: bool
+    ) -> None:
+        """Record when the connector's transaction began, flagging a guess."""
+        self._tx_started_at[connector_id] = started_at
+        metric = self._metrics[(connector_id, csess.session_time)]
+        metric.extra_attr = {"start_time_estimated": True} if estimated else {}
+
+    def _ensure_session_start(self, connector_id: int, transaction_id: int) -> float:
+        """Return the transaction's start time, adopting one if none is known.
+
+        A transaction learned from MeterValues rather than StartTransaction has
+        no recorded start. If it is the one persisted before a restart, its
+        real start is used; otherwise the first observation is, and the
+        session-time sensor says so with `start_time_estimated`.
+        """
+        started = self._tx_started_at.get(connector_id)
+        if started is not None:
+            return started
+        persisted = self._persisted_tx.get(connector_id)
+        if persisted is not None and persisted[0] == int(transaction_id or 0):
+            self._set_session_start(connector_id, persisted[1], estimated=False)
+        else:
+            self._set_session_start(connector_id, time.time(), estimated=True)
+        return self._tx_started_at[connector_id]
+
+    def _metric_transaction(self, connector_id: int) -> int:
+        """Return the transaction id the connector's metric holds, or 0."""
+        try:
+            return int(self._metrics[(connector_id, csess.transaction_id)].value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _live_connectors(self) -> list[int]:
+        """Return the connectors that have a transaction recorded anywhere."""
+        live = {c for c, tx in self._active_tx.items() if tx}
+        for conn in range(1, int(self.num_connectors or 1) + 1):
+            if self._metric_transaction(conn):
+                live.add(conn)
+        return sorted(live)
+
+    def _resolve_stop_connector(self, transaction_id: int) -> int | None:
+        """Find the connector a StopTransaction belongs to, or None if unsure.
+
+        Never guesses: applying a stop to the wrong connector ends a session
+        that is still running and files the other one's energy against it.
+        None means the caller must contain the uncertainty instead.
+        """
+        tx = int(transaction_id or 0)
+        by_map = [c for c, t in self._active_tx.items() if t and int(t) == tx]
+        if len(by_map) == 1:
+            return by_map[0]
+        if by_map:
+            return None  # duplicate ids on several connectors: cannot tell
+        by_metric = [
+            c
+            for c in range(1, int(self.num_connectors or 1) + 1)
+            if self._metric_transaction(c) == tx
+        ]
+        if len(by_metric) == 1:
+            return by_metric[0]
+        if by_metric:
+            return None
+        live = self._live_connectors()
+        if len(live) == 1:
+            _LOGGER.info(
+                "%s: StopTransaction for unrecorded id=%s applied to connector %s, "
+                "the only one with a transaction",
+                self.id,
+                tx,
+                live[0],
+            )
+            return live[0]
+        return None
+
+    def _clear_transaction_state(
+        self, connector_id: int, transaction_id: int, stop_reason=None
+    ) -> None:
+        """Forget the connector's transaction: the per-connector part of a stop."""
+        self._ended_tx[connector_id] = int(transaction_id or 0)
+        self._active_tx[connector_id] = 0
+        self._tx_started_at.pop(connector_id, None)
+        self._tx_indeterminate.discard(connector_id)
+        self._metrics[(connector_id, cstat.id_tag)].value = ""
+        self._metrics[(connector_id, csess.transaction_id)].value = 0
+        self._metrics[(connector_id, cstat.stop_reason)].value = stop_reason
+
+    def _apply_stop_energy(self, connector_id: int, meter_stop) -> None:
+        """Set the session's energy from the meter reading at its stop."""
+        ms_key = (connector_id, csess.meter_start)
+        if self._metrics[ms_key].value is None or self._charger_reports_session_energy:
+            return
+        try:
+            session_kwh = int(meter_stop) / 1000.0 - float(self._metrics[ms_key].value)
+        except Exception:
+            session_kwh = 0.0
+        self._metrics[(connector_id, csess.session_energy)].value = session_kwh
+
+    def _forget_stop_candidate(self, connector_id: int) -> None:
+        """Record that this connector can no longer own any pending stop.
+
+        Used when the connector proves its transaction is still running: the
+        stop was not its, so it is kept for the remaining candidates.
+        """
+        for pending in self._pending_stops:
+            pending["candidates"].discard(connector_id)
+        self._pending_stops = [p for p in self._pending_stops if p["candidates"]]
+
+    def _invalidate_pending_stops(self, connector_id: int, evidence: str) -> None:
+        """Drop every pending stop this connector could have owned.
+
+        Evidence that a candidate's transaction ended by another route - its
+        own StopTransaction, its closing values, a new transaction starting on
+        it - means an unattributed stop naming it may have been a malformed
+        duplicate for it, so no other candidate can be shown to own it.
+        """
+        remaining = [
+            p for p in self._pending_stops if connector_id not in p["candidates"]
+        ]
+        dropped = len(self._pending_stops) - len(remaining)
+        self._pending_stops = remaining
+        if dropped:
+            _LOGGER.warning(
+                "%s: connector %s %s; %s unattributed stop(s) that could have been "
+                "its can no longer be attributed and are discarded",
+                self.id,
+                connector_id,
+                evidence,
+                dropped,
+            )
+
+    def transaction_is_unsafe(self, connector_id: int | None) -> bool:
+        """Return whether a remote stop of this connector would be refused.
+
+        True while the connector is held, and also while it shares its id with
+        a held connector: the same rule stop_transaction applies, so an
+        entity gating on this never offers a stop that cannot be sent.
+        """
+        if connector_id is None:
+            return False
+        if connector_id in self._tx_indeterminate:
+            return True
+        tx = int(self._active_tx.get(connector_id, 0) or 0)
+        return bool(tx) and tx in self._unsafe_transaction_ids()
+
+    def _claim_pending_stop(self, connector_id: int) -> dict | None:
+        """Return the one unattributed stop this connector can own, if any.
+
+        A stop is applied only when the settled connector is a candidate for
+        exactly one pending stop and no other evidence has since shown how a
+        candidate's transaction ended. With two unattributed stops outstanding,
+        neither can be shown to belong to whichever connector reports idle
+        first, so both sessions keep their last periodic figures rather than
+        knowingly receiving another session's final reading and reason.
+        """
+        mine = [p for p in self._pending_stops if connector_id in p["candidates"]]
+        self._forget_stop_candidate(connector_id)
+        if len(mine) == 1:
+            self._pending_stops = [p for p in self._pending_stops if p is not mine[0]]
+            return mine[0]
+        if mine:
+            _LOGGER.warning(
+                "%s: %s unattributed stops could belong to connector %s; its final "
+                "energy and stop reason are not recorded",
+                self.id,
+                len(mine),
+                connector_id,
+            )
+        return None
+
+    def _unsafe_transaction_ids(self) -> set[int]:
+        """Return ids a held connector may still own; never stop these remotely."""
+        unsafe = set()
+        for conn in self._tx_indeterminate:
+            unsafe.add(int(self._active_tx.get(conn, 0) or 0))
+            unsafe.add(self._metric_transaction(conn))
+        unsafe.discard(0)
+        return unsafe
+
+    def _resolve_indeterminate(
+        self, connector_id: int, *, running: bool, claim: bool = True
+    ) -> None:
+        """Settle a connector whose transaction state was held as unresolved.
+
+        `claim` is True only for a status report saying the connector is idle
+        with nothing else known: then a pending stop may be attributed to it.
+        Any other evidence that its transaction ended (closing values) passes
+        claim=False, and the stops it could have owned are discarded instead.
+        """
+        if connector_id not in self._tx_indeterminate:
+            return
+        if running:
+            self._tx_indeterminate.discard(connector_id)
+            # It did not end, so no unattributed stop can be its.
+            self._forget_stop_candidate(connector_id)
+            _LOGGER.info(
+                "%s: connector %s is still in its transaction", self.id, connector_id
+            )
+        else:
+            _LOGGER.info(
+                "%s: connector %s reports no transaction; ending the one it held",
+                self.id,
+                connector_id,
+            )
+            if claim:
+                pending = self._claim_pending_stop(connector_id)
+            else:
+                pending = None
+                self._invalidate_pending_stops(
+                    connector_id, "sent its own closing meter values"
+                )
+            self._clear_transaction_state(
+                connector_id,
+                self._active_tx.get(connector_id, 0),
+                pending.get("reason") if pending else None,
+            )
+            if pending is not None:
+                self._apply_stop_energy(connector_id, pending.get("meter_stop"))
+            self._zero_flow_measurands(connector_id)
+        self._schedule_tx_store_save()
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger."""
@@ -655,10 +1061,14 @@ class ChargePoint(cp):
         # Target connector (default 1 if unspecified/0)
         target_cid = int(conn_id) if conn_id and int(conn_id) > 0 else 1
 
-        # Read active transaction on this connector
+        # Read active transaction on this connector. A held connector's id may
+        # belong to a transaction that has already ended, so no profile is
+        # bound to it until the charger settles the connector.
         try:
             active_tx_id = int(self._active_tx.get(target_cid, 0) or 0)
         except Exception:
+            active_tx_id = 0
+        if target_cid in self._tx_indeterminate:
             active_tx_id = 0
 
         txp_ok = False
@@ -821,7 +1231,11 @@ class ChargePoint(cp):
 
         If connector_id is provided, only stop the transaction running on that connector.
         """
-        # Resolve which transaction to stop
+        # Resolve which transaction to stop. An id a held connector may still
+        # own is never sent: with duplicate charger-supplied ids the stop could
+        # end another connector's running session, and this is the path the
+        # Charge Control switch takes, since it always names its connector.
+        unsafe = self._unsafe_transaction_ids()
         tx_id = 0
         if connector_id is not None:
             # Per-connector stop: do NOT fall back to other connectors
@@ -838,11 +1252,34 @@ class ChargePoint(cp):
                     n = 0
                 if n == 1 and int(connector_id) in (0, 1):
                     tx_id = int(self.active_transaction_id or 0)
+
+            if int(connector_id) in self._tx_indeterminate or tx_id in unsafe:
+                _LOGGER.warning(
+                    "%s: not stopping connector %s: its transaction state is "
+                    "unresolved until the charger reports its status",
+                    self.id,
+                    connector_id,
+                )
+                await self.notify_ha(
+                    f"Warning: Stop transaction on connector {connector_id} refused: "
+                    "transaction state unresolved"
+                )
+                return False
         else:
-            # Global stop (legacy behavior): stop the known active tx, or any active tx
-            tx_id = int(self.active_transaction_id or 0)
-            if tx_id == 0:
-                tx_id = next((int(v) for v in self._active_tx.values() if v), 0)
+            # Global stop (legacy behaviour): the known active transaction, or
+            # any active one - never an id a held connector may still own.
+            candidates = [
+                int(v)
+                for c, v in self._active_tx.items()
+                if v and c not in self._tx_indeterminate and int(v) not in unsafe
+            ]
+            legacy = int(self.active_transaction_id or 0)
+            if legacy in unsafe:
+                legacy = 0
+            if legacy and (legacy in candidates or not self._active_tx):
+                tx_id = legacy
+            else:
+                tx_id = candidates[0] if candidates else 0
 
         # Nothing to stop - succeed as no-op
         if tx_id == 0:
@@ -1054,8 +1491,18 @@ class ChargePoint(cp):
     def on_meter_values(self, connector_id: int, meter_value: dict, **kwargs):
         """Request handler for MeterValues Calls (multi-connector aware)."""
 
+        self._ensure_tx_store_loaded()
         transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
         tx_has_id: bool = transaction_id not in (None, 0)
+        if tx_has_id:
+            # Seeing an id, including on closing values, is enough to keep a
+            # later allocation clear of it; it does not make the id live.
+            self._note_transaction_id(transaction_id)
+        tx_end_context = any(
+            sampled_value.get(om.context) == ReadingContext.transaction_end.value
+            for bucket in meter_value
+            for sampled_value in bucket.get(om.sampled_value.name, [])
+        )
 
         # Restore missing per-connector meter_start / active_transaction_id from HA if possible.
         ms_key = (connector_id, csess.meter_start)
@@ -1083,7 +1530,12 @@ class ChargePoint(cp):
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id, connector_id)
             if value is None:
-                value = transaction_id if transaction_id else None
+                # A first sighting normally restores a transaction after a
+                # restart. Closing values are different: their id names a
+                # transaction that has already ended and must not revive it.
+                value = (
+                    transaction_id if transaction_id and not tx_end_context else None
+                )
             else:
                 try:
                     value = int(value)
@@ -1096,8 +1548,9 @@ class ChargePoint(cp):
                 except (ValueError, TypeError):
                     value = None
             self._metrics[tx_key].value = value
-            # Track active tx per connector
-            self._active_tx[connector_id] = value
+            # Track active tx per connector, and keep new ids clear of it
+            self._active_tx[connector_id] = int(value or 0)
+            self._note_transaction_id(value)
 
         if connector_id not in self._active_tx:
             try:
@@ -1112,13 +1565,20 @@ class ChargePoint(cp):
         # adopting their id below would revive the session that just ended. A
         # charger says so with a Transaction.End context, but OCPP leaves that
         # field optional, so fall back to the id of the transaction we last saw
-        # stop on this connector.
-        tx_ended: bool = bool(transaction_id) and (
-            transaction_id == int(self._ended_tx.get(connector_id, 0) or 0)
-            or any(
-                sampled_value.get(om.context) == ReadingContext.transaction_end.value
-                for bucket in meter_value
-                for sampled_value in bucket.get(om.sampled_value.name, [])
+        # stop on this connector. The context speaks only for the id it comes
+        # with: closing values for some other transaction, arriving while one
+        # is known on this connector, end nothing here.
+        current_tx = active_tx or recorded_tx
+        tx_ended: bool = (
+            bool(transaction_id)
+            and current_tx
+            in (
+                0,
+                transaction_id,
+            )
+            and (
+                transaction_id == int(self._ended_tx.get(connector_id, 0) or 0)
+                or tx_end_context
             )
         )
 
@@ -1128,6 +1588,12 @@ class ChargePoint(cp):
             self._active_tx[connector_id] = transaction_id
             active_tx = transaction_id
             recorded_tx = transaction_id
+            self._note_transaction_id(transaction_id)
+            # The charger chose this id, so it says nothing about when the
+            # session began; use the persisted start if this is the session
+            # that was running before the restart, else the first sighting.
+            self._ensure_session_start(connector_id, transaction_id)
+            self._schedule_tx_store_save()
             _LOGGER.debug(
                 "Restored transactionId=%s on conn %s from MeterValues.",
                 transaction_id,
@@ -1194,21 +1660,26 @@ class ChargePoint(cp):
         if tx_ended:
             self._zero_flow_measurands(connector_id)
 
-        if tx_has_id and transaction_matches:
-            try:
-                tx_start_epoch = float(self._metrics[tx_key].value)
-            except (TypeError, ValueError):
-                tx_start_epoch = time.time()
-            if tx_start_epoch > 0:
-                self._metrics[session_key].value = round(
-                    (time.time() - tx_start_epoch) / 60
-                )
-                self._metrics[session_key].unit = UnitOfTime.MINUTES
-            else:
-                _LOGGER.debug(
-                    "Skipping session time calc — invalid tx_start_epoch=%s",
-                    tx_start_epoch,
-                )
+        # A sample for the transaction a held connector still has settles it as
+        # running; the closing values of that transaction settle it as over.
+        if connector_id in self._tx_indeterminate and tx_has_id:
+            if tx_ended:
+                # The connector's own transaction is over, which is evidence
+                # of how it ended; an unattributed stop is not claimed here.
+                self._resolve_indeterminate(connector_id, running=False, claim=False)
+            elif transaction_matches:
+                self._resolve_indeterminate(connector_id, running=True)
+
+        # Session time comes from the recorded start, never from the id. The
+        # closing values leave the final figure alone. A held connector only
+        # gets here once the sample above has settled it as running, so its
+        # timer stands still until the charger says something about it.
+        if tx_has_id and transaction_matches and not tx_ended:
+            started_at = self._ensure_session_start(connector_id, transaction_id)
+            self._metrics[session_key].value = max(
+                0, round((time.time() - started_at) / 60)
+            )
+            self._metrics[session_key].unit = UnitOfTime.MINUTES
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.MeterValues()
 
@@ -1223,6 +1694,7 @@ class ChargePoint(cp):
         self.received_boot_notification = True
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
 
+        self._ensure_tx_store_loaded()
         self.hass.async_create_task(self.async_update_device_info_v16(kwargs))
         self._register_boot_notification()
         return resp
@@ -1251,6 +1723,15 @@ class ChargePoint(cp):
                 ChargePointStatus.suspended_evse.value,
             ):
                 self._zero_flow_measurands(connector_id)
+
+            # A connector held as unresolved after an unknown StopTransaction
+            # is settled only by a status that proves something: Faulted or
+            # Preparing leave it held rather than end a session that may be
+            # running.
+            if status in _TX_RUNNING_STATUSES:
+                self._resolve_indeterminate(connector_id, running=True)
+            elif status in _TX_ENDED_STATUSES:
+                self._resolve_indeterminate(connector_id, running=False)
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StatusNotification()
@@ -1297,12 +1778,21 @@ class ChargePoint(cp):
     def on_start_transaction(self, connector_id, id_tag, meter_start, **kwargs):
         """Handle a Start Transaction request."""
 
+        self._ensure_tx_store_loaded()
         auth_status = self.get_authorization_status(id_tag)
         if auth_status == AuthorizationStatus.accepted.value:
-            tx_id = int(time.time())
+            tx_id = self._allocate_transaction_id()
             self._ended_tx.pop(connector_id, None)
+            if connector_id in self._tx_indeterminate:
+                # Whatever it held has been superseded; a stop that named it
+                # can no longer be attributed to anyone.
+                self._tx_indeterminate.discard(connector_id)
+                self._invalidate_pending_stops(
+                    connector_id, "started a new transaction"
+                )
             self._active_tx[connector_id] = tx_id
             self.active_transaction_id = tx_id
+            self._set_session_start(connector_id, time.time(), estimated=False)
             self._metrics[(connector_id, cstat.id_tag)].value = id_tag
             self._metrics[(connector_id, cstat.stop_reason)].value = ""
             self._metrics[(connector_id, csess.transaction_id)].value = tx_id
@@ -1318,6 +1808,7 @@ class ChargePoint(cp):
             self._metrics[(connector_id, csess.session_energy)].value = 0.0
             self._metrics[(connector_id, csess.session_energy)].unit = HA_ENERGY_UNIT
 
+            self._schedule_tx_store_save()
             result = call_result.StartTransaction(
                 id_tag_info={om.status: AuthorizationStatus.accepted.value},
                 transaction_id=tx_id,
@@ -1335,41 +1826,59 @@ class ChargePoint(cp):
     def on_stop_transaction(self, meter_stop, timestamp, transaction_id, **kwargs):
         """Stop the current transaction (multi-connector)."""
 
-        # Resolve connector from active tx map
-        conn = next(
-            (c for c, tx in self._active_tx.items() if tx == transaction_id), None
-        )
+        self._ensure_tx_store_loaded()
+        conn = self._resolve_stop_connector(transaction_id)
         if conn is None:
-            _LOGGER.error(
-                "Stop transaction received for unknown transaction id=%i",
-                transaction_id,
-            )
-            conn = 1  # conservative fallback
-
-        # Reset active transaction (global + per-connector)
-        self._ended_tx[conn] = int(transaction_id or 0)
-        self._active_tx[conn] = 0
-        self.active_transaction_id = 0
-        self._metrics[(conn, cstat.id_tag)].value = ""
-        self._metrics[(conn, csess.transaction_id)].value = 0
-        self._metrics[(conn, cstat.stop_reason)].value = kwargs.get(
-            om.reason.name, None
-        )
-
-        ms_key = (conn, csess.meter_start)
-        if (
-            self._metrics[ms_key].value is not None
-            and not self._charger_reports_session_energy
-        ):
-            try:
-                session_kwh = int(meter_stop) / 1000.0 - float(
-                    self._metrics[ms_key].value
+            # Guessing here used to reset connector 1, ending a session that
+            # may still be running and filing another connector's energy
+            # against it. Hold every connector that could own this stop
+            # instead: its timer stops advancing and the next status report
+            # from the charger settles it.
+            live = self._live_connectors()
+            if live:
+                self._tx_indeterminate.update(live)
+                # Keep the stop's payload for whichever of them ended.
+                self._pending_stops.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "meter_stop": meter_stop,
+                        "reason": kwargs.get(om.reason.name, None),
+                        "candidates": set(live),
+                    }
                 )
-            except Exception:
-                session_kwh = 0.0
-            self._metrics[(conn, csess.session_energy)].value = session_kwh
+                _LOGGER.warning(
+                    "%s: StopTransaction for unknown transaction id=%s; cannot "
+                    "tell which of connectors %s it ends, holding their session "
+                    "state until the charger reports their status",
+                    self.id,
+                    transaction_id,
+                    live,
+                )
+            else:
+                _LOGGER.warning(
+                    "%s: StopTransaction for unknown transaction id=%s with no "
+                    "transaction recorded on any connector; nothing to end",
+                    self.id,
+                    transaction_id,
+                )
+            self.hass.async_create_task(self.update(self.settings.cpid))
+            return call_result.StopTransaction(
+                id_tag_info={om.status: AuthorizationStatus.accepted.value}
+            )
+
+        # Reset active transaction (global + per-connector). A stop that names
+        # this connector as a possible owner could have been a malformed
+        # duplicate of this one, so it is discarded rather than left for
+        # another connector to claim.
+        self._invalidate_pending_stops(conn, "received its own StopTransaction")
+        self._clear_transaction_state(
+            conn, transaction_id, kwargs.get(om.reason.name, None)
+        )
+        self.active_transaction_id = 0
+        self._apply_stop_energy(conn, meter_stop)
 
         self._zero_flow_measurands(conn)
+        self._schedule_tx_store_save()
 
         self.hass.async_create_task(self.update(self.settings.cpid))
         return call_result.StopTransaction(

@@ -478,6 +478,27 @@ class CentralSystem:
 
         return None
 
+    def is_transaction_indeterminate(
+        self, id: str, connector_id: int | None = None
+    ) -> bool:
+        """Return whether a connector's transaction state is held as unresolved.
+
+        An OCPP 1.6 charge point holds a connector when a StopTransaction
+        could not be attributed to it with certainty; controls that act on
+        the connector's transaction stay unavailable until the charger's
+        next status report settles it.
+        """
+        cp_id = self.cpids.get(id, id)
+        cp = self.charge_points.get(cp_id)
+        unsafe = getattr(cp, "transaction_is_unsafe", None)
+        if unsafe is None:
+            held = getattr(cp, "_tx_indeterminate", None)
+            return bool(held) and connector_id in held
+        # The same rule stop_transaction applies: held, or sharing its id
+        # with a held connector, so the entity never offers a stop that the
+        # charge point would refuse.
+        return bool(unsafe(connector_id))
+
     def get_availability_status(self, id: str):
         """Return the status that drives the charger availability switch.
 
