@@ -126,9 +126,23 @@ charger connects and completes its setup, so reconnecting the charger is
 usually enough. If the charger cannot complete setup, removing the
 integration and adding it back also clears it.
 
-Once the connector entities are recreated, the session sensors regain their
-units and Home Assistant may raise a one-time `units_changed` repair for
-`sensor.<cpid>_time_session`. Choose **"Update the unit of the historic
-statistic values, without converting"** to keep the existing history: the values
-were always minutes, only the unit label was missing while the connector slots
-were uninitialised.
+Session time unit repair
+------------------------
+
+`Time Session` is measured in minutes (`min`). Its unit stays the same during
+startup, disconnection and integration reloads. When the charger is offline,
+the sensor is `unavailable` and retains its unit.
+
+Older versions could lose the unit while live charger metrics were missing,
+including before connector slots were initialised. If the stored statistics
+have a blank unit, Home Assistant raises a `units_changed` warning for
+`sensor.<cpid>_time_session` (or its per-connector equivalent) once the sensor
+has a numeric value, possibly only after the next charging session.
+
+The Repairs entry has no fix button; open **Developer tools → Statistics** to
+apply the repair. Until the historical unit is corrected, Home Assistant does
+not compile new long-term statistics for this sensor. When it proposes changing
+the historical unit **from blank to `min`**, choose **"Update the unit of the
+historic statistic values, without converting"** to retain the history: the
+values were already minutes. Do not change `min` to a blank unit or delete the
+history to work around this issue.
