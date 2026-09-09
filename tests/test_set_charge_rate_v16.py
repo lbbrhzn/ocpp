@@ -98,6 +98,43 @@ async def test_custom_profile_path_exception_triggers_notify_and_returns_false(
 
 
 @pytest.mark.asyncio
+async def test_custom_profile_rejected_status_returns_false_without_notify(
+    cp_v16, monkeypatch, caplog
+):
+    """A custom profile the charger answers Rejected returns False and logs, without a notification."""
+    notices = []
+
+    async def fake_notify(msg, title="Ocpp integration"):
+        notices.append(msg)
+        return True
+
+    async def fake_call(_req):
+        return SimpleNamespace(status=ChargingProfileStatus.rejected.value)
+
+    async def fake_get_conf(_key):
+        pytest.fail("get_configuration should not be called for custom profile")
+
+    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+
+    profile = {
+        "chargingProfileId": 123,
+        "stackLevel": 1,
+        "chargingProfileKind": ChargingProfileKindType.relative.value,
+        "chargingProfilePurpose": ChargingProfilePurposeType.charge_point_max_profile.value,
+        "chargingSchedule": {
+            "chargingRateUnit": ChargingRateUnitType.amps.value,
+            "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16}],
+        },
+    }
+
+    assert await cp_v16.set_charge_rate(profile=profile, conn_id=2) is False
+    assert notices == []
+    assert "Custom SetChargingProfile rejected: Rejected" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_smart_charging_not_supported_returns_false_no_notify(
     cp_v16, monkeypatch
 ):

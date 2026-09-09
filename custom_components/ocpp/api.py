@@ -736,13 +736,13 @@ class CentralSystem:
     async def set_max_charge_rate_amps(
         self, id: str, value: float, connector_id: int = 0
     ):
-        """Set the maximum charge rate in amps."""
+        """Set the station maximum in amps; connector_id is retained but unused."""
         # allow id to be either cpid or cp_id
         cp_id = self.cpids.get(id, id)
 
         if cp_id in self.charge_points:
-            return await self.charge_points[cp_id].set_charge_rate(
-                limit_amps=value, conn_id=connector_id
+            return await self.charge_points[cp_id].set_station_charge_rate(
+                limit_amps=value
             )
         return False
 

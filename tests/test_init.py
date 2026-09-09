@@ -39,7 +39,7 @@ from .lifecycle_asserts import (
 # Both single- and multi-connector mocks configure cpid "test_cpid_9001"
 # with at least one connector, so this entity exists in each lifecycle
 # test and its identity across a reload is the load-bearing assertion.
-MAX_CURRENT_EID = "number.test_cpid_9001_connector_1_maximum_current"
+MAX_CURRENT_EID = "number.test_cpid_9001_maximum_current"
 
 
 # We can pass fixtures as defined in conftest.py to tell pytest to use the fixture
@@ -356,7 +356,7 @@ async def test_remove_config_entry_device_removes_charge_point(
     # The surviving sibling's entity is the reload probe: it must be a
     # fresh object after the update-listener reload, while the removed
     # charge point's entity must be gone.
-    sibling_eid = "number.test_cpid_9002_connector_1_maximum_current"
+    sibling_eid = "number.test_cpid_9002_maximum_current"
     entity_before = live_entity(hass, sibling_eid, "number")
 
     assert await async_remove_config_entry_device(hass, config_entry, victim)

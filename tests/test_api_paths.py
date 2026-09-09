@@ -40,6 +40,11 @@ class DummyCP:
         # service call sinks
         self.calls = []
 
+    async def set_station_charge_rate(self, **kw):
+        """Record the station-only number route."""
+        self.calls.append(("set_station_charge_rate", kw))
+        return True
+
     # ---- services the API calls into ----
     async def set_charge_rate(self, **kw):
         """Set charge rate."""
@@ -385,7 +390,7 @@ async def test_setters_when_missing_and_present(hass):
     # present -> routes and returns True
     cp = _install_dummy_cp(cs)
     assert await cs.set_max_charge_rate_amps("test_cpid", 16.0, connector_id=2) is True
-    assert ("set_charge_rate", {"limit_amps": 16.0, "conn_id": 2}) in cp.calls
+    assert cp.calls == [("set_station_charge_rate", {"limit_amps": 16.0})]
 
     # set_charger_state branches
     await cs.set_charger_state(

@@ -81,7 +81,7 @@ async def test_reload_with_charger_offline_keeps_every_platform(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert_platforms_hold(hass, entry.entry_id)
-    eid = "number.test_cpid_9001_connector_1_maximum_current"
+    eid = "number.test_cpid_9001_maximum_current"
     entity_before = live_entity(hass, eid, "number")
     assert entity_before is not None
 
@@ -115,7 +115,7 @@ async def test_a_second_offline_reload_is_also_clean(hass, bypass_websockets, ca
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    eid = "number.test_cpid_9001_connector_1_maximum_current"
+    eid = "number.test_cpid_9001_maximum_current"
     entity_start = live_entity(hass, eid, "number")
 
     assert await hass.config_entries.async_reload(entry.entry_id)
