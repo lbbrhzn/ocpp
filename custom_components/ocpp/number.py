@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import re
 from typing import Final
 
 from homeassistant.components.number import (
@@ -25,10 +26,8 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_MAX_CURRENT,
-    CONF_NUM_CONNECTORS,
     DATA_UPDATED,
     DEFAULT_MAX_CURRENT,
-    DEFAULT_NUM_CONNECTORS,
     DOMAIN,
     ICON,
 )
@@ -70,24 +69,23 @@ async def async_setup_entry(hass, entry, async_add_devices):
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
 
-        num_connectors = 1
-        for item in entry.data.get(CONF_CPIDS, []):
-            for _, cfg in item.items():
-                if cfg.get(CONF_CPID) == cpid:
-                    num_connectors = int(
-                        cfg.get(CONF_NUM_CONNECTORS, DEFAULT_NUM_CONNECTORS)
-                    )
-                    break
-            else:
-                continue
-            break
-
-        if num_connectors > 1:
-            for desc in NUMBERS:
-                uid_flat = ".".join([NUMBER_DOMAIN, DOMAIN, cpid, desc.key])
-                stale_eid = ent_reg.async_get_entity_id(NUMBER_DOMAIN, DOMAIN, uid_flat)
-                if stale_eid:
-                    ent_reg.async_remove(stale_eid)
+        legacy_uid = re.compile(
+            rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn\d+\.maximum_current"
+        )
+        for registry_entry in er.async_entries_for_config_entry(
+            ent_reg, entry.entry_id
+        ):
+            if (
+                registry_entry.platform == DOMAIN
+                and registry_entry.domain == NUMBER_DOMAIN
+                and legacy_uid.fullmatch(registry_entry.unique_id)
+            ):
+                _LOGGER.info(
+                    "Removing stale connector-level entity %s; "
+                    "Maximum Current is station-wide on this charger",
+                    registry_entry.entity_id,
+                )
+                ent_reg.async_remove(registry_entry.entity_id)
 
         for desc in NUMBERS:
             if desc.key == "maximum_current":
@@ -100,47 +98,28 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 ent_initial = desc.initial_value
                 ent_max = desc.native_max_value
 
-            if num_connectors > 1:
-                for conn_id in range(1, num_connectors + 1):
-                    entities.append(
-                        ChargePointNumber(
-                            hass=hass,
-                            central_system=central_system,
-                            cpid=cpid,
-                            description=OcppNumberDescription(
-                                key=desc.key,
-                                name=desc.name,
-                                icon=desc.icon,
-                                initial_value=ent_initial,
-                                native_min_value=desc.native_min_value,
-                                native_max_value=ent_max,
-                                native_step=desc.native_step,
-                                native_unit_of_measurement=desc.native_unit_of_measurement,
-                            ),
-                            connector_id=conn_id,
-                            op_connector_id=conn_id,
-                        )
-                    )
-            else:
-                entities.append(
-                    ChargePointNumber(
-                        hass=hass,
-                        central_system=central_system,
-                        cpid=cpid,
-                        description=OcppNumberDescription(
-                            key=desc.key,
-                            name=desc.name,
-                            icon=desc.icon,
-                            initial_value=ent_initial,
-                            native_min_value=desc.native_min_value,
-                            native_max_value=ent_max,
-                            native_step=desc.native_step,
-                            native_unit_of_measurement=desc.native_unit_of_measurement,
-                        ),
-                        connector_id=None,
-                        op_connector_id=0,
-                    )
+            uid_flat = ".".join([NUMBER_DOMAIN, DOMAIN, cpid, desc.key])
+            fresh = ent_reg.async_get_entity_id(NUMBER_DOMAIN, DOMAIN, uid_flat) is None
+            entities.append(
+                ChargePointNumber(
+                    hass=hass,
+                    central_system=central_system,
+                    cpid=cpid,
+                    description=OcppNumberDescription(
+                        key=desc.key,
+                        name=desc.name,
+                        icon=desc.icon,
+                        initial_value=ent_initial,
+                        native_min_value=desc.native_min_value,
+                        native_max_value=ent_max,
+                        native_step=desc.native_step,
+                        native_unit_of_measurement=desc.native_unit_of_measurement,
+                    ),
+                    connector_id=None,
+                    op_connector_id=0,
+                    fresh=fresh,
                 )
+            )
 
     async_add_devices(entities, False)
 
@@ -159,12 +138,14 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         description: OcppNumberDescription,
         connector_id: int | None = None,
         op_connector_id: int | None = None,
+        fresh: bool = False,
     ):
         """Initialize a Number instance."""
         self.cpid = cpid
         self._hass = hass
         self.central_system = central_system
         self.entity_description = description
+        self._fresh = fresh
         self.connector_id = connector_id
         self._op_connector_id = (
             op_connector_id if op_connector_id is not None else (connector_id or 1)
@@ -213,7 +194,9 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
         await super().async_added_to_hass()
-        if restored := await self.async_get_last_number_data():
+        # Restore data is keyed by entity id, not unique id. A new station
+        # entity must not inherit an old connector slider's renamed state.
+        if not self._fresh and (restored := await self.async_get_last_number_data()):
             self._attr_native_value = restored.native_value
             # What the previous session last settled on. The charger keeps
             # its charging profile across our restarts, so this is the best
@@ -249,7 +232,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         )
 
     async def async_set_native_value(self, value):
-        """Set new value for max current (station-wide when _op_connector_id==0, otherwise per-connector).
+        """Set the station-wide maximum current.
 
         - Optimistic UI: move the slider immediately so it tracks the drag.
         - On refusal, put it back and raise: a current limit that reads as
@@ -264,9 +247,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         self.async_write_ha_state()
 
         try:
-            ok = await self.central_system.set_max_charge_rate_amps(
-                self.cpid, target, connector_id=self._op_connector_id
-            )
+            ok = await self.central_system.set_max_charge_rate_amps(self.cpid, target)
         except HomeAssistantError:
             # set_charge_rate raises this for a rejected profile, and its
             # message carries the charger's own status_info - the only

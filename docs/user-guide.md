@@ -25,7 +25,7 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 
 OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices).
 
-For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices.
+For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices. Maximum Current is station-wide: every charger has one slider on the charger device, with default entity id `number.<cpid>_maximum_current`, regardless of its connector count. See the Maximum Current upgrade notes in the [charge automation guide](Charge_automation) for changes to existing entities and charger compatibility.
 
 ## Removing a charge point
 
@@ -92,7 +92,7 @@ If your integration shows extra attributes on the connector status sensor like a
 
 * `Charge Control`
 * `Availability` (must be set to ON before EV is plugged in)
-* `Maximum Current` (sets maximum charging current available)
+* `Maximum Current` (sets the station-wide maximum charging current available)
 * `Reset`
 
 ## Useful Entities for ABB Terra AC
@@ -122,7 +122,7 @@ If your integration shows extra attributes on the connector status sensor like a
 
 * `Charge Control`
 * `Availability` (OFF when something causes a problem or during a reboot etc)
-* `Maximum Current` (sets maximum charging current available)
+* `Maximum Current` (sets the station-wide maximum charging current available)
 * `Reset`
 
 ## Useful Entities and Workarounds for United Chargers Grizzl-E
@@ -147,7 +147,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 
 * `Charge Control` (User switches to ON to start charging session, once charger is in Preparing state. Can be automated in HA - see this [comment in Issue #442](https://github.com/lbbrhzn/ocpp/issues/442#issuecomment-1295865797) for details)
 * `Availability` (ON when charger is idle. OFF during active charging session, or when something causes a problem)
-* `Maximum Current` (sets maximum charging current available. Reverts to value set by charger's internal DIP switch following reboots; tweak slider to reload)
+* `Maximum Current` (sets the station-wide maximum charging current available. Reverts to value set by charger's internal DIP switch following reboots; tweak slider to reload)
 
 ## Useful Entities for Vestel EVC-04 Wallboxes
 
@@ -168,7 +168,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 
 * `Charge Control`
 * `Availability` (must be set to ON before EV is plugged in)
-* `Maximum Current` (sets maximum charging current available)
+* `Maximum Current` (sets the station-wide maximum charging current available)
 * `Reset`
 
 ## Useful Entities for Rolec EVO

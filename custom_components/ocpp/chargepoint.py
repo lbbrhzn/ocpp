@@ -422,6 +422,10 @@ class ChargePoint(cp):
         """Clear all charging profiles."""
         pass
 
+    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+        """Set the station-wide maximum current without transaction fallbacks."""
+        raise NotImplementedError
+
     async def set_charge_rate(
         self,
         limit_amps: int | float | None = None,

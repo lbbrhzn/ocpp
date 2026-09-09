@@ -690,6 +690,10 @@ class ChargePoint(cp):
             ClearChargingProfileStatusEnumType.unknown,
         )
 
+    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+        """Use the managed station limit for the Maximum Current entity."""
+        return await self.set_charge_rate(limit_amps=limit_amps, conn_id=0)
+
     async def set_charge_rate(
         self,
         limit_amps: int | None = None,

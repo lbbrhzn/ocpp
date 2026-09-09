@@ -9,6 +9,7 @@ import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import UnitOfTime
 from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
@@ -935,34 +936,13 @@ class ChargePoint(cp):
             return float(_DEFAULT_LIMIT_AMPS)
         return round(watts / denom, 1)
 
-    async def set_charge_rate(
+    async def _resolve_charge_rate(
         self,
-        limit_amps: int | float | None = None,
-        limit_watts: int | float | None = None,
-        conn_id: int = 0,
-        profile: dict | None = None,
-    ) -> bool:
-        """Set charge rate."""
-        if profile is not None:
-            try:
-                req = call.SetChargingProfile(
-                    connector_id=int(conn_id), cs_charging_profiles=profile
-                )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    return True
-                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
-            except Exception as ex:
-                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
-                await self.notify_ha(
-                    "Warning: Set charging profile failed with response Exception"
-                )
-            return False
-
-        if not (int(self.supported_features or 0) & prof.SMART):
-            _LOGGER.info("Smart charging is not supported by this charger")
-            return False
-
+        limit_amps: int | float | None,
+        limit_watts: int | float | None,
+        conn_id: int,
+    ) -> tuple[str, float, int]:
+        """Resolve units, electrical conversion and stack level for managed limits."""
         # Determine allowed unit (default to Amps if not reported)
         units_resp = await self.get_configuration(
             ckey.charging_schedule_allowed_charging_rate_unit
@@ -1014,6 +994,92 @@ class ChargePoint(cp):
         except Exception:
             stack_level = 1
 
+        return units_value, limit_value, stack_level
+
+    @staticmethod
+    def _station_charge_rate_request(
+        units_value: str, limit_value: float, stack_level: int
+    ) -> call.SetChargingProfile:
+        """Build the shared station ceiling used by the slider and action."""
+        return call.SetChargingProfile(
+            connector_id=0,
+            cs_charging_profiles={
+                om.charging_profile_id: 1000,
+                om.stack_level: stack_level,
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
+                om.charging_schedule: {
+                    om.charging_rate_unit: units_value,
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: limit_value}
+                    ],
+                },
+            },
+        )
+
+    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+        """Set only a station ceiling; transaction defaults cannot replace one."""
+        try:
+            if not (int(self.supported_features or 0) & prof.SMART):
+                raise HomeAssistantError(
+                    "Smart charging is not supported by this charger"
+                )
+            units, limit, stack_level = await self._resolve_charge_rate(
+                limit_amps, None, 0
+            )
+            req = self._station_charge_rate_request(units, limit, stack_level)
+            # _get_specific_response already raises CALLERRORs. Be explicit
+            # here so preserving the charger's reason does not rely on it.
+            resp = await self.call(req, suppress=False)
+            status = resp.status
+        except Exception as ex:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_variables_error",
+                translation_placeholders={"message": str(ex)},
+            ) from ex
+        if status != ChargingProfileStatus.accepted:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_variables_error",
+                translation_placeholders={
+                    "message": f"ChargePointMaxProfile: {status}"
+                },
+            )
+        return True
+
+    async def set_charge_rate(
+        self,
+        limit_amps: int | float | None = None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+        profile: dict | None = None,
+    ) -> bool:
+        """Set charge rate."""
+        if profile is not None:
+            try:
+                req = call.SetChargingProfile(
+                    connector_id=int(conn_id), cs_charging_profiles=profile
+                )
+                resp = await self.call(req)
+                if resp.status == ChargingProfileStatus.accepted:
+                    return True
+                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
+            except Exception as ex:
+                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
+                await self.notify_ha(
+                    "Warning: Set charging profile failed with response Exception"
+                )
+            return False
+
+        if not (int(self.supported_features or 0) & prof.SMART):
+            _LOGGER.info("Smart charging is not supported by this charger")
+            return False
+
+        units_value, limit_value, stack_level = await self._resolve_charge_rate(
+            limit_amps, limit_watts, conn_id
+        )
+
         # Helper to build a simple relative schedule with one period
         def _mk_schedule(_units: str, _limit: float) -> dict:
             return {
@@ -1036,17 +1102,8 @@ class ChargePoint(cp):
 
         # Try ChargePointMaxProfile (connectorId = 0)
         try:
-            req = call.SetChargingProfile(
-                connector_id=0,
-                cs_charging_profiles={
-                    om.charging_profile_id: _profile_id(
-                        ChargingProfilePurposeType.charge_point_max_profile.value, 0
-                    ),
-                    om.stack_level: stack_level,
-                    om.charging_profile_kind: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
-                    om.charging_schedule: _mk_schedule(units_value, limit_value),
-                },
+            req = self._station_charge_rate_request(
+                units_value, limit_value, stack_level
             )
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
