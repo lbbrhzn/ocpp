@@ -10,6 +10,7 @@ They avoid any parallel/dummy implementation of ChargePoint.
 """
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from ocpp.v16.enums import (
@@ -34,6 +35,7 @@ from custom_components.ocpp.ocppv16 import (
     ChargePoint as ChargePointv16,
     _allowed_charging_rate_units,
 )
+from custom_components.ocpp.session import SessionToken
 
 
 @pytest.fixture
@@ -234,6 +236,41 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
     assert ok is True
     assert notices == []
+
+
+@pytest.mark.asyncio
+async def test_configured_txprofile_fallback_is_adopted_by_session_controller(
+    cp_v16, monkeypatch
+):
+    """The legacy action cannot install an untracked transaction profile."""
+    token = SessionToken(4, 73, 2, 2)
+    controller = SimpleNamespace(
+        current_token=lambda connector: token if connector == 2 else None,
+        async_set_limit=AsyncMock(),
+    )
+    cp_v16.session_controller = controller
+
+    async def fake_get_conf(key: str):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "3"
+        pytest.fail(f"Unexpected get_configuration key: {key}")
+
+    async def fake_call(req):
+        purpose = req.cs_charging_profiles["chargingProfilePurpose"]
+        if purpose == ChargingProfilePurposeType.charge_point_max_profile.value:
+            return SimpleNamespace(status=ChargingProfileStatus.rejected)
+        assert purpose == ChargingProfilePurposeType.tx_default_profile.value
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+
+    assert await cp_v16.set_charge_rate(limit_amps=12, conn_id=2) is True
+    controller.async_set_limit.assert_awaited_once_with(
+        2, token, 12.0, source_watts=None
+    )
 
 
 def test_allowed_charging_rate_units_tokens():
@@ -511,3 +548,68 @@ def test_phase_count_ignores_phase_values_that_are_not_numbers(cp_v16):
     voltage.extra_attr = {"L1-N": 230.0, "L2-N": "n/a", "L3-N": 231.0}
     cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
     assert cp_v16._phase_count(1) == 2
+
+
+@pytest.mark.asyncio
+async def test_power_only_session_conversion_exposes_its_assumptions(
+    cp_v16, monkeypatch
+):
+    """An amp slider converted to watts reports the voltage and phase count."""
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Power"
+        if key == ckey.charge_profile_max_stack_level:
+            return "2"
+        return None
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    prepared = await cp_v16.prepare_session_limit(1, 16)
+
+    assert prepared["unit"] == "W"
+    assert prepared["value"] == 3680
+    assert prepared["conversion_voltage"] == 230
+    assert prepared["conversion_phases"] == 1
+
+
+def test_session_request_builders_v16(cp_v16):
+    """The 1.6 builders address exactly the id and connector they are given."""
+    clear = cp_v16.build_session_clear_request(4010)
+    assert clear.id == 4010
+    custom = cp_v16.build_custom_profile_request(2, {"chargingProfileId": 9})
+    assert custom.connector_id == 2
+    assert custom.cs_charging_profiles == {"chargingProfileId": 9}
+
+
+@pytest.mark.asyncio
+async def test_unobserved_transaction_skips_the_managed_leg_with_one_warning(
+    cp_v16, monkeypatch, caplog
+):
+    """With a controller but no token, the legacy TxProfile is not sent."""
+    cp_v16.session_controller = SimpleNamespace(current_token=lambda _c: None)
+    cp_v16._session_fallback_skipped = {}
+    cp_v16._active_tx = {2: 55}
+    sent = []
+
+    async def fake_get_conf(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "3"
+        return None
+
+    async def fake_call(req):
+        purpose = req.cs_charging_profiles["chargingProfilePurpose"]
+        sent.append(purpose)
+        if purpose == ChargingProfilePurposeType.charge_point_max_profile.value:
+            return SimpleNamespace(status=ChargingProfileStatus.rejected)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+
+    assert await cp_v16.set_charge_rate(limit_amps=12, conn_id=2) is True
+    assert await cp_v16.set_charge_rate(limit_amps=12, conn_id=2) is True
+
+    assert ChargingProfilePurposeType.tx_profile.value not in sent
+    assert caplog.text.count("Managed TxProfile fallback was skipped") == 1

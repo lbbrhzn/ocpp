@@ -12,6 +12,7 @@ from homeassistant.const import STATE_OK, UnitOfElectricCurrent
 from homeassistant.core import State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from ocpp.messages import CallError
 from ocpp.v16.enums import Measurand
 from pytest_homeassistant_custom_component.common import (
@@ -24,8 +25,9 @@ from custom_components.ocpp.const import (
     CONF_MAX_CURRENT,
     CONF_NUM_CONNECTORS,
     CONF_PORT,
-    DOMAIN,
     ChargerSystemSettings,
+    DATA_UPDATED,
+    DOMAIN,
 )
 from custom_components.ocpp.enums import ConfigurationKey, Profiles
 from custom_components.ocpp.ocppv16 import ChargePoint as ChargePoint16
@@ -135,10 +137,25 @@ async def test_one_master_on_station_device(hass, flat_entry, setup_flat, connec
         for e in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
         if e.domain == "number"
     ]
-    assert len(numbers) == 1
-    assert numbers[0].unique_id == "number.ocpp.test_cpid.maximum_current"
+    assert len(numbers) == connectors + 1
+    master = next(
+        entry
+        for entry in numbers
+        if entry.unique_id == "number.ocpp.test_cpid.maximum_current"
+    )
+    expected_sessions = (
+        {"number.ocpp.test_cpid.session_current_limit"}
+        if connectors == 1
+        else {
+            f"number.ocpp.test_cpid.conn{connector}.session_current_limit"
+            for connector in range(1, connectors + 1)
+        }
+    )
+    assert {
+        entry.unique_id for entry in numbers if entry is not master
+    } == expected_sessions
     entity = _number(hass)
-    device = dr.async_get(hass).async_get(numbers[0].device_id)
+    device = dr.async_get(hass).async_get(master.device_id)
     assert (DOMAIN, "test_cpid") in device.identifiers
     assert entity.connector_id is None
     assert entity._op_connector_id == 0
@@ -211,6 +228,58 @@ async def test_cleanup_only_legacy_numbers_for_this_charger(
         )
     for entry in kept:
         assert registry.async_get(entry.entity_id) == entry
+
+
+@pytest.mark.parametrize(
+    ("connectors", "stale_uids", "expected_session_uids"),
+    [
+        (
+            1,
+            (
+                "number.ocpp.test_cpid.conn1.session_current_limit",
+                "number.ocpp.test_cpid.conn2.session_current_limit",
+            ),
+            {"number.ocpp.test_cpid.session_current_limit"},
+        ),
+        (
+            2,
+            ("number.ocpp.test_cpid.session_current_limit",),
+            {
+                "number.ocpp.test_cpid.conn1.session_current_limit",
+                "number.ocpp.test_cpid.conn2.session_current_limit",
+            },
+        ),
+    ],
+)
+async def test_session_entities_follow_connector_topology_without_orphans(
+    hass,
+    flat_entry,
+    setup_flat,
+    connectors,
+    stale_uids,
+    expected_session_uids,
+):
+    """Discovery-driven one/many transitions remove the obsolete entity shape."""
+    _configure(hass, flat_entry, num_connectors=connectors)
+    registry = er.async_get(hass)
+    stale = [_register(hass, flat_entry, uid) for uid in stale_uids]
+    foreign = _register(
+        hass, flat_entry, "number.ocpp.other.conn1.session_current_limit"
+    )
+
+    await setup_flat()
+
+    assert all(registry.async_get(entry.entity_id) is None for entry in stale)
+    assert registry.async_get(foreign.entity_id) == foreign
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if entry.platform == DOMAIN
+        and entry.domain == "number"
+        and entry.unique_id.endswith("session_current_limit")
+        and ".test_cpid." in entry.unique_id
+    }
+    assert session_uids == expected_session_uids
 
 
 async def test_existing_master_survives_connector_reconfiguration(
@@ -460,3 +529,73 @@ async def test_slider201_uses_existing_station_path(
         assert req.charging_profile_criteria == {
             "charging_profile_purpose": "ChargingStationMaxProfile"
         }
+
+
+async def test_session_entity_set_paths(hass, flat_entry, setup_flat):
+    """The session number refuses without a token and delegates with one."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = live_entity(hass, "number.test_cpid_session_current_limit", "number")
+    controller = central.session_controllers["CP_flat"]
+
+    with pytest.raises(HomeAssistantError, match="no qualifying charging session"):
+        await entity.async_set_native_value(16)
+
+    controller.on_transaction_start(1, 73, 1)
+    central.set_session_charge_rate_amps = AsyncMock()
+    await entity.async_set_native_value(16)
+    central.set_session_charge_rate_amps.assert_awaited_once_with(
+        "test_cpid", 1, controller.current_token(1), 16.0
+    )
+
+    # A broadcast whose payload is not a collection still refreshes safely.
+    async_dispatcher_send(hass, DATA_UPDATED, 5)
+    await hass.async_block_till_done()
+
+    central.session_controllers.clear()
+    with pytest.raises(HomeAssistantError, match="controller not found"):
+        await entity.async_set_native_value(16)
+
+
+async def test_session_entities_follow_a_malformed_or_oversized_connector_count(
+    hass, flat_entry, setup_flat, caplog
+):
+    """A bad count falls back to one entity; a huge count stops at 99."""
+    _configure(hass, flat_entry, num_connectors="many")
+    await setup_flat()
+    registry = er.async_get(hass)
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if "session_current_limit" in entry.unique_id
+    }
+    assert session_uids == {"number.ocpp.test_cpid.session_current_limit"}
+
+    await hass.config_entries.async_unload(flat_entry.entry_id)
+    _configure(hass, flat_entry, num_connectors=100)
+    await setup_flat()
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if "conn" in entry.unique_id and "session_current_limit" in entry.unique_id
+    }
+    assert len(session_uids) == 99
+    assert "limited to connectors 1..99" in caplog.text
+
+
+async def test_reset_session_limits_service_routes_to_the_configured_charger(
+    hass, flat_entry, setup_flat
+):
+    """The action reaches the controller through the configured charger id."""
+    central = await setup_flat()
+    controller = central.session_controllers["CP_flat"]
+    controller.async_reset = AsyncMock()
+
+    await hass.services.async_call(
+        DOMAIN,
+        "reset_session_limits",
+        {"devid": "test_cpid", "force": True},
+        blocking=True,
+    )
+
+    controller.async_reset.assert_awaited_once_with(None, force=True)

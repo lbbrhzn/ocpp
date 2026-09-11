@@ -34,6 +34,7 @@ from custom_components.ocpp.enums import (
 from custom_components.ocpp.number import NUMBERS
 from custom_components.ocpp.switch import SWITCHES
 from custom_components.ocpp.ocppv16 import ChargePoint as ServerCP
+from custom_components.ocpp.session import CallOutcome, ClassifiedCallResult
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cpclass, call, call_result
 from ocpp.v16.enums import (
@@ -3317,6 +3318,7 @@ async def test_post_connect_set_availability_error_swallowed_and_REM_triggers_ca
 
     async def fake_boot(self):
         called["boot"] += 1
+        return False
 
     async def fake_status(self):
         called["status"] += 1
@@ -3359,6 +3361,10 @@ async def test_post_connect_set_availability_error_swallowed_and_REM_triggers_ca
             assert getattr(srv_cp, "post_connect_success", False) is True
             assert called["boot"] == 1
             assert called["status"] == 1
+            assert srv_cp.session_controller is not None
+            assert not srv_cp.session_controller._initial_gate
+            assert not srv_cp.session_controller._expected_boot
+            assert srv_cp.session_controller._boot_timeout_task is None
         finally:
             task.cancel()
 
@@ -4203,13 +4209,21 @@ async def test_set_charge_rate_with_active_transaction(
                 # Reject CP-max (connector_id == 0) so code proceeds to TxProfile + TxDefault
                 if getattr(req, "connector_id", None) == 0:
                     return SimpleNamespace(status=ChargingProfileStatus.rejected)
-                # Accept TxProfile and TxDefaultProfile
+                # Accept TxDefaultProfile
                 return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+            async def fake_classified(req):
+                calls.append(req)
+                return ClassifiedCallResult(
+                    CallOutcome.SUCCESS,
+                    SimpleNamespace(status=ChargingProfileStatus.accepted),
+                )
 
             monkeypatch.setattr(srv, "get_configuration", fake_get_configuration)
 
             # Intercept outgoing SetChargingProfile calls
             monkeypatch.setattr(srv, "call", fake_call)
+            monkeypatch.setattr(srv, "call_classified", fake_classified)
 
             ok = await srv.set_charge_rate(limit_amps=16, conn_id=1)
             assert ok is True
@@ -4254,8 +4268,10 @@ async def test_set_charge_rate_exception_paths(
             # Make sure there is an active transaction on connector 1
             await client.send_start_transaction(0)
 
-            # Case A: CP-max raises, TxProfile raises, TxDefault succeeds → overall True
+            # Case A: CP-max raises, TxProfile is rejected before sending,
+            # TxDefault succeeds → overall True.
             call_count = 0
+            classified_count = 0
 
             async def fake_call_case_a(req):
                 nonlocal call_count
@@ -4263,11 +4279,16 @@ async def test_set_charge_rate_exception_paths(
                 # 1st call (CP-max) → raise
                 if call_count == 1:
                     raise RuntimeError("cp-max boom")
-                # 2nd call (TxProfile) → raise
-                if call_count == 2:
-                    raise RuntimeError("tx-profile boom")
-                # 3rd call (TxDefault) → accept
+                # 2nd call (TxDefault) → accept
                 return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+            async def fake_classified_case_a(req):
+                nonlocal classified_count
+                classified_count += 1
+                return ClassifiedCallResult(
+                    CallOutcome.LOCAL_REQUEST_INVALID,
+                    error=RuntimeError("tx-profile boom"),
+                )
 
             # Ensure smart charging available
             srv._attr_supported_features = {prof.SMART}
@@ -4282,22 +4303,35 @@ async def test_set_charge_rate_exception_paths(
             monkeypatch.setattr(srv, "get_configuration", fake_get_configuration)
 
             monkeypatch.setattr(srv, "call", fake_call_case_a)
+            monkeypatch.setattr(srv, "call_classified", fake_classified_case_a)
             ok_a = await srv.set_charge_rate(limit_amps=10, conn_id=1)
             assert ok_a is True
-            assert call_count == 3  # hit all branches
+            assert call_count == 2  # CP-max + TxDefault
+            assert classified_count == 1  # managed TxProfile
 
-            # Case B: CP-max raises, TxProfile raises, TxDefault raises → overall False
+            # Case B: every leg fails → overall False
             call_count_b = 0
+            classified_count_b = 0
 
             async def fake_call_case_b(req):
                 nonlocal call_count_b
                 call_count_b += 1
                 raise RuntimeError(f"boom-{call_count_b}")
 
+            async def fake_classified_case_b(req):
+                nonlocal classified_count_b
+                classified_count_b += 1
+                return ClassifiedCallResult(
+                    CallOutcome.REMOTE_VALIDATION_ERROR,
+                    error=RuntimeError("tx-profile boom"),
+                )
+
             monkeypatch.setattr(srv, "call", fake_call_case_b)
+            monkeypatch.setattr(srv, "call_classified", fake_classified_case_b)
             ok_b = await srv.set_charge_rate(limit_amps=12, conn_id=1)
             assert ok_b is False
-            assert call_count_b >= 2  # at least CP-max + TxProfile tried
+            assert call_count_b == 2  # CP-max + TxDefault
+            assert classified_count_b == 1  # managed TxProfile
 
             # Case C: Custom profile branch raises → returns False
             async def fake_call_custom(req):

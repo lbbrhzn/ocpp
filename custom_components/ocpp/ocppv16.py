@@ -154,6 +154,8 @@ def _allowed_charging_rate_units(units_resp: str | None) -> tuple[bool, bool]:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    supports_trigger_boot_notification = True
+
     def __init__(
         self,
         id: str,
@@ -200,6 +202,7 @@ class ChargePoint(cp):
             hass, _TX_STORE_VERSION, tx_store_key(entry.entry_id, id)
         )
         self._tx_store_load = None
+        self._session_fallback_skipped: dict[int, int] = {}
 
     # ------------------------------------------------------------------
     # Transaction identity, timing and containment (#2123)
@@ -845,6 +848,73 @@ class ChargePoint(cp):
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
 
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve unit and stack before a transaction-bound set is recorded."""
+        unit, value, stack_level = await self._resolve_charge_rate(
+            None if source_watts is not None else limit_amps,
+            source_watts,
+            connector_id,
+        )
+        voltage = self._line_voltage(connector_id)
+        phases = self._phase_count(connector_id)
+        converted = source_watts is not None or (
+            unit == ChargingRateUnitType.watts.value and limit_amps is not None
+        )
+        return {
+            "unit": unit,
+            "value": value,
+            "amps": (
+                round(float(source_watts) / (voltage * phases), 1)
+                if source_watts is not None
+                else float(limit_amps)
+            ),
+            "stack_level": max(0, int(stack_level)),
+            "target": connector_id,
+            "conversion_voltage": voltage if converted else None,
+            "conversion_phases": phases if converted else None,
+        }
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxProfile bound to the active 1.6 transaction."""
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: int(prepared["stack_level"]),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
+                om.transaction_id: int(transaction_id),
+                om.charging_schedule: {
+                    om.charging_rate_unit: prepared["unit"],
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: prepared["value"]}
+                    ],
+                },
+            },
+        )
+
+    def build_session_clear_request(self, profile_id: int):
+        """Build an exact-id 1.6 clear that cannot remove foreign profiles."""
+        return call.ClearChargingProfile(id=int(profile_id))
+
+    def build_custom_profile_request(self, connector_id: int, profile: dict):
+        """Build a custom 1.6 profile without changing its supplied content."""
+        return call.SetChargingProfile(
+            connector_id=int(connector_id), cs_charging_profiles=profile
+        )
+
     async def _resolve_charge_rate(
         self,
         limit_amps: int | float | None,
@@ -1027,9 +1097,10 @@ class ChargePoint(cp):
         # Target connector (default 1 if unspecified/0)
         target_cid = int(conn_id) if conn_id and int(conn_id) > 0 else 1
 
-        # Read active transaction on this connector. A held connector's id may
-        # belong to a transaction that has already ended, so no profile is
-        # bound to it until the charger settles the connector.
+        # Read active transaction on this connector. This remains the legacy
+        # path for directly constructed ChargePoint instances; a configured
+        # integration routes the TxProfile leg through the session controller
+        # and its stronger online-start token instead.
         try:
             active_tx_id = int(self._active_tx.get(target_cid, 0) or 0)
         except Exception:
@@ -1040,8 +1111,38 @@ class ChargePoint(cp):
         txp_ok = False
         txd_ok = False
 
-        # If an active transaction exists on this connector, try TxProfile first (affects ongoing charging)
-        if active_tx_id > 0:
+        controller = getattr(self, "session_controller", None)
+        token = controller.current_token(target_cid) if controller is not None else None
+        if token is not None:
+            try:
+                display_amps = (
+                    self._watts_to_amps(float(limit_watts), target_cid)
+                    if limit_watts is not None
+                    else (
+                        float(limit_amps)
+                        if limit_amps is not None
+                        else (
+                            self._watts_to_amps(float(limit_value), target_cid)
+                            if units_value == ChargingRateUnitType.watts.value
+                            else float(limit_value)
+                        )
+                    )
+                )
+                await controller.async_set_limit(
+                    target_cid,
+                    token,
+                    display_amps,
+                    source_watts=(
+                        float(limit_watts) if limit_watts is not None else None
+                    ),
+                )
+                txp_ok = True
+            except HomeAssistantError as ex:
+                _LOGGER.debug("Managed TxProfile fallback refused: %s", ex)
+        # Preserve the old direct path only when no controller exists. Once
+        # configured, an adopted transaction id is deliberately insufficient:
+        # only an online start in this connection generation may be targeted.
+        elif controller is None and active_tx_id > 0:
             try:
                 txp_stack = max(1, stack_level)  # keep same or higher than defaults
                 req = call.SetChargingProfile(
@@ -1065,6 +1166,15 @@ class ChargePoint(cp):
                     _LOGGER.debug("TxProfile not accepted (%s).", resp.status)
             except Exception as ex:
                 _LOGGER.debug("TxProfile call raised: %s.", ex)
+        elif controller is not None and active_tx_id > 0:
+            if self._session_fallback_skipped.get(target_cid) != active_tx_id:
+                self._session_fallback_skipped[target_cid] = active_tx_id
+                _LOGGER.warning(
+                    "Managed TxProfile fallback was skipped on connector %s: "
+                    "transaction %s was not observed starting on this connection",
+                    target_cid,
+                    active_tx_id,
+                )
 
         # Always attempt TxDefaultProfile as well (for future sessions)
         try:
@@ -1658,6 +1768,8 @@ class ChargePoint(cp):
             status=RegistrationStatus.accepted.value,
         )
         self.received_boot_notification = True
+        if self.session_controller is not None:
+            self.session_controller.on_boot_notification()
         _LOGGER.debug("Received boot notification for %s: %s", self.id, kwargs)
 
         self._ensure_tx_store_loaded()

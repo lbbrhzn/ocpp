@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -25,7 +26,7 @@ from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.chargepoint import SetVariableResult
 from custom_components.ocpp.switch import ChargePointSwitch, SWITCHES
 
-from tests.const import MOCK_CONFIG_DATA
+from tests.const import MOCK_CONFIG_DATA, MOCK_CONFIG_FLOW
 
 
 class DummyCP:
@@ -510,6 +511,24 @@ async def test_custom_profile_mapping_bypasses_string_parsing(hass):
 
     assert cp.calls == [("set_charge_rate", {"profile": profile, "conn_id": 2})]
     assert cp.calls[0][1]["profile"] is profile
+
+
+@pytest.mark.asyncio
+async def test_any_reserved_custom_profile_id_spelling_is_rejected(hass):
+    """A harmless first id field cannot hide a reserved id in another spelling."""
+    cs, cp = _available_central_system(hass)
+    profile = {
+        "chargingProfileId": 7,
+        "charging_profile_id": "not-an-id",
+        "id": 4010,
+    }
+
+    with pytest.raises(HomeAssistantError, match="reserved"):
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(data={"devid": "ok", "custom_profile": profile})
+        )
+
+    assert cp.calls == []
 
 
 @pytest.mark.asyncio
@@ -1124,6 +1143,26 @@ async def test_service_call_raises_when_no_charge_points(hass):
 
 
 @pytest.mark.asyncio
+async def test_force_session_reset_can_discard_records_while_offline(hass):
+    """Force recovery acts on the persistent controller, not a live socket."""
+    from custom_components.ocpp import _resolve_central_system
+
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_FLOW.copy())
+    cs = CentralSystem(hass, entry)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = cs
+    controller = cs.session_controllers["test_cp_id"]
+    controller.async_reset = AsyncMock()
+
+    assert _resolve_central_system(hass, "test_cpid", include_configured=True) is cs
+
+    await cs.handle_reset_session_limits(
+        SimpleNamespace(data={"devid": "test_cpid", "connector": 1, "force": True})
+    )
+
+    controller.async_reset.assert_awaited_once_with(1, force=True)
+
+
+@pytest.mark.asyncio
 async def test_single_cp_fallback_for_missing_devid(hass):
     """Backwards compatibility: a single CP falls back when devid is missing.
 
@@ -1302,3 +1341,94 @@ async def test_cpid_wins_over_a_colliding_cp_id(hass):
 
     # cs_a is registered first, but the cpid owner must win.
     assert _resolve_central_system(hass, "shared_name") is cs_b
+
+
+@pytest.mark.asyncio
+async def test_session_rate_helper_and_reset_target_resolution(hass):
+    """The session helpers resolve their controller by either charger id."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_FLOW.copy())
+    cs = CentralSystem(hass, entry)
+    controller = cs.session_controllers["test_cp_id"]
+    controller.async_set_limit = AsyncMock()
+    controller.async_reset = AsyncMock()
+
+    await cs.set_session_charge_rate_amps("test_cpid", 1, "token", 16.0)
+    controller.async_set_limit.assert_awaited_once_with(1, "token", 16.0)
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await cs.set_session_charge_rate_amps("nobody", 1, "token", 16.0)
+
+    # No devid and nothing connected: the single configured controller.
+    await cs.handle_reset_session_limits(SimpleNamespace(data={"force": True}))
+    controller.async_reset.assert_awaited_with(None, force=True)
+
+    # No devid with exactly one connected charger: that charger.
+    _install_dummy_cp(cs, cpid="test_cpid", cp_id="test_cp_id", status=STATE_OK)
+    await cs.handle_reset_session_limits(SimpleNamespace(data={"connector": 2}))
+    controller.async_reset.assert_awaited_with(2, force=False)
+
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_reset_session_limits(SimpleNamespace(data={"devid": "nobody"}))
+
+
+@pytest.mark.asyncio
+async def test_confirmed_reset_needs_a_connected_charger(hass):
+    """Only a force reset may run against an offline charger."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_FLOW.copy())
+    cs = CentralSystem(hass, entry)
+    controller = cs.session_controllers["test_cp_id"]
+    controller.async_reset = AsyncMock()
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_reset_session_limits(
+            SimpleNamespace(data={"devid": "test_cpid"})
+        )
+    _install_dummy_cp(
+        cs, cpid="test_cpid", cp_id="test_cp_id", status=STATE_UNAVAILABLE
+    )
+    with pytest.raises(HomeAssistantError):
+        await cs.handle_reset_session_limits(
+            SimpleNamespace(data={"devid": "test_cpid"})
+        )
+    controller.async_reset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_custom_txprofile_needs_a_controller_for_its_charger(hass):
+    """A charger without a controller cannot take a routed TxProfile."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, status=STATE_OK)
+    profile = {"chargingProfilePurpose": "TxProfile", "chargingProfileId": 9}
+    with pytest.raises(HomeAssistantError, match="controller not found"):
+        await cs.handle_set_charge_rate(
+            SimpleNamespace(
+                data={"devid": "test_cpid", "custom_profile": profile, "conn_id": 1}
+            )
+        )
+    assert not cp.calls
+
+
+@pytest.mark.asyncio
+async def test_rebuild_binds_the_session_controller_to_the_new_object(
+    hass, monkeypatch
+):
+    """A version-change rebuild rebinds the controller before starting."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cs.charge_points["CP_1"] = _FakeReconnectCP("1.6")
+    new_cp = _FakeReconnectCP("2.0.1")
+    monkeypatch.setattr(cs, "_build_charge_point", lambda *_args: new_cp)
+    controller = SimpleNamespace(async_bind=AsyncMock())
+    cs.session_controllers["CP_1"] = controller
+
+    await cs.on_connect(_make_ws("ocpp2.0.1"))
+
+    controller.async_bind.assert_awaited_once_with(new_cp)
+    assert new_cp.started is True
+
+
+def test_controllers_are_built_only_for_charger_mappings(hass):
+    """A malformed cpids entry is skipped rather than crashing setup."""
+    data = {**MOCK_CONFIG_FLOW, "cpids": [*MOCK_CONFIG_FLOW["cpids"], "junk"]}
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    cs = CentralSystem(hass, entry)
+    assert set(cs.session_controllers) == {"test_cp_id"}

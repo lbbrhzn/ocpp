@@ -24,13 +24,14 @@ If your charger reports more than one connector, the sensors below are created p
 | `sensor.<cpid>_transaction_id` | `sensor.<cpid>_connector_1_transaction_id` |
 | `sensor.<cpid>_current_import` | `sensor.<cpid>_connector_1_current_import` |
 | `number.<cpid>_maximum_current` | `number.<cpid>_maximum_current` |
+| `number.<cpid>_session_current_limit` | `number.<cpid>_connector_1_session_current_limit` |
 
 ## Adjusting the charge current
 
 When the OCPP integration is added to your Home Assistant, you get a slider to control the maximum charge current named:
 `number.<cpid>_maximum_current`
 
-The slider sets a ceiling for the entire charging station. On **OCPP 1.6** it sends only a `ChargePointMaxProfile` on connector 0. On **OCPP 2.0.1** it sends a `ChargingStationMaxProfile` on EVSE 0; at or above the configured maximum it clears profiles of that purpose instead. On 1.6, setting the slider to its maximum still sends a profile. A refused request is shown as an error and the slider returns to its last confirmed value, or unknown if there is none. There is no transaction-profile fallback in the slider. Chargers that reject the station profile can still use the `ocpp.set_charge_rate` action and its fallback chain, described below. For per-connector session control, use the action's `custom_profile` option as described below.
+The `Maximum Current` slider sets the station-wide ceiling; charger settings and profiles written by other systems can impose a lower limit. On **OCPP 1.6** it sends only a `ChargePointMaxProfile` on connector 0. On **OCPP 2.0.1** it sends a `ChargingStationMaxProfile` on EVSE 0; at or above the configured maximum it clears profiles of that purpose instead. On 1.6, setting the slider to its maximum still sends a profile. A refused request is shown as an error and the slider returns to its last confirmed value, or unknown if there is none. There is no transaction-profile fallback in the master slider. Chargers that reject the station profile can still use the `ocpp.set_charge_rate` action and its fallback chain, described below.
 
 While using this entity in an automation might seem logical, do not assume it is safe to update at control-loop frequency.
 OCPP defines the profile's behaviour, but not where a charger stores it. Some charger firmware persists station-wide profiles in non-volatile memory; other firmware does not. If a charger writes every update to EEPROM or flash, a fast control loop can wear that storage. There is no universal safe update rate or lifetime estimate: confirm the implementation and supported update frequency with the charger manufacturer.
@@ -47,9 +48,19 @@ The upgrade does not clear stored charging profiles. Moving the master updates o
 
 ### TxProfile
 
-For session-scoped control, use a profile that is active exclusively during the current charging session. This allows you to adjust the charge current downwards while still respecting the upper limit defined by the ChargePointMaxProfile.
+`Session Current Limit` is the managed session-scoped control. It appears once per connector and is available only for a transaction the integration saw start online on the current connection. It sends a `TxProfile` bound to that exact transaction and sits below the station-wide master.
 
-Essentially, the slider in your GUI maintains control over the absolute maximum current the charger can utilize.
+The session slider is deliberately not restored. A reconnect, charger boot, protocol rebuild, or Home Assistant restart makes it unavailable for the remainder of an already-running transaction; the integration clears every recorded profile id exactly and waits for a later online transaction start. A rejected change leaves the previous confirmed value displayed. While a change is in flight the slider stays available and reports `operation_pending`; a second change in that window is refused. A timeout makes the slider unavailable until exact-id cleanup succeeds. If the charger connection drops during a change, the change fails with an error and the caller keeps running. Setting it to its configured maximum removes the integration-owned session profile rather than installing a maximum-valued profile.
+
+This control does not claim the charger is unrestricted: the station master, charger configuration, or profiles written by another system can still impose a lower limit. OCPP also does not guarantee that profile updates avoid non-volatile storage, so the same manufacturer guidance about update frequency applies.
+
+If both reserved cleanup slots for one connector become uncertain, Home Assistant raises a repair issue. Run `ocpp.reset_session_limits` to retry exact-id clears. Its `force` option only discards the integration's records; it is unsafe because a charger may still process a previously timed-out request.
+
+Automatic exact-id cleanup uses bounded exponential backoff. After eight failed calls in one connection generation it stops sending, leaves the id reserved, and raises a repair issue; a reconnect starts a fresh bounded cycle, or `ocpp.reset_session_limits` retries immediately. This prevents a charger that persistently rejects clears from receiving one request per minute forever.
+
+For custom session-scoped control, use a profile that is active exclusively during the current charging session. A custom `TxProfile` is ordered through the same controller, and the managed slider yields only after the charger accepts it. This routing is stricter than the old pass-through path: a multi-connector charger must supply a non-zero `conn_id`, and the call returns `operation pending` if that connector is already setting, clearing, or handing off a profile.
+
+`ocpp.clear_profile` is also ordered through the controller. It temporarily makes every session slider on that charger unavailable and waits for admitted connector operations to drain before sending; a stalled operation can therefore delay the action for up to 35 seconds before it reports a timeout. On OCPP 2.0.1 it then exact-clears every recorded managed session id as well as the station profile and reports partial failures.
 
 ### What `ocpp.set_charge_rate` does with `limit_amps`
 
@@ -77,7 +88,7 @@ Everything below sends a raw profile through `custom_profile`, exactly as you wr
 
 That escape hatch hands you three things the managed path was handling:
 
-* **The profile id.** A charger replaces an existing profile that has the same id. On OCPP 1.6 the integration uses `1000` for ChargePointMaxProfile, `2000+n` for TxDefaultProfile and `3000+n` for TxProfile, where `n` is the connector. On 2.0.1 it uses id `1` for the `ChargingStationMaxProfile` the slider writes. **Reusing `1` on 2.0.1 can replace the slider's ceiling with your session profile, which then disappears when the transaction ends.** Maintain your own charger-wide inventory and use a different integer for every connector and purpose.
+* **The profile id.** A charger replaces an existing profile that has the same id. On OCPP 1.6 the integration uses `1000` for ChargePointMaxProfile and `2000+n` for TxDefaultProfile, where `n` is the connector. On 2.0.1 it uses id `1` for the `ChargingStationMaxProfile` the master writes. Session controls reserve ids 4000 through 4999 on both protocols, and the action refuses a custom profile in that range. **Reusing `1` on 2.0.1 can replace the slider's ceiling with your session profile, which then disappears when the transaction ends.** Maintain your own charger-wide inventory and use a different integer for every connector and purpose.
 * **The stack level.** Among overlapping profiles of the same purpose, a higher supported level takes precedence. A profile can therefore be accepted but have no effect when another profile is above it. Do not assume that level 2 is valid or sufficient. On OCPP 1.6, query `ChargeProfileMaxStackLevel`; on 2.0.1, inspect the charger's smart-charging device-model variables. Coordinate the chosen level with every other system that writes profiles, and keep it within the maximum the charger reports.
 * **The rate unit and phase count.** See below.
 
