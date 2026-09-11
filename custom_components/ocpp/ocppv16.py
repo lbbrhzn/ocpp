@@ -33,7 +33,6 @@ from ocpp.v16.enums import (
     DataTransferStatus,
     Measurand,
     MessageTrigger,
-    Phase,
     ReadingContext,
     RegistrationStatus,
     RemoteStartStopStatus,
@@ -90,8 +89,6 @@ def _to_message_trigger(name: str) -> MessageTrigger | None:
 # Charge-rate defaults plus conservative electrical conversion fallbacks.
 _DEFAULT_LIMIT_AMPS = DEFAULT_MAX_CURRENT
 _DEFAULT_LIMIT_WATTS = 22000
-_DEFAULT_LINE_VOLTAGE = 230.0
-_DEFAULT_PHASES = 1
 
 # Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
 _MAX_CONNECTORS = 10
@@ -136,11 +133,6 @@ def tx_store_key(entry_id: str, cp_id: str) -> str:
 
 _AMPS_UNIT_TOKENS = frozenset({"current", "a", "amp", "amps", "ampere", "amperes"})
 _WATTS_UNIT_TOKENS = frozenset({"power", "w", "watt", "watts"})
-_PHASE_KEY_GROUPS = (
-    frozenset({Phase.l1.value, Phase.l2.value, Phase.l3.value}),
-    frozenset({Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value}),
-    frozenset({Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value}),
-)
 
 
 def _allowed_charging_rate_units(units_resp: str | None) -> tuple[bool, bool]:
@@ -406,6 +398,7 @@ class ChargePoint(cp):
         self, connector_id: int, transaction_id: int, stop_reason=None
     ) -> None:
         """Forget the connector's transaction: the per-connector part of a stop."""
+        self._report_transaction_end(connector_id, transaction_id)
         self._ended_tx[connector_id] = int(transaction_id or 0)
         self._active_tx[connector_id] = 0
         self._tx_started_at.pop(connector_id, None)
@@ -851,90 +844,6 @@ class ChargePoint(cp):
         except Exception as ex:
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
-
-    def _lookup_metric(self, measurand: str, conn_id: int):
-        """Return a connector metric if it has a value, else None."""
-        metrics = getattr(self, "_metrics", None)
-        if metrics is None:
-            return None
-        try:
-            target = int(conn_id) if conn_id and int(conn_id) > 0 else 1
-        except (TypeError, ValueError):
-            target = 1
-        # Connector 0 contains legacy/global telemetry. Never fall back to
-        # connector 1 for another connector, as that can mix unrelated ports.
-        connector_ids = (target, 0)
-        for cid in connector_ids:
-            key = (cid, measurand)
-            if key not in metrics:
-                continue
-            metric = metrics[key]
-            if metric is not None and getattr(metric, "value", None) is not None:
-                return metric
-        return None
-
-    def _line_voltage(self, conn_id: int) -> float:
-        """Return a plausible line-to-neutral voltage, or the 230 V default."""
-        metric = self._lookup_metric(Measurand.voltage.value, conn_id)
-        if metric is not None:
-            try:
-                voltage = float(metric.value)
-            except (TypeError, ValueError):
-                voltage = 0.0
-            if 50.0 <= voltage <= 500.0:
-                return voltage
-        return _DEFAULT_LINE_VOLTAGE
-
-    def _phase_count(self, conn_id: int) -> int:
-        """Count electrically active phases; conservatively default to one.
-
-        Some chargers publish placeholders for every phase even on a
-        single-phase installation.  Counting those keys turns a 16 A limit
-        into 16 A * 230 V * 3 for power-only chargers, although L2 and L3 are
-        explicitly reported as zero.  Count only phase values that carry a
-        meaningful voltage/current instead.
-        """
-        measurands = (
-            Measurand.voltage.value,
-            Measurand.current_import.value,
-            Measurand.current_offered.value,
-        )
-        best = 0
-        for measurand in measurands:
-            metric = self._lookup_metric(measurand, conn_id)
-            if metric is None:
-                continue
-            phase_values = {
-                str(key): value for key, value in (metric.extra_attr or {}).items()
-            }
-            threshold = 50.0 if measurand == Measurand.voltage.value else 0.1
-            for group in _PHASE_KEY_GROUPS:
-                n = 0
-                for phase in group:
-                    if phase not in phase_values:
-                        continue
-                    try:
-                        value = abs(float(phase_values[phase]))
-                    except (TypeError, ValueError):
-                        continue
-                    if value >= threshold:
-                        n += 1
-                if n > best:
-                    best = n
-        return best if best > 0 else _DEFAULT_PHASES
-
-    def _amps_to_watts(self, amps: float, conn_id: int) -> float:
-        """Convert a current limit to watts for Power-only chargers."""
-        return float(
-            round(amps * self._line_voltage(conn_id) * self._phase_count(conn_id))
-        )
-
-    def _watts_to_amps(self, watts: float, conn_id: int) -> float:
-        """Convert a power limit to amps for Current-only chargers."""
-        denom = self._line_voltage(conn_id) * self._phase_count(conn_id)
-        if denom <= 0:
-            return float(_DEFAULT_LIMIT_AMPS)
-        return round(watts / denom, 1)
 
     async def _resolve_charge_rate(
         self,
@@ -1866,6 +1775,7 @@ class ChargePoint(cp):
             self._metrics[(connector_id, csess.session_energy)].unit = HA_ENERGY_UNIT
 
             self._schedule_tx_store_save()
+            self._report_transaction_start(connector_id, tx_id, connector_id)
             result = call_result.StartTransaction(
                 id_tag_info={om.status: AuthorizationStatus.accepted.value},
                 transaction_id=tx_id,

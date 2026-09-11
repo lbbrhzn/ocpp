@@ -503,3 +503,11 @@ async def test_dual_unit_charger_sends_explicit_watts(cp_v16, monkeypatch):
     unit, limit = _schedule_limit(captured[0])
     assert unit == ChargingRateUnitType.watts.value
     assert limit == 7000.0
+
+
+def test_phase_count_ignores_phase_values_that_are_not_numbers(cp_v16):
+    """A placeholder string in one phase cannot break the count of the others."""
+    voltage = Metric(230.0, "V")
+    voltage.extra_attr = {"L1-N": 230.0, "L2-N": "n/a", "L3-N": 231.0}
+    cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
+    assert cp_v16._phase_count(1) == 2
