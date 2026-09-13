@@ -48,6 +48,7 @@ def cp_v16():
     cp._ocpp_version = "1.6"
     cp.active_transaction_id = 0
     cp._active_tx = {}
+    cp._tx_indeterminate = set()
     cp._metrics = _ConnectorAwareMetrics()
     # set_charge_rate calls these (we’ll monkeypatch per-test):
     # - cp.get_configuration(key)
@@ -94,6 +95,43 @@ async def test_custom_profile_path_exception_triggers_notify_and_returns_false(
     assert ok is False
     assert len(notices) == 1
     assert "Set charging profile failed" in notices[0]
+
+
+@pytest.mark.asyncio
+async def test_custom_profile_rejected_status_returns_false_without_notify(
+    cp_v16, monkeypatch, caplog
+):
+    """A custom profile the charger answers Rejected returns False and logs, without a notification."""
+    notices = []
+
+    async def fake_notify(msg, title="Ocpp integration"):
+        notices.append(msg)
+        return True
+
+    async def fake_call(_req):
+        return SimpleNamespace(status=ChargingProfileStatus.rejected.value)
+
+    async def fake_get_conf(_key):
+        pytest.fail("get_configuration should not be called for custom profile")
+
+    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+
+    profile = {
+        "chargingProfileId": 123,
+        "stackLevel": 1,
+        "chargingProfileKind": ChargingProfileKindType.relative.value,
+        "chargingProfilePurpose": ChargingProfilePurposeType.charge_point_max_profile.value,
+        "chargingSchedule": {
+            "chargingRateUnit": ChargingRateUnitType.amps.value,
+            "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16}],
+        },
+    }
+
+    assert await cp_v16.set_charge_rate(profile=profile, conn_id=2) is False
+    assert notices == []
+    assert "Custom SetChargingProfile rejected: Rejected" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -465,3 +503,11 @@ async def test_dual_unit_charger_sends_explicit_watts(cp_v16, monkeypatch):
     unit, limit = _schedule_limit(captured[0])
     assert unit == ChargingRateUnitType.watts.value
     assert limit == 7000.0
+
+
+def test_phase_count_ignores_phase_values_that_are_not_numbers(cp_v16):
+    """A placeholder string in one phase cannot break the count of the others."""
+    voltage = Metric(230.0, "V")
+    voltage.extra_attr = {"L1-N": 230.0, "L2-N": "n/a", "L3-N": 231.0}
+    cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
+    assert cp_v16._phase_count(1) == 2

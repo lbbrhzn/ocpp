@@ -10,7 +10,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from homeassistant.const import STATE_ON
+from homeassistant.const import STATE_ON, UnitOfTime
 from homeassistant.exceptions import HomeAssistantError
 import websockets
 
@@ -415,9 +415,17 @@ async def test_cms_responses_normal_v16(
         await cp.send_firmware_status()
         await cp.send_data_transfer()
         await cp.send_start_transaction(12345)
+        assert (
+            cs.charge_points[cp_id]._metrics[(1, csess.session_time)].unit
+            == UnitOfTime.MINUTES
+        )
         await cp.send_meter_err_phases()
         await cp.send_meter_line_voltage()
         await cp.send_meter_periodic_data()
+        assert (
+            cs.charge_points[cp_id]._metrics[(1, csess.session_time)].unit
+            == UnitOfTime.MINUTES
+        )
         # add delay to allow meter data to be processed
         await cp.send_stop_transaction(1)
 

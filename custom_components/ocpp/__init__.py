@@ -502,6 +502,55 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unloaded
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: device_registry.DeviceEntry
+) -> bool:
+    """Handle a request to remove one of this entry's devices.
+
+    Home Assistant only allows removing an entry's devices via UI/API when
+    the integration implements this hook.  A charge point device is matched
+    by its (DOMAIN, cp_id) identifier and dropped from CONF_CPIDS; the entry
+    update listener then reloads the integration, so the device is not
+    re-created on setup.  The central system device and anything else that
+    matches no configured charge point is refused, so it can never be
+    removed by accident.
+    """
+    # The central system device is registered with (DOMAIN, csid).  If a
+    # charge point's cp_id or cpid equals the csid, setup registers both
+    # under that identifier and Home Assistant merges them into a single
+    # device.  Removing it would silently drop the charge point from
+    # CONF_CPIDS, so refuse anything carrying the central system identifier.
+    csid = entry.data.get(CONF_CSID)
+    if csid is not None and (DOMAIN, str(csid)) in device_entry.identifiers:
+        _LOGGER.warning(
+            "Refusing to remove device %s: it is the central system or shares "
+            "its identifier with one",
+            device_entry.name,
+        )
+        return False
+
+    for cp_data in entry.data.get(CONF_CPIDS, []):
+        for cp_id, _settings in cp_data.items():
+            if (DOMAIN, cp_id) not in device_entry.identifiers:
+                continue
+            new_cpids = [
+                {cid: settings for cid, settings in item.items() if cid != cp_id}
+                or None
+                for item in entry.data.get(CONF_CPIDS, [])
+            ]
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_CPIDS: [c for c in new_cpids if c]}
+            )
+            _LOGGER.info("Removed charge point %s from entry %s", cp_id, entry.title)
+            return True
+
+    _LOGGER.warning(
+        "Refusing to remove device %s: matches no configured charge point",
+        device_entry.name,
+    )
+    return False
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await hass.config_entries.async_reload(entry.entry_id)

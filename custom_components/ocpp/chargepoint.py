@@ -58,6 +58,7 @@ from .const import (
     CONFIG,
     DATA_UPDATED,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_MAX_CURRENT,
     DEFAULT_NUM_CONNECTORS,
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
@@ -75,6 +76,13 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 # never send a boot notification. Module-level so tests can shrink it
 # without monkeypatching asyncio.sleep globally.
 MONITOR_BACKSTOP_DELAY = 10
+_DEFAULT_LINE_VOLTAGE = 230.0
+_DEFAULT_PHASES = 1
+_PHASE_KEY_GROUPS = (
+    frozenset({Phase.l1.value, Phase.l2.value, Phase.l3.value}),
+    frozenset({Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value}),
+    frozenset({Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value}),
+)
 
 
 class Metric:
@@ -300,6 +308,7 @@ class ChargePoint(cp):
         # completes and charging continues.
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+        self.session_controller = None
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -424,6 +433,10 @@ class ChargePoint(cp):
     async def clear_profile(self):
         """Clear all charging profiles."""
         pass
+
+    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+        """Set the station-wide maximum current without transaction fallbacks."""
+        raise NotImplementedError
 
     async def set_charge_rate(
         self,
@@ -724,6 +737,7 @@ class ChargePoint(cp):
             # an explicit stop invalidates every request already in progress.
             if self._reconnect_token is not token:
                 return
+            self._reset_protocol_generation_state()
             self.status = STATE_OK
             self._connection = connection
             self._metrics[(0, cstat.reconnects)].value += 1
@@ -733,6 +747,53 @@ class ChargePoint(cp):
         finally:
             if not installed:
                 await self._stop_session(candidate)
+
+    def _reset_protocol_generation_state(self) -> None:
+        """Demote protocol state that cannot remain live across a reconnect.
+
+        A reconnect is a transport boundary, not a charger-generation boundary.
+        Protocol ordering guards therefore survive it and are reset only by a
+        subsequent BootNotification.
+        """
+
+    def _report_transaction_start(
+        self, connector_id: int, transaction_id: int | str, target=None
+    ) -> None:
+        """Tell the optional session hook that a transaction started online.
+
+        The hook is not part of protocol handling: a failure inside it is
+        logged and must not turn the charger's request into an error reply
+        or skip the state changes that follow.
+        """
+        if self.session_controller is None:
+            return
+        try:
+            self.session_controller.on_transaction_start(
+                connector_id, transaction_id, target
+            )
+        except Exception:
+            _LOGGER.exception(
+                "%s: session hook failed on transaction %s start at connector %s",
+                self.id,
+                transaction_id,
+                connector_id,
+            )
+
+    def _report_transaction_end(
+        self, connector_id: int, transaction_id: int | str
+    ) -> None:
+        """Tell the optional session hook that a transaction ended."""
+        if self.session_controller is None:
+            return
+        try:
+            self.session_controller.on_transaction_end(connector_id, transaction_id)
+        except Exception:
+            _LOGGER.exception(
+                "%s: session hook failed on transaction %s end at connector %s",
+                self.id,
+                transaction_id,
+                connector_id,
+            )
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str
@@ -880,6 +941,79 @@ class ChargePoint(cp):
                 f"id_tag='{id_tag}' not found in auth_list, default authorization_status='{auth_status}'"
             )
         return auth_status
+
+    def _lookup_metric(self, measurand: str, conn_id: int):
+        """Return a connector metric, falling back only to charger scope."""
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None:
+            return None
+        try:
+            target = int(conn_id) if conn_id and int(conn_id) > 0 else 1
+        except (TypeError, ValueError):
+            target = 1
+        for cid in (target, 0):
+            key = (cid, measurand)
+            if key not in metrics:
+                continue
+            metric = metrics[key]
+            if metric is not None and getattr(metric, "value", None) is not None:
+                return metric
+        return None
+
+    def _line_voltage(self, conn_id: int) -> float:
+        """Return a plausible line-to-neutral voltage, or the 230 V default."""
+        metric = self._lookup_metric(Measurand.voltage.value, conn_id)
+        if metric is not None:
+            try:
+                voltage = float(metric.value)
+            except (TypeError, ValueError):
+                voltage = 0.0
+            if 50.0 <= voltage <= 500.0:
+                return voltage
+        return _DEFAULT_LINE_VOLTAGE
+
+    def _phase_count(self, conn_id: int) -> int:
+        """Count electrically active phases; conservatively default to one."""
+        measurands = (
+            Measurand.voltage.value,
+            Measurand.current_import.value,
+            Measurand.current_offered.value,
+        )
+        best = 0
+        for measurand in measurands:
+            metric = self._lookup_metric(measurand, conn_id)
+            if metric is None:
+                continue
+            phase_values = {
+                str(key): value for key, value in (metric.extra_attr or {}).items()
+            }
+            threshold = 50.0 if measurand == Measurand.voltage.value else 0.1
+            for group in _PHASE_KEY_GROUPS:
+                count = 0
+                for phase in group:
+                    if phase not in phase_values:
+                        continue
+                    try:
+                        value = abs(float(phase_values[phase]))
+                    except (TypeError, ValueError):
+                        continue
+                    if value >= threshold:
+                        count += 1
+                best = max(best, count)
+        return best or _DEFAULT_PHASES
+
+    def _amps_to_watts(self, amps: float, conn_id: int) -> float:
+        """Convert current to power with the shared electrical assumptions."""
+        return float(
+            round(amps * self._line_voltage(conn_id) * self._phase_count(conn_id))
+        )
+
+    def _watts_to_amps(self, watts: float, conn_id: int) -> float:
+        """Convert power to current with the shared electrical assumptions."""
+        denominator = self._line_voltage(conn_id) * self._phase_count(conn_id)
+        if denominator <= 0:
+            return float(DEFAULT_MAX_CURRENT)
+        return round(watts / denominator, 1)
 
     def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
         """Process per-phase MeterValues and aggregate them into per-connector metrics.

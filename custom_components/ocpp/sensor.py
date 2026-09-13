@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import CONF_MONITORED_VARIABLES
+from homeassistant.const import CONF_MONITORED_VARIABLES, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -347,6 +347,11 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     @property
     def native_unit_of_measurement(self):
         """Return the native unit of measurement."""
+        # Session duration is calculated in minutes by both protocol handlers.
+        # Keep its unit even before connection or when restoring offline state.
+        if self.metric == HAChargerSession.session_time:
+            return UnitOfTime.MINUTES
+
         value = self.central_system.get_ha_unit(
             self.cpid, self.metric, self.connector_id
         )

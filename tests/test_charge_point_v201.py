@@ -689,7 +689,10 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
     assert cs.get_metric(cpid, csess.session_energy) == 0.233
     assert cs.get_metric(cpid, csess.session_time) == 2
 
-    # Now with energy reading in Started transaction event
+    # Now with energy reading in a new transaction. Transaction ids are
+    # unique within a charger generation; replaying the ended id is correctly
+    # rejected by the server's ordering guard.
+    second_tx_id = f"{cp.remote_start_tx_id}-second"
     await cp.call(
         call.TransactionEvent(
             TransactionEventEnumType.started.value,
@@ -697,7 +700,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             TriggerReasonEnumType.cable_plugged_in.value,
             0,
             transaction_info={
-                "transaction_id": cp.remote_start_tx_id,
+                "transaction_id": second_tx_id,
                 "charging_state": ChargingStateEnumType.ev_connected.value,
             },
             meter_value=[
@@ -722,7 +725,7 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             TriggerReasonEnumType.charging_state_changed.value,
             1,
             transaction_info={
-                "transaction_id": cp.remote_start_tx_id,
+                "transaction_id": second_tx_id,
                 "charging_state": ChargingStateEnumType.charging.value,
             },
             meter_value=[
@@ -746,9 +749,9 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
             TriggerReasonEnumType.charging_state_changed.value,
-            1,
+            2,
             transaction_info={
-                "transaction_id": cp.remote_start_tx_id,
+                "transaction_id": second_tx_id,
                 "charging_state": ChargingStateEnumType.suspended_ev.value,
             },
         )
@@ -762,9 +765,9 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             TransactionEventEnumType.updated.value,
             tx_start_time.isoformat(),
             TriggerReasonEnumType.charging_state_changed.value,
-            1,
+            3,
             transaction_info={
-                "transaction_id": cp.remote_start_tx_id,
+                "transaction_id": second_tx_id,
                 "charging_state": ChargingStateEnumType.suspended_evse.value,
             },
         )
@@ -779,9 +782,9 @@ async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePo
             TransactionEventEnumType.ended.value,
             tx_start_time.isoformat(),
             TriggerReasonEnumType.ev_communication_lost.value,
-            2,
+            4,
             transaction_info={
-                "transaction_id": cp.remote_start_tx_id,
+                "transaction_id": second_tx_id,
                 "charging_state": ChargingStateEnumType.idle.value,
                 "stopped_reason": ReasonEnumType.ev_disconnected.value,
             },

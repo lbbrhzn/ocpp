@@ -17,24 +17,33 @@ This page provides several examples and hints to illustrate some of the many pot
 
 `<cpid>` is the charge point id you configured for your charger. The examples use the entity names of a **single-connector** charger.
 
-If your charger reports more than one connector, those charger-level entities do not exist — the integration creates per-connector entities instead and removes the flat ones. Use the connector that matches the `conn_id` you pass to the action:
+If your charger reports more than one connector, the sensors below are created per connector and their old flat entries are removed. Use the sensor for the connector that matches the `conn_id` you pass to the action. Maximum Current stays on the charger device, with one station-wide slider for every charger. These are default entity ids; any existing user rename of the flat Maximum Current entity is preserved:
 
 | Single connector | Two or more connectors |
 | --- | --- |
 | `sensor.<cpid>_transaction_id` | `sensor.<cpid>_connector_1_transaction_id` |
 | `sensor.<cpid>_current_import` | `sensor.<cpid>_connector_1_current_import` |
-| `number.<cpid>_maximum_current` | `number.<cpid>_connector_1_maximum_current` |
+| `number.<cpid>_maximum_current` | `number.<cpid>_maximum_current` |
 
 ## Adjusting the charge current
 
 When the OCPP integration is added to your Home Assistant, you get a slider to control the maximum charge current named:
 `number.<cpid>_maximum_current`
 
+The slider sets a ceiling for the entire charging station. On **OCPP 1.6** it sends only a `ChargePointMaxProfile` on connector 0. On **OCPP 2.0.1** it sends a `ChargingStationMaxProfile` on EVSE 0; at or above the configured maximum it clears profiles of that purpose instead. On 1.6, setting the slider to its maximum still sends a profile. A refused request is shown as an error and the slider returns to its last confirmed value, or unknown if there is none. There is no transaction-profile fallback in the slider. Chargers that reject the station profile can still use the `ocpp.set_charge_rate` action and its fallback chain, described below. For per-connector session control, use the action's `custom_profile` option as described below.
+
 While using this entity in an automation might seem logical, do not assume it is safe to update at control-loop frequency.
-This entity controls the OCPP ChargePointMaxProfile, which configures the maximum power or current available for the entire charging station.
 OCPP defines the profile's behaviour, but not where a charger stores it. Some charger firmware persists station-wide profiles in non-volatile memory; other firmware does not. If a charger writes every update to EEPROM or flash, a fast control loop can wear that storage. There is no universal safe update rate or lifetime estimate: confirm the implementation and supported update frequency with the charger manufacturer.
 
 ⚠️ **Warning**: Do not use the maximum-current slider as a high-frequency control loop unless the charger manufacturer confirms that repeated profile updates are safe. Debounce ordinary changes, require a meaningful change before sending another profile, and retain the ability to send an immediate safety reduction.
+
+### Maximum Current upgrade notes
+
+This is a breaking change for multi-connector chargers: the old `number.<cpid>_connector_N_maximum_current` entities are removed, including renamed or disabled entries, and replaced by one station-wide master. Update dashboards, scripts and automations that reference the old entities. Existing flat Maximum Current entities keep their registry identity, customisations and restored values. A newly created master starts at the configured maximum without treating a removed entity's value as confirmed; that initial display is not evidence of the charger's current limit.
+
+The slider-side fallback is also removed on **single-connector OCPP 1.6 chargers**. A charger that rejects `ChargePointMaxProfile` now reports an error on slider changes, even if a transaction profile previously worked. The `ocpp.set_charge_rate` action retains its existing behaviour.
+
+The upgrade does not clear stored charging profiles. Moving the master updates only the station maximum; existing transaction or default profiles may continue imposing lower limits. On 1.6, `ocpp.clear_profile` clears **all charging profiles, including custom profiles**. On 2.0.1 it clears **all profiles with purpose `ChargingStationMaxProfile`**, including any custom profiles of that purpose, and leaves transaction/default profiles in place.
 
 ### TxProfile
 
@@ -46,7 +55,7 @@ Essentially, the slider in your GUI maintains control over the absolute maximum 
 
 Before writing a profile by hand it is worth knowing what the built-in action does, because it is not simply a session-scoped limit.
 
-On **OCPP 1.6** it first tries a station-wide `ChargePointMaxProfile` on connector 0, the same profile purpose the slider writes. **If the charger accepts it, that is the end of the call.** Only if the charger *rejects* it does the action fall back to a `TxProfile` bound to the running transaction, plus a `TxDefaultProfile` for later sessions. Which of those happened depends on your charger, and the action reports success either way.
+On **OCPP 1.6** it first tries a station-wide `ChargePointMaxProfile` on connector 0, the same profile purpose the slider writes. **If the charger accepts it, that is the end of the call.** Only if the charger *rejects* it does the action fall back to a `TxProfile` bound to the running transaction, plus a `TxDefaultProfile` on that connector. Which of those happened depends on your charger, and the action reports success either way.
 
 So on a charger that accepts the station-wide profile, calling this on a short interval repeatedly exercises whatever storage path that firmware uses, and the limit can outlive the transaction rather than being session-scoped.
 

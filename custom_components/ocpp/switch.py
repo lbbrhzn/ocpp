@@ -44,6 +44,9 @@ class OcppSwitchDescription(SwitchEntityDescription):
     default_state: bool = False
     per_connector: bool = False
     single_connector_status_fallback: bool = False
+    # The switch acts on the connector's transaction, so it is unavailable
+    # while that transaction's state is held as unresolved (see ocppv16).
+    transaction_bound: bool = False
 
 
 SWITCHES: Final[list[OcppSwitchDescription]] = [
@@ -60,6 +63,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
             ChargePointStatus.suspended_ev.value,
         ],
         per_connector=True,
+        transaction_bound=True,
     ),
     OcppSwitchDescription(
         key="availability",
@@ -207,6 +211,11 @@ class ChargePointSwitch(SwitchEntity):
         target_conn = (
             self.connector_id if self.entity_description.per_connector else None
         )
+        if (
+            self.entity_description.transaction_bound
+            and self.central_system.is_transaction_indeterminate(self.cpid, target_conn)
+        ):
+            return False
         return bool(self.central_system.get_available(self.cpid, target_conn))
 
     @property
