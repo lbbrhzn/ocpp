@@ -123,6 +123,7 @@ async def test_second_post_connect_during_slow_inventory_does_not_poison_map(has
 
     # owner attempt in flight; first report part arrived, counts still absent
     cp._wait_inventory = asyncio.Event()
+    cp._response_timeout = 0.01
     from custom_components.ocpp.ocppv201 import InventoryReport
 
     cp._inventory = InventoryReport()

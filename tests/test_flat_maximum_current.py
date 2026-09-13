@@ -29,7 +29,10 @@ from custom_components.ocpp.const import (
 )
 from custom_components.ocpp.enums import ConfigurationKey, Profiles
 from custom_components.ocpp.ocppv16 import ChargePoint as ChargePoint16
-from custom_components.ocpp.ocppv201 import ChargePoint as ChargePoint201
+from custom_components.ocpp.ocppv201 import (
+    ChargePoint as ChargePoint201,
+    InventoryReport,
+)
 
 from .const import MOCK_CONFIG_CP_APPEND, MOCK_CONFIG_DATA
 from .lifecycle_asserts import live_entity
@@ -430,6 +433,8 @@ async def test_slider201_uses_existing_station_path(
     """The new hook retains EVSE 0, the configured clear threshold and refusals."""
     central = await setup_flat()
     cp = _attach_protocol(hass, flat_entry, central, "2.0.1")
+    # A cached report keeps the on-use refresh out of the counted traffic.
+    cp._inventory = InventoryReport()
     cp.call = AsyncMock(
         return_value=SimpleNamespace(status=status, status_info="charger reason")
     )

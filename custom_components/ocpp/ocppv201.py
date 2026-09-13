@@ -5,7 +5,7 @@ import contextlib
 from datetime import datetime, UTC
 from dataclasses import dataclass, field
 import logging
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
@@ -63,6 +63,12 @@ from .const import (
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
+# Inventory normally settles within a few seconds. Leave enough room for a
+# burst of events from every connector of a large station, without retaining
+# up to a gigabyte of one-megabyte websocket frames from a misbehaving peer
+# for the whole window.
+_MAX_PENDING_TRANSACTION_EVENTS = 128
+
 
 @dataclass
 class InventoryReport:
@@ -75,6 +81,7 @@ class InventoryReport:
     # rather than "no" - the two are told apart here so that only the
     # unknown case is resolved by probing. An explicit false stands.
     smart_charging_available: bool | None = None
+    charging_rate_units: frozenset[str] = field(default_factory=frozenset)
     reservation_available: bool = False
     local_auth_available: bool = False
     tx_updated_measurands: list[MeasurandEnumType] = field(default_factory=list)
@@ -94,12 +101,15 @@ class ChargePoint(cp):
     _wait_inventory: asyncio.Event | None = None
     _connector_status: list[list[ConnectorStatusEnumType | None]]
     _tx_start_time: dict[int, datetime]
+    _tx_last_seen: dict[int, datetime]  # latest applied event of the displayed tx
     _global_to_evse: dict[int, tuple[int, int]]  # global_idx -> (evse_id, connector_id)
     _evse_to_global: dict[tuple[int, int], int]  # (evse_id, connector_id) -> global_idx
     _evse_status_v16: dict[int, ChargePointStatusv16]
     _pending_status_notifications: list[
         tuple[str, str, int, int]
     ]  # (timestamp, connector_status, evse_id, connector_id)
+    _pending_transaction_events: list[tuple[tuple[Any, ...], dict[str, Any]]]
+    _inventory_mapping_pending: bool
 
     def __init__(
         self,
@@ -122,11 +132,44 @@ class ChargePoint(cp):
             charger,
         )
         self._tx_start_time = {}
+        self._tx_last_seen: dict[int, datetime] = {}
         self._global_to_evse: dict[int, tuple[int, int]] = {}
         self._evse_to_global: dict[tuple[int, int], int] = {}
         self._pending_status_notifications: list[tuple[str, str, int, int]] = []
+        self._pending_transaction_events = []
+        self._pending_transaction_overflow_logged = False
+        self._replaying_transaction_events = False
+        self._inventory_mapping_pending = True
         self._connector_status = []
         self._evse_status_v16: dict[int, ChargePointStatusv16] = {}
+        self._tx_event_state: dict[str, dict[str, Any]] = {}
+
+    def _reset_protocol_generation_state(self) -> None:
+        """Demote buffered events at a websocket connection boundary."""
+        self._pending_transaction_overflow_logged = False
+        # A reconnect without a BootNotification does not restart transaction
+        # ids or seqNo. Keep the ordering guard so a charger cannot replay an
+        # older event into current metrics after a momentary websocket drop.
+        # BootNotification is the charger-generation boundary that clears it.
+        # Events held from the previous connection were current when they
+        # arrived but say nothing about this connection: keep them as history
+        # so the sensors still learn which transaction they describe, without
+        # ever counting as an online start. Replaying them, here or at the
+        # settle, re-creates their ordering records, so a copy the charger
+        # queued and re-sends after the reconnect is dropped as stale rather
+        # than applied twice.
+        for _args, kwargs in self._pending_transaction_events:
+            kwargs["offline"] = True
+        # A reconnect during the first setup, before any report was cached,
+        # gets a fresh inventory window because post_connect runs again.
+        # Otherwise no attempt is coming, so nothing may be held for one -
+        # unless one is still streaming, in which case its settle replays the
+        # history through the complete report rather than a partial one.
+        self._inventory_mapping_pending = (
+            not self.post_connect_success and self._inventory is None
+        )
+        if not self._inventory_mapping_pending and self._wait_inventory is None:
+            self._drain_pending_transaction_events()
 
     # --- Connector mapping helpers (EVSE <-> global index) ---
     def _build_connector_map(self) -> bool:
@@ -152,6 +195,12 @@ class ChargePoint(cp):
         if self._evse_to_global and self._global_to_evse:
             return True
         return self._build_connector_map()
+
+    def _connector_map_is_pending(self) -> bool:
+        """Whether connector messages must wait for the inventory boundary."""
+        return not (self._evse_to_global and self._global_to_evse) and (
+            self._inventory_mapping_pending or self._wait_inventory is not None
+        )
 
     def _pair_to_global(self, evse_id: int, conn_id: int) -> int:
         """Return global index for (evse_id, conn_id)."""
@@ -397,6 +446,87 @@ class ChargePoint(cp):
             return
         self._drain_pending_status_notifications()
 
+    def _buffer_transaction_event(
+        self,
+        event_type: str,
+        timestamp: str,
+        trigger_reason: str,
+        seq_no: int,
+        transaction_info: dict[str, Any],
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Hold an event until its EVSE pair can be mapped without guessing."""
+        if len(self._pending_transaction_events) >= _MAX_PENDING_TRANSACTION_EVENTS:
+            self._pending_transaction_events.pop(0)
+            if not self._pending_transaction_overflow_logged:
+                _LOGGER.warning(
+                    "%s: pending TransactionEvent buffer exceeded %s entries; "
+                    "oldest events will be discarded until inventory settles",
+                    self.id,
+                    _MAX_PENDING_TRANSACTION_EVENTS,
+                )
+                self._pending_transaction_overflow_logged = True
+        # Retain only fields consumed by on_transaction_event. In particular,
+        # don't keep arbitrary customData alive for the whole inventory window.
+        buffered_transaction_info = {
+            key: transaction_info[key]
+            for key in ("transaction_id", "charging_state")
+            if key in transaction_info
+        }
+        buffered_kwargs = {
+            key: kwargs[key]
+            for key in ("evse", "offline", "meter_value", "id_token")
+            if key in kwargs
+        }
+        self._pending_transaction_events.append(
+            (
+                (
+                    event_type,
+                    timestamp,
+                    trigger_reason,
+                    seq_no,
+                    buffered_transaction_info,
+                ),
+                buffered_kwargs,
+            )
+        )
+
+    def _drain_pending_transaction_events(self) -> None:
+        """Replay buffered events after inventory settles, even without a map."""
+        pending = self._pending_transaction_events
+        self._pending_transaction_events = []
+        self._pending_transaction_overflow_logged = False
+        self._replaying_transaction_events = True
+        try:
+            for args, kwargs in pending:
+                kwargs["_from_pending_transaction_event"] = True
+                self.on_transaction_event(*args, **kwargs)
+        finally:
+            self._replaying_transaction_events = False
+        if pending:
+            # One refresh for the whole replay; the events themselves are
+            # kept from scheduling their own.
+            self.hass.async_create_task(self.update(self.settings.cpid))
+
+    def _flush_pending_transaction_events(self) -> None:
+        """Replay buffered events as soon as a canonical map is available."""
+        if not self._ensure_connector_map():
+            return
+        self._drain_pending_transaction_events()
+
+    def _settle_inventory_boundary(self) -> None:
+        """Close the inventory window and replay everything held for it.
+
+        With a map (even a partial one) connector messages route through it;
+        without one they take _pair_to_global's dynamic allocation, so the
+        first charger-reported pair becomes connector 1.
+        """
+        self._inventory_mapping_pending = False
+        if self._inventory:
+            self._build_connector_map()
+        self._drain_pending_status_notifications()
+        self._drain_pending_transaction_events()
+
     def _total_connectors(self) -> int:
         """Total physical connectors across all EVSE."""
         if not self._inventory:
@@ -415,18 +545,26 @@ class ChargePoint(cp):
         )
 
     async def _get_inventory(self):
-        if self._inventory is not None:
-            return
         if self._wait_inventory is not None:
-            # An attempt is already in flight (post_connect can run twice:
-            # boot notification racing the 10s monitor backstop). Taking
-            # ownership here would overwrite the owner's event, and once the
-            # owner settled and cleared it, this caller's accepted response
-            # would dereference None at _wait_inventory.wait(). Return and
-            # leave the attempt - and the drain at its settle point - to the
-            # single owner.
+            # Capability consumers must wait for the single owner rather than
+            # read an empty or half-streamed report. In particular, returning
+            # here can make a managed rate request send amps just before the
+            # owner learns that the station supports watts only.
+            owner = self._wait_inventory
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(owner.wait(), self._response_timeout)
+            return
+        if self._inventory is not None:
+            # With no attempt in flight, none is coming to settle the mapping
+            # window, so settle it here: a reconnect can re-arm the window
+            # after an earlier attempt already cached the report, and anything
+            # held for it would otherwise wait forever. While an attempt is
+            # still streaming its parts the report is partial, so the settle
+            # stays with that owner.
+            self._settle_inventory_boundary()
             return
         self._wait_inventory = asyncio.Event()
+        owner = self._wait_inventory
         req = call.GetBaseReport(1, "FullInventory")
         resp: call_result.GetBaseReport | None = None
         try:
@@ -455,7 +593,8 @@ class ChargePoint(cp):
             # cancelled - and now that an in-flight event turns other callers
             # away, leaking it set would make every future attempt silently
             # return forever.
-            self._wait_inventory = None
+            if self._wait_inventory is owner:
+                self._wait_inventory = None
             # However this attempt ended - final report received, timed out,
             # refused, unsupported, or an escaping exception - it is over,
             # and nothing else will drain the statuses buffered while it ran:
@@ -464,20 +603,24 @@ class ChargePoint(cp):
             # the zero-connector fallback entirely, and on a persistently
             # failing charger the next attempt would strand them again. Drain
             # inside the finally so this really is the one point every
-            # outcome passes through. With a map (even a partial one)
-            # statuses route through it; without one they take
+            # outcome passes through. With a map (even a partial one),
+            # connector messages route through it; without one they take
             # _pair_to_global's dynamic allocation, so the first
             # charger-reported pair becomes connector 1. (Station-level
             # statuses never buffer - on_status_notification applies them
             # immediately - so only real connector pairs pass through here.)
             # A concurrent second caller (boot notification racing the 10s
-            # monitor backstop) never reaches this point mid-stream - it
-            # returns early on the _inventory check above - so a
-            # half-streamed report can never be drained into a dynamic map
-            # that the real inventory could then not replace.
-            if self._inventory:
-                self._build_connector_map()
-            self._drain_pending_status_notifications()
+            # monitor backstop) waits on the owner's event above, so it cannot
+            # drain a half-streamed report into a dynamic map that the real
+            # inventory could then not replace.
+            try:
+                self._settle_inventory_boundary()
+            finally:
+                # A refusal, unsupported request, exception or cancellation
+                # has no final NotifyReport to wake callers sharing this
+                # attempt. Always publish completion, even if replaying a
+                # buffered charger message itself fails.
+                owner.set()
 
     async def get_number_of_connectors(self) -> int:
         """Return number of connectors on this charger.
@@ -742,27 +885,57 @@ class ChargePoint(cp):
 
         # Removing the limit is a successful outcome too: a request at or above
         # the maximum means "no restriction", not a failure to apply one. The
-        # amp threshold has to be the configured maximum rather than a literal
-        # 32, because that is what bounds number.<cpid>_maximum_current - with
-        # a higher max_current every request in between was turned into a bare
-        # profile clear, so the charger ran unrestricted while the slider
-        # showed the figure the user had asked for.
+        # amp threshold is the configured maximum because that is what bounds
+        # number.<cpid>_maximum_current. Removing the managed station limit
+        # needs no capability information, so resolve these cases before the
+        # report refresh: a charger that accepts GetBaseReport but never
+        # completes it must not delay the clear for the whole response timeout.
         if limit_watts is not None:
             if float(limit_watts) >= 22000:
                 return await self.clear_profile()
-            period_limit = int(limit_watts)
-            unit_value = ChargingRateUnitEnumType.watts.value
-
         elif limit_amps is not None:
             if float(limit_amps) >= float(self.settings.max_current):
                 return await self.clear_profile()
-            period_limit = (
-                int(limit_amps) if float(limit_amps).is_integer() else float(limit_amps)
-            )
-            unit_value = ChargingRateUnitEnumType.amps.value
-
         else:
             return await self.clear_profile()
+
+        # A boot discards the cached report and an established connection does
+        # not run post_connect again, so refresh on use: otherwise a W-only
+        # station is sent amps after a reboot. A failed refresh keeps today's
+        # amp default rather than blocking the request.
+        try:
+            await self._get_inventory()
+        except Exception as ex:
+            _LOGGER.debug(
+                "%s: inventory refresh before set_charge_rate failed: %s", self.id, ex
+            )
+        allowed_units = (
+            self._inventory.charging_rate_units if self._inventory else frozenset()
+        )
+        watts_only = allowed_units == {ChargingRateUnitEnumType.watts.value}
+        amps_only = allowed_units == {ChargingRateUnitEnumType.amps.value}
+
+        if limit_watts is not None:
+            if amps_only:
+                period_limit = self._watts_to_amps(float(limit_watts), conn_id)
+                unit_value = ChargingRateUnitEnumType.amps.value
+            else:
+                # Preserve caller-supplied watts whenever the charger permits
+                # watts, rather than round-tripping through amps.
+                period_limit = int(limit_watts)
+                unit_value = ChargingRateUnitEnumType.watts.value
+
+        elif limit_amps is not None:
+            if watts_only:
+                period_limit = self._amps_to_watts(float(limit_amps), conn_id)
+                unit_value = ChargingRateUnitEnumType.watts.value
+            else:
+                period_limit = (
+                    int(limit_amps)
+                    if float(limit_amps).is_integer()
+                    else float(limit_amps)
+                )
+                unit_value = ChargingRateUnitEnumType.amps.value
 
         schedule: dict = {
             "id": 1,
@@ -964,6 +1137,44 @@ class ChargePoint(cp):
             self.async_update_device_info_v201(charging_station)
         )
         self._inventory = None
+        # An initial boot is followed by post_connect's inventory request. A
+        # later boot on an already configured connection is not, so waiting in
+        # that case would strand events forever on chargers whose inventory is
+        # unusable.
+        self._inventory_mapping_pending = not self.post_connect_success
+        # Transaction ids are charger-defined strings and may be reused after
+        # a boot. Ordering history from the preceding charger generation must
+        # not reject the new transaction as a replay.
+        self._tx_event_state.clear()
+        connector_ids = set(self._tx_start_time) | set(self._tx_last_seen)
+        for connector_id in self._global_to_evse:
+            transaction = self._metrics.get((connector_id, csess.transaction_id))
+            if transaction is not None and transaction.value not in (None, ""):
+                connector_ids.add(connector_id)
+        # The clock may restart behind its previous value, so the bound that
+        # judges replayed history must not outlive the generation that set it.
+        self._tx_last_seen.clear()
+        # A transaction id can be reused in this new charger generation, and
+        # the charger's clock and energy register can restart behind their old
+        # values. Keep the id available for a remote stop, but do not attach
+        # the preceding generation's timer, token or meter baseline to the next
+        # online event carrying that same id.
+        self._tx_start_time.clear()
+        for connector_id in connector_ids:
+            for measurand in {
+                csess.meter_start,
+                csess.session_energy,
+                csess.session_time,
+            }:
+                metric = self._metrics.get((connector_id, measurand))
+                if metric is not None:
+                    metric.value = None
+            id_tag = self._metrics.get((connector_id, cstat.id_tag))
+            if id_tag is not None:
+                id_tag.value = ""
+        self._pending_transaction_events.clear()
+        self._pending_transaction_overflow_logged = False
+        self.received_boot_notification = True
         self._register_boot_notification()
         return resp
 
@@ -1011,7 +1222,8 @@ class ChargePoint(cp):
             self._metrics[
                 (global_idx, cstat.status_connector)
             ].value = evse_status_v16.value
-        self.hass.async_create_task(self.update(self.settings.cpid))
+        if not self._replaying_transaction_events:
+            self.hass.async_create_task(self.update(self.settings.cpid))
 
     @on(Action.status_notification)
     def on_status_notification(
@@ -1023,24 +1235,19 @@ class ChargePoint(cp):
         # charger whose inventory yields no map would strand them - and the
         # chargers that send station-level statuses (e.g. FoxESS A-series)
         # are exactly the ones with such inventories.
-        if (
-            evse_id >= 1
-            and connector_id >= 1
-            and not self._ensure_connector_map()
-            and (not self.post_connect_success or self._wait_inventory is not None)
-        ):
-            # No inventory-derived map, and either setup is still running or
-            # an inventory attempt is in flight (stop_transaction re-fetches
-            # when none is cached, so this can happen after setup too): hold
-            # the status until the attempt settles, so it cannot poison the
-            # map of a charger whose real report is still on its way.
+        if evse_id >= 1 and connector_id >= 1 and self._connector_map_is_pending():
+            # No inventory-derived map, and either the initial inventory
+            # boundary has not settled or a later attempt is in flight
+            # (stop_transaction re-fetches when none is cached): hold the
+            # status so it cannot poison a map whose real report is still on
+            # its way.
             # _get_inventory drains this buffer when the attempt ends, however
             # it ends, so nothing held here can be stranded.
             #
-            # Once setup has finished and no attempt is running, a missing
-            # map means the inventory is unusable and no flush is ever
-            # coming - fall through and let _pair_to_global's dynamic
-            # allocation route it instead of buffering it forever.
+            # Once the inventory boundary has settled and no attempt is
+            # running, a missing map means the inventory is unusable and no
+            # flush is coming - fall through and let _pair_to_global's
+            # dynamic allocation route it instead of buffering it forever.
             self._pending_status_notifications.append(
                 (timestamp, connector_status, evse_id, connector_id)
             )
@@ -1106,6 +1313,22 @@ class ChargePoint(cp):
                 variable_name == "Available"
             ):
                 self._inventory.smart_charging_available = bool_value
+                continue
+            if component_name == "SmartChargingCtrlr" and variable_name == "RateUnit":
+                characteristics: dict = (
+                    report_data.get("variable_characteristics", {}) or {}
+                )
+                # The actual value lists the units the station supports. The
+                # characteristics' valuesList is the variable's whole domain,
+                # "A,W" on every compliant station, so it only stands in when
+                # no value was reported.
+                raw_units = str(value or characteristics.get("values_list") or "")
+                units = {
+                    token.strip().upper()
+                    for token in raw_units.replace(";", ",").split(",")
+                    if token.strip().upper() in {"A", "W"}
+                }
+                self._inventory.charging_rate_units = frozenset(units)
                 continue
             if (component_name == "ReservationCtrlr") and (
                 variable_name == "Available"
@@ -1207,10 +1430,13 @@ class ChargePoint(cp):
                 continue
 
         if not kwargs.get("tbc", False):
+            self._inventory_mapping_pending = False
             if hasattr(self, "_build_connector_map"):
                 self._build_connector_map()
             if hasattr(self, "_flush_pending_status_notifications"):
                 self._flush_pending_status_notifications()
+            if hasattr(self, "_flush_pending_transaction_events"):
+                self._flush_pending_transaction_events()
             self._wait_inventory.set()
 
         return call_result.NotifyReport()
@@ -1235,7 +1461,14 @@ class ChargePoint(cp):
         meter_values: list[dict],
         evse_id: int,
         connector_id: int,
+        *,
+        applies_to_current_transaction: bool = True,
     ):
+        if not applies_to_current_transaction:
+            # Metrics are current-state storage, not an event archive.  A
+            # delayed sample for transaction A must not roll lifetime energy
+            # (or any flow/session metric) back after transaction B has begun.
+            return
         global_idx: int = self._pair_to_global(evse_id, connector_id)
         converted_values: list[list[MeasurandValue]] = []
         for meter_value in meter_values:
@@ -1258,9 +1491,12 @@ class ChargePoint(cp):
                 )
             converted_values.append(measurands)
 
-        if (tx_event_type == TransactionEventEnumType.started.value) or (
-            (tx_event_type == TransactionEventEnumType.updated.value)
-            and (self._metrics[(global_idx, csess.meter_start)].value is None)
+        if applies_to_current_transaction and (
+            (tx_event_type == TransactionEventEnumType.started.value)
+            or (
+                (tx_event_type == TransactionEventEnumType.updated.value)
+                and (self._metrics[(global_idx, csess.meter_start)].value is None)
+            )
         ):
             energy_measurand = MeasurandEnumType.energy_active_import_register.value
             for meter_value in converted_values:
@@ -1275,9 +1511,14 @@ class ChargePoint(cp):
                             (global_idx, csess.meter_start)
                         ].unit = energy_unit
 
-        self.process_measurands(converted_values, True, global_idx)
+        self.process_measurands(
+            converted_values, applies_to_current_transaction, global_idx
+        )
 
-        if tx_event_type == TransactionEventEnumType.ended.value:
+        if (
+            applies_to_current_transaction
+            and tx_event_type == TransactionEventEnumType.ended.value
+        ):
             measurands_in_tx: set[str] = set()
             tx_end_context = ReadingContextEnumType.transaction_end.value
             for meter_value in converted_values:
@@ -1303,17 +1544,89 @@ class ChargePoint(cp):
         transaction_info,
         **kwargs,
     ):
-        """Perform OCPP callback."""
-        evse_id: int = kwargs["evse"]["id"] if "evse" in kwargs else 1
-        evse_conn_id: int = (
-            kwargs["evse"].get("connector_id", 1) if "evse" in kwargs else 1
-        )
+        """Apply only advancing, online events to live connector state."""
+        response = call_result.TransactionEvent()
+        from_pending = bool(kwargs.pop("_from_pending_transaction_event", False))
+        tx_id = str(transaction_info.get("transaction_id", ""))
+        try:
+            sequence = int(seq_no)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "%s: ignored TransactionEvent with invalid seqNo=%s", self.id, seq_no
+            )
+            return response
+
+        evse = kwargs.get("evse") or {"id": 1}
+        try:
+            evse_id = int(evse.get("id", 1))
+        except (TypeError, ValueError):
+            evse_id = 0
+        raw_connector = evse.get("connector_id")
+        if evse_id > 0 and not from_pending and self._connector_map_is_pending():
+            self._buffer_transaction_event(
+                event_type,
+                timestamp,
+                trigger_reason,
+                seq_no,
+                transaction_info,
+                kwargs,
+            )
+            if kwargs.get("id_token"):
+                # The reply cannot wait for the replay, and a response must
+                # carry idTokenInfo whenever the request carried an idToken.
+                # The live path always answers Accepted; answer the same here.
+                response.id_token_info = {
+                    "status": AuthorizationStatusEnumType.accepted
+                }
+            return response
+        if raw_connector is None:
+            connector_count = 0
+            if self._inventory is not None and 0 < evse_id <= len(
+                self._inventory.connector_count
+            ):
+                connector_count = int(self._inventory.connector_count[evse_id - 1] or 0)
+            if connector_count:
+                pass
+            elif int(self.settings.num_connectors or 0) == 1:
+                # No report yet, or one that names no connector for this
+                # EVSE: the configured total of one connector, which is also
+                # what the charger is exposed as, still makes the omitted
+                # connector id unambiguous.
+                connector_count = 1
+            elif len(self._evse_to_global) >= int(self.settings.num_connectors or 0):
+                # Once the existing map covers the configured topology it is
+                # also usable as an early-inventory source of ambiguity.
+                connector_count = len(
+                    {
+                        connector
+                        for mapped_evse, connector in self._evse_to_global
+                        if mapped_evse == evse_id
+                    }
+                )
+            if connector_count == 1:
+                evse_conn_id = 1
+            else:
+                _LOGGER.warning(
+                    "%s: TransactionEvent tx=%s omitted connectorId for EVSE %s "
+                    "with %s known connectors; connector state was not attributed",
+                    self.id,
+                    tx_id,
+                    evse_id,
+                    connector_count or "an unknown number of",
+                )
+                station_v16 = self._charging_state_v16(
+                    transaction_info.get("charging_state")
+                )
+                if station_v16 and evse_id > 0:
+                    self._report_evse_status(evse_id, station_v16)
+                return response
+        else:
+            try:
+                evse_conn_id = int(raw_connector)
+            except (TypeError, ValueError):
+                evse_conn_id = 0
+
         if evse_id < 1 or evse_conn_id < 1:
-            # The same degenerate pair _apply_status_notification refuses. It
-            # has to be caught before _pair_to_global, which would otherwise
-            # allocate a phantom connector, record the transaction and its
-            # meter values against it, and leave the real connector empty.
-            # The charging state is still station-level news, so report that.
             _LOGGER.debug(
                 "Ignoring connector-scoped data from a TransactionEvent with "
                 "a malformed pair (evse_id=%s, connector_id=%s)",
@@ -1323,16 +1636,121 @@ class ChargePoint(cp):
             station_v16 = self._charging_state_v16(
                 transaction_info.get("charging_state")
             )
-            if station_v16:
+            if station_v16 and evse_id > 0:
                 self._report_evse_status(evse_id, station_v16)
-            return call_result.TransactionEvent()
-        global_idx: int = self._pair_to_global(evse_id, evse_conn_id)
-        offline: bool = kwargs.get("offline", False)
-        meter_values: list[dict] = kwargs.get("meter_value", [])
-        self._set_meter_values(event_type, meter_values, evse_id, evse_conn_id)
-        t = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            return response
 
-        if "charging_state" in transaction_info:
+        previous = self._tx_event_state.get(tx_id)
+        if previous and (sequence <= previous["seq"] or previous["ended"]):
+            _LOGGER.debug(
+                "%s: ignored stale TransactionEvent tx=%s seq=%s (last=%s ended=%s)",
+                self.id,
+                tx_id,
+                sequence,
+                previous["seq"],
+                previous["ended"],
+            )
+            return response
+        if tx_id not in self._tx_event_state and len(self._tx_event_state) >= 1024:
+            ended = next(
+                (key for key, state in self._tx_event_state.items() if state["ended"]),
+                None,
+            )
+            if ended is None:
+                _LOGGER.warning(
+                    "%s: evicted the oldest TransactionEvent ordering record "
+                    "to admit tx=%s because the per-generation guard is full",
+                    self.id,
+                    tx_id,
+                )
+                self._tx_event_state.pop(next(iter(self._tx_event_state)))
+            else:
+                self._tx_event_state.pop(ended)
+        self._tx_event_state[tx_id] = {
+            "seq": sequence,
+            "ended": event_type == TransactionEventEnumType.ended.value,
+        }
+
+        offline = bool(kwargs.get("offline", False))
+        global_idx = self._pair_to_global(evse_id, evse_conn_id)
+        current_tx_value = self._metrics[(global_idx, csess.transaction_id)].value
+        current_tx_id = (
+            str(current_tx_value) if current_tx_value not in (None, "") else ""
+        )
+        is_started = event_type == TransactionEventEnumType.started.value
+        is_ended = event_type == TransactionEventEnumType.ended.value
+        t = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=UTC)
+        foreign = bool(current_tx_id and current_tx_id != tx_id)
+        # An online event for another transaction is normally current charger
+        # evidence. Two shapes are history instead: an Ended says nothing
+        # about whether the displayed transaction is still running, and an
+        # Updated stamped no later than the displayed transaction's latest
+        # applied event can only be a replay whose offline flag the charger
+        # did not set. The latest event rather than the start is the bound so
+        # that a transaction adopted without a Started is guarded as well.
+        # Retiring the displayed session on those would hand its confirmed
+        # limit to cleanup while the car is still charging under it.
+        history = False
+        if foreign and not offline:
+            if is_ended:
+                history = True
+            elif not is_started:
+                last_seen = self._tx_last_seen.get(global_idx)
+                history = last_seen is not None and t <= last_seen
+        foreign_online = foreign and not offline and not history
+        # An offline Started is history too: it records ordering only, so a
+        # replay can never resurrect an ended transaction. A transaction that
+        # is still running announces itself with its next online event, which
+        # adopts it below.
+        applies_to_current_transaction = (
+            (not offline and not history) or current_tx_id == tx_id
+        ) and not (offline and is_started)
+
+        if foreign_online:
+            # Any online event is current charger evidence.  It retires the
+            # displayed transaction even when the new transaction's Started
+            # was missed, but only an actual online Started below is reported
+            # to the transaction hook as a start.
+            if is_started:
+                _LOGGER.debug(
+                    "%s[%s]: online Started replaced transaction %s with %s",
+                    self.id,
+                    global_idx,
+                    current_tx_id,
+                    tx_id,
+                )
+            else:
+                _LOGGER.warning(
+                    "%s[%s]: online TransactionEvent switched transaction "
+                    "%s -> %s without a matching Started event",
+                    self.id,
+                    global_idx,
+                    current_tx_id,
+                    tx_id,
+                )
+            self._report_transaction_end(global_idx, current_tx_id)
+            self._tx_start_time.pop(global_idx, None)
+            self._tx_last_seen.pop(global_idx, None)
+            self._metrics[(global_idx, csess.transaction_id)].value = ""
+            self._metrics[(global_idx, cstat.id_tag)].value = ""
+            self._metrics[(global_idx, csess.meter_start)].value = None
+            self._metrics[(global_idx, csess.session_energy)].value = None
+            self._metrics[(global_idx, csess.session_time)].value = None
+            if not is_ended:
+                self._metrics[(global_idx, csess.transaction_id)].value = tx_id
+
+        meter_values: list[dict] = kwargs.get("meter_value", [])
+        self._set_meter_values(
+            event_type,
+            meter_values,
+            evse_id,
+            evse_conn_id,
+            applies_to_current_transaction=applies_to_current_transaction,
+        )
+
+        if applies_to_current_transaction and "charging_state" in transaction_info:
             state = transaction_info["charging_state"]
             evse_status_v16 = self._charging_state_v16(state)
             if evse_status_v16:
@@ -1359,33 +1777,67 @@ class ChargePoint(cp):
                         evse_id, evse_status_v16, connector_id=evse_conn_id
                     )
 
-        response = call_result.TransactionEvent()
         id_token = kwargs.get("id_token")
         if id_token:
             response.id_token_info = {"status": AuthorizationStatusEnumType.accepted}
-            id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
-            self._metrics[(global_idx, cstat.id_tag)].value = id_tag_string
+            if applies_to_current_transaction:
+                id_tag_string: str = id_token["type"] + ":" + id_token["id_token"]
+                self._metrics[(global_idx, cstat.id_tag)].value = id_tag_string
 
-        if event_type == TransactionEventEnumType.started.value:
+        if is_started and applies_to_current_transaction:
             self._tx_start_time[global_idx] = t
-            tx_id: str = transaction_info["transaction_id"]
             self._metrics[(global_idx, csess.transaction_id)].value = tx_id
             self._metrics[(global_idx, csess.session_time)].value = 0
             self._metrics[(global_idx, csess.session_time)].unit = UnitOfTime.MINUTES
-        else:
+            self._report_transaction_start(global_idx, tx_id, (evse_id, evse_conn_id))
+        elif applies_to_current_transaction:
+            if not offline and not current_tx_id and not is_ended:
+                # Online evidence of a transaction nothing displays yet, such
+                # as the first Updated after a Home Assistant restart. Adopt
+                # its id so a remote stop can target it. No Started was
+                # observed, so no start is reported to the transaction hook.
+                self._metrics[(global_idx, csess.transaction_id)].value = tx_id
             if self._tx_start_time.get(global_idx):
-                elapsed = (t - self._tx_start_time[global_idx]).total_seconds()
+                elapsed = max(
+                    0.0, (t - self._tx_start_time[global_idx]).total_seconds()
+                )
                 duration_minutes: int = int((elapsed + 59) // 60)
                 self._metrics[(global_idx, csess.session_time)].value = duration_minutes
                 self._metrics[
                     (global_idx, csess.session_time)
                 ].unit = UnitOfTime.MINUTES
-            if event_type == TransactionEventEnumType.ended.value:
+            if is_ended:
+                self._report_transaction_end(global_idx, tx_id)
                 self._metrics[(global_idx, csess.transaction_id)].value = ""
                 self._metrics[(global_idx, cstat.id_tag)].value = ""
                 self._tx_start_time.pop(global_idx, None)
+                self._tx_last_seen.pop(global_idx, None)
 
-        if not offline:
+        if applies_to_current_transaction and not is_ended:
+            # The latest applied event bounds what can still count as history
+            # for the transaction now displayed.
+            previous_seen = self._tx_last_seen.get(global_idx)
+            if previous_seen is None or t > previous_seen:
+                self._tx_last_seen[global_idx] = t
+
+        if offline and applies_to_current_transaction:
+            _LOGGER.debug(
+                "%s: applied offline TransactionEvent tx=%s seq=%s without "
+                "reporting an online start",
+                self.id,
+                tx_id,
+                sequence,
+            )
+        elif offline or history:
+            _LOGGER.debug(
+                "%s: ignored %s TransactionEvent tx=%s seq=%s for a "
+                "transaction other than the one currently displayed",
+                self.id,
+                "offline" if offline else "superseded",
+                tx_id,
+                sequence,
+            )
+        elif not self._replaying_transaction_events:
             self.hass.async_create_task(self.update(self.settings.cpid))
 
         return response

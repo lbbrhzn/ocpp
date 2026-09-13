@@ -21,6 +21,7 @@ import asyncio
 import logging
 from datetime import datetime, UTC
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -1225,3 +1226,39 @@ async def test_a_station_level_control_is_never_gated_by_a_hold(hass):
 
     assert cp.transaction_is_unsafe(1) is True
     assert cp.transaction_is_unsafe(None) is False
+
+
+async def test_transaction_hooks_report_start_and_end(hass, frozen_time):
+    """A bound controller hears every 1.6 start and end with its connector."""
+    cp = _mk_cp(hass)
+    await _settle(hass, cp)
+    cp.session_controller = Mock()
+
+    tx_id = cp.on_start_transaction(1, "tag-a", 0).transaction_id
+    cp.session_controller.on_transaction_start.assert_called_once_with(1, tx_id, 1)
+
+    cp.on_stop_transaction(meter_stop=5000, timestamp=None, transaction_id=tx_id)
+    await hass.async_block_till_done()
+    cp.session_controller.on_transaction_end.assert_called_once_with(1, tx_id)
+
+
+async def test_a_failing_hook_cannot_break_transaction_handling(
+    hass, frozen_time, caplog
+):
+    """A hook that raises is logged; the 1.6 start and stop complete regardless."""
+    cp = _mk_cp(hass)
+    await _settle(hass, cp)
+    cp.session_controller = Mock()
+    cp.session_controller.on_transaction_start.side_effect = RuntimeError("start")
+    cp.session_controller.on_transaction_end.side_effect = RuntimeError("end")
+
+    result = cp.on_start_transaction(1, "tag-a", 0)
+    tx_id = result.transaction_id
+    assert result.id_tag_info["status"] == "Accepted"
+    assert cp._active_tx[1] == tx_id
+    assert f"session hook failed on transaction {tx_id} start" in caplog.text
+
+    cp.on_stop_transaction(meter_stop=5000, timestamp=None, transaction_id=tx_id)
+    await hass.async_block_till_done()
+    assert cp._active_tx[1] == 0
+    assert caplog.text.count("session hook failed") == 2
