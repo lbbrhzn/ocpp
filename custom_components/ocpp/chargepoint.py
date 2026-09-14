@@ -288,6 +288,7 @@ class ChargePoint(cp):
         self._targeted_refresh_ready = False
         self.tasks = None
         self._session = None
+        self._start_pending = True
         self._reconnect_token = None
         self._retirement_tasks: set[asyncio.Task] = set()
         self._charger_reports_session_energy = False
@@ -586,6 +587,12 @@ class ChargePoint(cp):
 
     async def start(self):
         """Start charge point."""
+        # A subclass may await initialization (v1.6 loads transaction state)
+        # before reaching here. Stop/reconnect must fence that pending start.
+        # Check before creating coroutines; run publishes without yielding.
+        if not self._start_pending:
+            return
+        self._start_pending = False
         await self.run([super().start(), self.monitor_connection()])
 
     async def run(self, tasks):
@@ -691,13 +698,15 @@ class ChargePoint(cp):
             raise asyncio.CancelledError
 
     async def stop(self):
-        """Stop the current session and invalidate already pending reconnects."""
+        """Stop the session and invalidate pending initial start and reconnects."""
+        self._start_pending = False
         self._reconnect_token = None
         await self._stop_session(self._get_session())
 
     async def reconnect(self, connection: ServerConnection):
         """Retire the previous session before publishing the newest replacement."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
+        self._start_pending = False
         token = self._reconnect_token = object()
         candidate = {"connection": connection, "tasks": (), "cleanup": None}
         installed = False
