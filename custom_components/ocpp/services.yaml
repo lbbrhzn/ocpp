@@ -39,14 +39,14 @@ set_charge_rate:
       default: 22000
     conn_id:
       name: Connector identifier
-      description: Optional, 0 = all connectors (default), 1 is first connector
+      description: Selects the target connector, or mapped EVSE on OCPP 2.x, for custom_profile. Managed limits first target the whole charging station; OCPP 1.6 may use this connector for fallback profiles.
       required: false
       advanced: true
       example: 0
       default: 0
     custom_profile:
       name: Custom profile
-      description: Used to send a custom charge profile to charger (for advanced users only use >- or '' to ensure profile is a string variable)
+      description: Raw OCPP charging profile. Prefer a YAML mapping, including a template that returns a mapping. A valid JSON object string is also accepted; single-quoted object strings remain supported for compatibility.
       required: false
       advanced: true
       example: '{"chargingProfileId":8,"stackLevel":0,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16}]}}'

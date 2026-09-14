@@ -48,7 +48,7 @@ async def test_trigger_status_timeout_on_nonzero_adjusts_and_stops(
             await wait_ready(cs.charge_points[cp_id])
 
             srv_cp = cs.charge_points[cp_id]
-            srv_cp._metrics[0][cdet.connectors.value].value = 2
+            srv_cp._metrics[0][cdet.connectors].value = 2
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):
@@ -64,7 +64,7 @@ async def test_trigger_status_timeout_on_nonzero_adjusts_and_stops(
             assert ok is False
             # Should stop after the failing connector
             assert attempts == [0, 1, 2]
-            assert int(srv_cp._metrics[0][cdet.connectors.value].value) == 1
+            assert int(srv_cp._metrics[0][cdet.connectors].value) == 1
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -248,7 +248,7 @@ async def test_measurands_manual_set_accepted_configures(
             # configure() should have been called with the accepted CSV
             assert (
                 called_configure
-                and called_configure[0][0] == ckey.meter_values_sampled_data.value
+                and called_configure[0][0] == ckey.meter_values_sampled_data
             )
         finally:
             task.cancel()
@@ -364,7 +364,7 @@ async def test_trigger_status_notification_connector_count_parse_exception(
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
             # Force parse error so n=1
-            srv._metrics[0][cdet.connectors.value].value = "bad"
+            srv._metrics[0][cdet.connectors].value = "bad"
 
             async def fake_call(req):
                 if isinstance(req, call.TriggerMessage):

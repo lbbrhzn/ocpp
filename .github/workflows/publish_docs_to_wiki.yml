@@ -6,33 +6,102 @@ on:
       - docs/**
     branches:
       - main
-      
+
+# Least privilege for the default token: this job only reads the repo.
+# The wiki push uses WIKI_ACTION_TOKEN, a separate credential.
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-publish
+  cancel-in-progress: false
+
 env:
-  USER_TOKEN: ${{ secrets.WIKI_ACTION_TOKEN }}
   USER_NAME: ocpp
   USER_EMAIL: ocpp@lbbrhzn.nl
-  OWNER: ${{ github.event.repository.owner.name }}
-  REPOSITORY_NAME: ${{ github.event.repository.name }}
 
 jobs:
   publish_docs_to_wiki:
     runs-on: ubuntu-latest
-    steps:  
+    timeout-minutes: 10
+    steps:
     - uses: actions/checkout@v7
+      with:
+        # Nothing here pushes to the main repo; do not leave the default
+        # token in the checkout's git config.
+        persist-credentials: false
 
-    - name: Pull wiki
+    - name: Stage wiki content
       run: |
-         mkdir tmp_wiki
-         cd tmp_wiki
-         git init
-         git config user.name $USER_NAME
-         git config user.email $USER_EMAIL
-         git pull https://$USER_TOKEN@github.com/$OWNER/$REPOSITORY_NAME.wiki.git
+        # Build the new page set BEFORE the live mirror is touched, so a
+        # copy that fails partway leaves the wiki as it was instead of
+        # publishing half a mirror. xargs propagates such a failure;
+        # find -exec cp ... \; would not - find exits 0 however many
+        # invocations failed.
+        #
+        # -type f is load-bearing, not cosmetic: it copies regular files
+        # only. A symlink under docs/ pointing at the wiki clone's
+        # .git/config would otherwise be dereferenced into a page and
+        # publish the wiki token.
+        #
+        # Only the Markdown pages belong in the wiki. docs/ also carries
+        # the Sphinx machinery for Read the Docs (conf.py, Makefile,
+        # index.rst, requirements.txt) and its own README, which describes
+        # the folder rather than the wiki.
+        mkdir wiki_staging
+        find docs -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print0 \
+          | xargs -0 -I PAGE cp -- PAGE wiki_staging/
+        # The wiki front page must be among them, or something is wrong.
+        test -f wiki_staging/Home.md
 
-    - name: Push wiki
+    - name: Publish to wiki
+      env:
+        WIKI_TOKEN: ${{ secrets.WIKI_ACTION_TOKEN }}
       run: |
-        rsync -av --delete docs/ tmp_wiki/ --exclude .git
+        # Transport is retried a few times: a transient failure here used
+        # to leave the wiki stale until the next docs commit. Errors are
+        # not classified - matching git stderr is fragile, and a retried
+        # auth failure just fails three times a few seconds apart. The
+        # backoff carries jitter because a GitHub-wide incident fails
+        # every repository's workflows at once: without it they would all
+        # retry on the same 10s and 20s beat and hit the recovering
+        # service together. (The concurrency group above only serialises
+        # this repository's own runs.)
+        retry() {
+          label="$1"; shift
+          attempt=1
+          until "$@"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "$label failed after $attempt attempts" >&2
+              return 1
+            fi
+            delay=$((attempt * 10 + RANDOM % 10))
+            echo "$label failed (attempt $attempt), retrying in ${delay}s" >&2
+            sleep "$delay"
+            attempt=$((attempt + 1))
+          done
+        }
+
+        WIKI_URL="https://${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git"
+        # Nothing below echoes the command: the URL carries the token.
+        clone_wiki() {
+          rm -rf tmp_wiki
+          git clone --quiet "$WIKI_URL" tmp_wiki
+        }
+        retry "wiki clone" clone_wiki
+
+        # Replace the mirror's contents wholesale, keeping .git: a page
+        # deleted from docs/ has to disappear from the wiki too.
+        find tmp_wiki -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+        mv wiki_staging/*.md tmp_wiki/
+
         cd tmp_wiki
+        git config user.name "$USER_NAME"
+        git config user.email "$USER_EMAIL"
         git add .
+        if git diff --cached --quiet; then
+          echo "Wiki already up to date - nothing to publish"
+          exit 0
+        fi
         git commit -m "Update Wiki content"
-        git push -f --set-upstream https://$USER_TOKEN@github.com/$OWNER/$REPOSITORY_NAME.wiki.git master
+        retry "wiki push" git push

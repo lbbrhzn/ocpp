@@ -85,7 +85,7 @@ def _mk_cp(
     # Minimal fake connection
     conn = SimpleNamespace(state=State.CLOSED, close=lambda: asyncio.sleep(0))
     cp = ChargePoint("CP_A", conn, version, hass, entry, centr, chg)
-    cp._metrics[(0, csess.meter_start.value)].value = None
+    cp._metrics[(0, csess.meter_start)].value = None
     return cp
 
 
@@ -191,16 +191,20 @@ async def test_async_update_device_info_updates_metrics_and_registry(hass):
         firmware_version="1.2.3",
     )
 
-    assert cp._metrics[(0, cdet.model.value)].value == "Model X"
-    assert cp._metrics[(0, cdet.vendor.value)].value == "Acme"
-    assert cp._metrics[(0, cdet.firmware_version.value)].value == "1.2.3"
-    assert cp._metrics[(0, cdet.serial.value)].value == "SER123"
+    assert cp._metrics[(0, cdet.model)].value == "Model X"
+    assert cp._metrics[(0, cdet.vendor)].value == "Acme"
+    assert cp._metrics[(0, cdet.firmware_version)].value == "1.2.3"
+    assert cp._metrics[(0, cdet.serial)].value == "SER123"
 
     from homeassistant.helpers import device_registry
 
     dr = device_registry.async_get(hass)
-    dev = dr.async_get_device({(DOMAIN, "CP_ID"), (DOMAIN, "test_cpid")})
-    assert dev is not None
+    devs = dr.async_get_devices(
+        identifiers={(DOMAIN, "CP_ID"), (DOMAIN, "test_cpid")},
+        config_entry_id=entry.entry_id,
+    )
+    assert devs
+    dev = devs[0]
     assert dev.manufacturer == "Acme"
     assert dev.model == "Model X"
     assert dev.sw_version == "1.2.3"
@@ -273,8 +277,8 @@ def test_get_energy_kwh_and_session_derive(hass):
     cp = _mk_cp(hass, version=OcppVersion.V201)  # != 1.6 to enable session derive
 
     # Starting meter (kWh)
-    cp._metrics[(1, csess.meter_start.value)].value = 10.0
-    cp._metrics[(1, csess.meter_start.value)].unit = HA_ENERGY_UNIT
+    cp._metrics[(1, csess.meter_start)].value = 10.0
+    cp._metrics[(1, csess.meter_start)].unit = HA_ENERGY_UNIT
 
     # Send EAIR in Wh (should normalize to kWh)
     mv = _mv(
@@ -287,10 +291,8 @@ def test_get_energy_kwh_and_session_derive(hass):
     assert cp._metrics[(1, "Energy.Active.Import.Register")].unit == HA_ENERGY_UNIT
 
     # Session energy derived = EAIR - meter_start
-    assert cp._metrics[(1, csess.session_energy.value)].value == pytest.approx(
-        0.5, 1e-12
-    )
-    assert cp._metrics[(1, csess.session_energy.value)].unit == HA_ENERGY_UNIT
+    assert cp._metrics[(1, csess.session_energy)].value == pytest.approx(0.5, 1e-12)
+    assert cp._metrics[(1, csess.session_energy)].unit == HA_ENERGY_UNIT
 
 
 @pytest.mark.asyncio
@@ -390,9 +392,9 @@ async def test_stop_cancels_tasks_when_close_fails(hass):
     with pytest.raises(OSError):
         await cp.stop()
 
-    assert all(
-        task.cancelled for task in cp.tasks
-    ), "tasks must be cancelled even when the websocket close raises"
+    assert all(task.cancelled for task in cp.tasks), (
+        "tasks must be cancelled even when the websocket close raises"
+    )
     assert cp.status == STATE_UNAVAILABLE
 
 
@@ -417,9 +419,9 @@ async def test_stop_cancels_tasks_when_close_is_cancelled(hass):
     with pytest.raises(asyncio.CancelledError):
         await cp.stop()
 
-    assert all(
-        task.cancelled for task in cp.tasks
-    ), "tasks must be cancelled even when the websocket close is cancelled"
+    assert all(task.cancelled for task in cp.tasks), (
+        "tasks must be cancelled even when the websocket close is cancelled"
+    )
     assert cp.status == STATE_UNAVAILABLE
 
 

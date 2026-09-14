@@ -81,7 +81,7 @@ async def test_station_level_status_applies_without_a_connector_map(hass):
     )
 
     assert cp._pending_status_notifications == []
-    assert cp._metrics[(0, cstat.status.value)].value == "Available"
+    assert cp._metrics[(0, cstat.status)].value == "Available"
 
 
 @pytest.mark.asyncio
@@ -106,5 +106,5 @@ async def test_malformed_ids_are_dropped_not_crashed_or_misattributed(
     )
 
     assert cp._pending_status_notifications == []
-    assert cp._metrics[(0, cstat.status.value)].value is None
+    assert cp._metrics[(0, cstat.status)].value is None
     assert cp._connector_status == []

@@ -43,6 +43,10 @@ class OcppSwitchDescription(SwitchEntityDescription):
     metric_condition: list[str] | None = None
     default_state: bool = False
     per_connector: bool = False
+    single_connector_status_fallback: bool = False
+    # The switch acts on the connector's transaction, so it is unavailable
+    # while that transaction's state is held as unresolved (see ocppv16).
+    transaction_bound: bool = False
 
 
 SWITCHES: Final[list[OcppSwitchDescription]] = [
@@ -52,13 +56,14 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_charge_start.name,
         off_action=HAChargerServices.service_charge_stop.name,
-        metric_state=HAChargerStatuses.status_connector.value,
+        metric_state=HAChargerStatuses.status_connector,
         metric_condition=[
             ChargePointStatus.charging.value,
             ChargePointStatus.suspended_evse.value,
             ChargePointStatus.suspended_ev.value,
         ],
         per_connector=True,
+        transaction_bound=True,
     ),
     OcppSwitchDescription(
         key="availability",
@@ -66,10 +71,11 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status.value,  # charger-level status
+        metric_state=HAChargerStatuses.status,  # charger-level status
         metric_condition=[ChargePointStatus.available.value],
         default_state=True,
         per_connector=False,
+        single_connector_status_fallback=True,
     ),
     OcppSwitchDescription(
         key="connnector_availability",
@@ -77,7 +83,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
         icon=ICON,
         on_action=HAChargerServices.service_availability.name,
         off_action=HAChargerServices.service_availability.name,
-        metric_state=HAChargerStatuses.status_connector.value,  # connector-level status
+        metric_state=HAChargerStatuses.status_connector,  # connector-level status
         metric_condition=[
             ChargePointStatus.available.value,
             ChargePointStatus.preparing.value,
@@ -205,6 +211,11 @@ class ChargePointSwitch(SwitchEntity):
         target_conn = (
             self.connector_id if self.entity_description.per_connector else None
         )
+        if (
+            self.entity_description.transaction_bound
+            and self.central_system.is_transaction_indeterminate(self.cpid, target_conn)
+        ):
+            return False
         return bool(self.central_system.get_available(self.cpid, target_conn))
 
     @property
@@ -217,18 +228,21 @@ class ChargePointSwitch(SwitchEntity):
         """Return true if the switch is on."""
         """Test metric state against condition if present"""
         if self.entity_description.metric_state is not None:
-            metric_conn = (
-                self.connector_id
-                if (
-                    self.entity_description.metric_state
-                    == HAChargerStatuses.status_connector.value
-                    or self.entity_description.per_connector
+            if self.entity_description.single_connector_status_fallback:
+                resp = self.central_system.get_availability_status(self.cpid)
+            else:
+                metric_conn = (
+                    self.connector_id
+                    if (
+                        self.entity_description.metric_state
+                        == HAChargerStatuses.status_connector
+                        or self.entity_description.per_connector
+                    )
+                    else None
                 )
-                else None
-            )
-            resp = self.central_system.get_metric(
-                self.cpid, self.entity_description.metric_state, metric_conn
-            )
+                resp = self.central_system.get_metric(
+                    self.cpid, self.entity_description.metric_state, metric_conn
+                )
             if self.entity_description.metric_condition is not None:
                 self._state = resp in self.entity_description.metric_condition
             else:

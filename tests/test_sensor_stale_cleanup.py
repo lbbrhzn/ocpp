@@ -63,7 +63,7 @@ async def test_setup_removes_the_stale_flat_entity_and_logs_it(
     stale = registry.async_get_or_create(
         "sensor",
         DOMAIN,
-        sensor_unique_id(cpid, cstat.status_connector.value),
+        sensor_unique_id(cpid, cstat.status_connector),
         suggested_object_id=f"{cpid}_status_connector_renamed",
     )
 
@@ -109,7 +109,7 @@ async def test_single_connector_setup_removes_nothing(hass, bypass_websockets, c
     live = registry.async_get_or_create(
         "sensor",
         DOMAIN,
-        sensor_unique_id("test_cpid", cstat.status_connector.value),
+        sensor_unique_id("test_cpid", cstat.status_connector),
         suggested_object_id="test_cpid_status_connector",
     )
 

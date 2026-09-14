@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 import logging
 from math import sqrt
 import secrets
@@ -59,6 +59,7 @@ from .const import (
     CONFIG,
     DATA_UPDATED,
     DEFAULT_ENERGY_UNIT,
+    DEFAULT_MAX_CURRENT,
     DEFAULT_NUM_CONNECTORS,
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
@@ -76,6 +77,13 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 # never send a boot notification. Module-level so tests can shrink it
 # without monkeypatching asyncio.sleep globally.
 MONITOR_BACKSTOP_DELAY = 10
+_DEFAULT_LINE_VOLTAGE = 230.0
+_DEFAULT_PHASES = 1
+_PHASE_KEY_GROUPS = (
+    frozenset({Phase.l1.value, Phase.l2.value, Phase.l3.value}),
+    frozenset({Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value}),
+    frozenset({Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value}),
+)
 
 
 class Metric:
@@ -202,7 +210,7 @@ class _ConnectorAwareMetrics(MutableMapping):
         return key in self._by_conn[0]
 
 
-class OcppVersion(str, Enum):
+class OcppVersion(StrEnum):
     """OCPP version choice."""
 
     V16 = "1.6"
@@ -286,22 +294,23 @@ class ChargePoint(cp):
         self._metrics: _ConnectorAwareMetrics = _ConnectorAwareMetrics()
 
         # Init standard metrics for connector 0
-        self._metrics[(0, cdet.identifier.value)].value = id
-        self._metrics[(0, cstat.reconnects.value)].value = 0
+        self._metrics[(0, cdet.identifier)].value = id
+        self._metrics[(0, cstat.reconnects)].value = 0
 
         self._attr_supported_features = prof.NONE
         self._remote_id_tag = self.get_remote_id_tag()
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+        self.session_controller = None
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
-        _ = self._metrics[(conn_id, cstat.status_connector.value)]
-        _ = self._metrics[(conn_id, cstat.error_code_connector.value)]
-        _ = self._metrics[(conn_id, csess.transaction_id.value)]
+        _ = self._metrics[(conn_id, cstat.status_connector)]
+        _ = self._metrics[(conn_id, cstat.error_code_connector)]
+        _ = self._metrics[(conn_id, csess.transaction_id)]
 
-        self._metrics[(conn_id, csess.session_time.value)].unit = TIME_MINUTES
-        self._metrics[(conn_id, csess.session_energy.value)].unit = HA_ENERGY_UNIT
-        self._metrics[(conn_id, csess.meter_start.value)].unit = HA_ENERGY_UNIT
+        self._metrics[(conn_id, csess.session_time)].unit = TIME_MINUTES
+        self._metrics[(conn_id, csess.session_energy)].unit = HA_ENERGY_UNIT
+        self._metrics[(conn_id, csess.meter_start)].unit = HA_ENERGY_UNIT
 
     def get_remote_id_tag(self) -> str:
         """Get remote id tag from configuration.yaml or generate a random 20 char one."""
@@ -351,7 +360,7 @@ class ChargePoint(cp):
     async def fetch_supported_features(self):
         """Get supported features."""
         self._attr_supported_features = await self.get_supported_features()
-        self._metrics[(0, cdet.features.value)].value = self._attr_supported_features
+        self._metrics[(0, cdet.features)].value = self._attr_supported_features
         _LOGGER.debug(
             "Feature profiles returned: %s", self._attr_supported_features.labels()
         )
@@ -365,7 +374,7 @@ class ChargePoint(cp):
             self.num_connectors = await self.get_number_of_connectors()
             for conn in range(1, self.num_connectors + 1):
                 self._init_connector_slots(conn)
-            self._metrics[(0, cdet.connectors.value)].value = self.num_connectors
+            self._metrics[(0, cdet.connectors)].value = self.num_connectors
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
@@ -442,10 +451,14 @@ class ChargePoint(cp):
         """Clear all charging profiles."""
         pass
 
+    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+        """Set the station-wide maximum current without transaction fallbacks."""
+        raise NotImplementedError
+
     async def set_charge_rate(
         self,
-        limit_amps: int = 32,
-        limit_watts: int = 22000,
+        limit_amps: int | float | None = None,
+        limit_watts: int | float | None = None,
         conn_id: int = 0,
         profile: dict | None = None,
     ):
@@ -514,8 +527,8 @@ class ChargePoint(cp):
 
     async def monitor_connection(self):
         """Monitor the connection, by measuring the connection latency."""
-        self._metrics[(0, cstat.latency_ping.value)].unit = "ms"
-        self._metrics[(0, cstat.latency_pong.value)].unit = "ms"
+        self._metrics[(0, cstat.latency_ping)].unit = "ms"
+        self._metrics[(0, cstat.latency_pong)].unit = "ms"
         connection = self._connection
         timeout_counter = 0
 
@@ -548,12 +561,12 @@ class ChargePoint(cp):
                     f"Connection latency from '{self.cs_settings.csid}' to '{self.id}': "
                     f"ping={latency_ping} ms, pong={latency_pong} ms",
                 )
-                self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
-                self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                self._metrics[(0, cstat.latency_ping)].value = latency_ping
+                self._metrics[(0, cstat.latency_pong)].value = latency_pong
                 # This loop is these sensors' only publisher: nothing
                 # message-driven republishes them on an idle charger.
                 self._async_refresh_metric_entities(
-                    [cstat.latency_ping.value, cstat.latency_pong.value],
+                    [cstat.latency_ping, cstat.latency_pong],
                     fallback_to_full_update=False,
                 )
 
@@ -563,10 +576,10 @@ class ChargePoint(cp):
                     f"Connection latency from '{self.cs_settings.csid}' to '{self.id}': "
                     f"ping={latency_ping} ms, pong={latency_pong} ms",
                 )
-                self._metrics[(0, cstat.latency_ping.value)].value = latency_ping
-                self._metrics[(0, cstat.latency_pong.value)].value = latency_pong
+                self._metrics[(0, cstat.latency_ping)].value = latency_ping
+                self._metrics[(0, cstat.latency_pong)].value = latency_pong
                 self._async_refresh_metric_entities(
-                    [cstat.latency_ping.value, cstat.latency_pong.value],
+                    [cstat.latency_ping, cstat.latency_pong],
                     fallback_to_full_update=False,
                 )
 
@@ -628,21 +641,69 @@ class ChargePoint(cp):
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
 
         await self.stop()
+        self._reset_protocol_generation_state()
         self.status = STATE_OK
         self._connection = connection
-        self._metrics[(0, cstat.reconnects.value)].value += 1
+        self._metrics[(0, cstat.reconnects)].value += 1
         # post connect now handled on receiving boot notification or with backstop in monitor connection
         await self.run([super().start(), self.monitor_connection()])
+
+    def _reset_protocol_generation_state(self) -> None:
+        """Demote protocol state that cannot remain live across a reconnect.
+
+        A reconnect is a transport boundary, not a charger-generation boundary.
+        Protocol ordering guards therefore survive it and are reset only by a
+        subsequent BootNotification.
+        """
+
+    def _report_transaction_start(
+        self, connector_id: int, transaction_id: int | str, target=None
+    ) -> None:
+        """Tell the optional session hook that a transaction started online.
+
+        The hook is not part of protocol handling: a failure inside it is
+        logged and must not turn the charger's request into an error reply
+        or skip the state changes that follow.
+        """
+        if self.session_controller is None:
+            return
+        try:
+            self.session_controller.on_transaction_start(
+                connector_id, transaction_id, target
+            )
+        except Exception:
+            _LOGGER.exception(
+                "%s: session hook failed on transaction %s start at connector %s",
+                self.id,
+                transaction_id,
+                connector_id,
+            )
+
+    def _report_transaction_end(
+        self, connector_id: int, transaction_id: int | str
+    ) -> None:
+        """Tell the optional session hook that a transaction ended."""
+        if self.session_controller is None:
+            return
+        try:
+            self.session_controller.on_transaction_end(connector_id, transaction_id)
+        except Exception:
+            _LOGGER.exception(
+                "%s: session hook failed on transaction %s end at connector %s",
+                self.id,
+                transaction_id,
+                connector_id,
+            )
 
     async def async_update_device_info(
         self, serial: str, vendor: str, model: str, firmware_version: str
     ):
         """Update device info asynchronously."""
 
-        self._metrics[(0, cdet.model.value)].value = model
-        self._metrics[(0, cdet.vendor.value)].value = vendor
-        self._metrics[(0, cdet.firmware_version.value)].value = firmware_version
-        self._metrics[(0, cdet.serial.value)].value = serial
+        self._metrics[(0, cdet.model)].value = model
+        self._metrics[(0, cdet.vendor)].value = vendor
+        self._metrics[(0, cdet.firmware_version)].value = firmware_version
+        self._metrics[(0, cdet.serial)].value = serial
 
         identifiers = {(DOMAIN, self.id), (DOMAIN, self.settings.cpid)}
 
@@ -714,7 +775,15 @@ class ChargePoint(cp):
         dr = device_registry.async_get(self.hass)
 
         identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
-        root_dev = dr.async_get_device(identifiers)
+        root_dev = next(
+            iter(
+                dr.async_get_devices(
+                    identifiers=identifiers,
+                    config_entry_id=self.entry.entry_id,
+                )
+            ),
+            None,
+        )
         if root_dev is None:
             return
 
@@ -773,6 +842,79 @@ class ChargePoint(cp):
             )
         return auth_status
 
+    def _lookup_metric(self, measurand: str, conn_id: int):
+        """Return a connector metric, falling back only to charger scope."""
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None:
+            return None
+        try:
+            target = int(conn_id) if conn_id and int(conn_id) > 0 else 1
+        except (TypeError, ValueError):
+            target = 1
+        for cid in (target, 0):
+            key = (cid, measurand)
+            if key not in metrics:
+                continue
+            metric = metrics[key]
+            if metric is not None and getattr(metric, "value", None) is not None:
+                return metric
+        return None
+
+    def _line_voltage(self, conn_id: int) -> float:
+        """Return a plausible line-to-neutral voltage, or the 230 V default."""
+        metric = self._lookup_metric(Measurand.voltage.value, conn_id)
+        if metric is not None:
+            try:
+                voltage = float(metric.value)
+            except (TypeError, ValueError):
+                voltage = 0.0
+            if 50.0 <= voltage <= 500.0:
+                return voltage
+        return _DEFAULT_LINE_VOLTAGE
+
+    def _phase_count(self, conn_id: int) -> int:
+        """Count electrically active phases; conservatively default to one."""
+        measurands = (
+            Measurand.voltage.value,
+            Measurand.current_import.value,
+            Measurand.current_offered.value,
+        )
+        best = 0
+        for measurand in measurands:
+            metric = self._lookup_metric(measurand, conn_id)
+            if metric is None:
+                continue
+            phase_values = {
+                str(key): value for key, value in (metric.extra_attr or {}).items()
+            }
+            threshold = 50.0 if measurand == Measurand.voltage.value else 0.1
+            for group in _PHASE_KEY_GROUPS:
+                count = 0
+                for phase in group:
+                    if phase not in phase_values:
+                        continue
+                    try:
+                        value = abs(float(phase_values[phase]))
+                    except (TypeError, ValueError):
+                        continue
+                    if value >= threshold:
+                        count += 1
+                best = max(best, count)
+        return best or _DEFAULT_PHASES
+
+    def _amps_to_watts(self, amps: float, conn_id: int) -> float:
+        """Convert current to power with the shared electrical assumptions."""
+        return float(
+            round(amps * self._line_voltage(conn_id) * self._phase_count(conn_id))
+        )
+
+    def _watts_to_amps(self, watts: float, conn_id: int) -> float:
+        """Convert power to current with the shared electrical assumptions."""
+        denominator = self._line_voltage(conn_id) * self._phase_count(conn_id)
+        if denominator <= 0:
+            return float(DEFAULT_MAX_CURRENT)
+        return round(watts / denominator, 1)
+
     def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
         """Process per-phase MeterValues and aggregate them into per-connector metrics.
 
@@ -814,16 +956,14 @@ class ChargePoint(cp):
                 measurand_data[measurand] = {}
 
             if unit is not None:
-                measurand_data[measurand][om.unit.value] = unit
+                measurand_data[measurand][om.unit] = unit
                 self._metrics[(target_cid, measurand)].unit = unit
-                self._metrics[(target_cid, measurand)].extra_attr[om.unit.value] = unit
+                self._metrics[(target_cid, measurand)].extra_attr[om.unit] = unit
 
             measurand_data[measurand][phase] = value
             self._metrics[(target_cid, measurand)].extra_attr[phase] = value
             if context is not None:
-                self._metrics[(target_cid, measurand)].extra_attr[om.context.value] = (
-                    context
-                )
+                self._metrics[(target_cid, measurand)].extra_attr[om.context] = context
 
         line_phases_all = [
             Phase.l1.value,
@@ -896,7 +1036,7 @@ class ChargePoint(cp):
                     # If only a single phase value exists, just pass it through
                     else:
                         metric_value = next(
-                            (v for k, v in phase_info.items() if k != om.unit.value),
+                            (v for k, v in phase_info.items() if k != om.unit),
                             None,
                         )
 
@@ -911,7 +1051,7 @@ class ChargePoint(cp):
                         )
 
             if metric_value is not None:
-                metric_unit = phase_info.get(om.unit.value)
+                metric_unit = phase_info.get(om.unit)
 
                 if metric_unit == DEFAULT_POWER_UNIT:
                     self._metrics[(target_cid, metric)].value = metric_value / 1000
@@ -1028,7 +1168,7 @@ class ChargePoint(cp):
                     value = value / 1000
                     unit = HA_POWER_UNIT
 
-                if self._metrics[(connector_id, csess.meter_start.value)].value == 0:
+                if self._metrics[(connector_id, csess.meter_start)].value == 0:
                     # Charger reports Energy.Active.Import.Register directly as Session energy for transactions.
                     self._charger_reports_session_energy = True
 
@@ -1058,6 +1198,38 @@ class ChargePoint(cp):
                     if is_eair and idx != best_eair_idx:
                         continue
 
+                    # A transaction-bound EAIR sample below meter_start cannot
+                    # be a lifetime register reading: the charger is reporting
+                    # SESSION energy in MeterValues while StartTransaction
+                    # reported a lifetime meter_start, so the meter_start == 0
+                    # detection above never fired. Switch mode here, before
+                    # skip_eair is evaluated, so the sample is neither written to
+                    # the lifetime metric nor published as a negative on a
+                    # total_increasing sensor.
+                    if (
+                        is_eair
+                        and is_transaction
+                        and not self._charger_reports_session_energy
+                    ):
+                        ms_metric = self._metrics[(target_cid, csess.meter_start)]
+                        if (
+                            ms_metric.value is not None
+                            and ms_metric.unit == unit
+                            and value < ms_metric.value
+                        ):
+                            _LOGGER.warning(
+                                "%s[%s]: Energy.Active.Import.Register sample "
+                                "%s %s is below meter_start %s %s. Treating this "
+                                "charger as reporting session energy directly.",
+                                csess.session_energy,
+                                target_cid,
+                                value,
+                                unit,
+                                ms_metric.value,
+                                ms_metric.unit,
+                            )
+                            self._charger_reports_session_energy = True
+
                     # Determine whether to skip writing EAIR to the main metric:
                     # - Skip only if this is an EAIR reading,
                     # - AND the charger reports session energy (meter_start == 0),
@@ -1079,10 +1251,10 @@ class ChargePoint(cp):
                         self._metrics[(target_cid, measurand)].unit = unit
                         if location is not None:
                             self._metrics[(target_cid, measurand)].extra_attr[
-                                om.location.value
+                                om.location
                             ] = location
                         self._metrics[(target_cid, measurand)].extra_attr[
-                            om.context.value
+                            om.context
                         ] = context
 
                     # Session handling, only for EAIR during a transaction (per-connector)
@@ -1091,15 +1263,15 @@ class ChargePoint(cp):
                             # Charger reports session energy directly; ignore Transaction.Begin.
                             if context != ReadingContext.transaction_begin.value:
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].value = value
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].unit = unit
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].extra_attr[cstat.id_tag.name] = self._metrics[
-                                    (target_cid, cstat.id_tag.value)
+                                    (target_cid, cstat.id_tag)
                                 ].value
                         else:
                             # Initialize baseline on first tx-bound EAIR; then derive Session = EAIR - meter_start.
@@ -1108,17 +1280,17 @@ class ChargePoint(cp):
                                 ms_metric.value = value
                                 ms_metric.unit = unit
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].value = 0.0
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].unit = unit
                             elif ms_metric.unit == unit:
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].value = round(1000 * (value - ms_metric.value)) / 1000
                                 self._metrics[
-                                    (target_cid, csess.session_energy.value)
+                                    (target_cid, csess.session_energy)
                                 ].unit = unit
                 else:
                     unprocessed.append(sampled_value)

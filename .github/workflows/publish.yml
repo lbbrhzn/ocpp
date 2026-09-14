@@ -28,8 +28,16 @@ jobs:
         uses: home-assistant/actions/helpers/version@master
 
       - name: 🔢 Set version number
+        env:
+          # Passed via env, never interpolated into the shell source: the
+          # release tag is attacker-influenceable and this job has
+          # contents: write.
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          python3 ${{ github.workspace }}/manage/update_manifest.py --version ${{ steps.version.outputs.version }}
+          # Strip any leading v: the helper emits the tag verbatim, and
+          # released zips have carried versions like "v0.11.2" as a result.
+          python3 "$WORKSPACE/manage/update_manifest.py" --version "${RELEASE_VERSION#v}"
 
       - name: 📤 Upload zip to action
         uses: actions/upload-artifact@v7.0.1

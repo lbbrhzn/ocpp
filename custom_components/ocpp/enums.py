@@ -1,9 +1,9 @@
 """Additional enumerated values to use in home assistant."""
 
-from enum import Enum, IntFlag, auto
+from enum import IntFlag, StrEnum, auto
 
 
-class HAChargerServices(str, Enum):
+class HAChargerServices(StrEnum):
     """Charger status conditions to report in home assistant."""
 
     # For HA service reference and for function to call use .value
@@ -22,7 +22,7 @@ class HAChargerServices(str, Enum):
     service_data_transfer = "data_transfer"
 
 
-class HAChargerStatuses(str, Enum):
+class HAChargerStatuses(StrEnum):
     """Charger status conditions to report in home assistant."""
 
     status = "Status"
@@ -38,7 +38,7 @@ class HAChargerStatuses(str, Enum):
     id_tag = "Id.Tag"
 
 
-class HAChargerDetails(str, Enum):
+class HAChargerDetails(StrEnum):
     """Charger nameplate information to report in home assistant."""
 
     identifier = "ID"
@@ -53,7 +53,7 @@ class HAChargerDetails(str, Enum):
     config_response = "Timestamp.Config.Response"
 
 
-class HAChargerSession(str, Enum):
+class HAChargerSession(StrEnum):
     """Charger session information to report in home assistant."""
 
     transaction_id = "Transaction.Id"
@@ -80,7 +80,7 @@ class Profiles(IntFlag):
         return "|".join([p.name for p in Profiles if p & self])
 
 
-class OcppMisc(str, Enum):
+class OcppMisc(StrEnum):
     """Miscellaneous strings used in ocpp v1.6 responses."""
 
     # For pythonic version use .name (eg with kwargs) for ocpp json use .value
@@ -122,7 +122,7 @@ class OcppMisc(str, Enum):
     power = "Power"
 
 
-class ConfigurationKey(str, Enum):
+class ConfigurationKey(StrEnum):
     """Configuration Key Names."""
 
     # 9.1 Core Profile

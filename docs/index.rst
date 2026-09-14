@@ -16,7 +16,9 @@ Table of Contents
 
    installation
    supported-devices
+   multiple-central-systems
    user-guide
+   Charge_automation
    support
    debugging
    development

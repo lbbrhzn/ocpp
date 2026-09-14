@@ -30,7 +30,7 @@ from custom_components.ocpp.const import (
     CentralSystemSettings,
     ChargerSystemSettings,
 )
-from custom_components.ocpp.ocppv201 import ChargePoint
+from custom_components.ocpp.ocppv201 import ChargePoint, InventoryReport
 
 from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
 
@@ -70,6 +70,8 @@ def _mk_cp(hass, status=ChargingProfileStatusEnumType.accepted, max_current=32):
         subprotocol="ocpp2.0.1",
     )
     cp = ChargePoint("CP_A", conn, hass, entry, central, charger)
+    # A cached report keeps the on-use refresh out of the recorded traffic.
+    cp._inventory = InventoryReport()
     cp.sent = []
 
     async def record(req):
@@ -130,6 +132,12 @@ async def test_clearing_the_limit_reports_success(hass, kwargs):
     installed by the charger or another system down with it.
     """
     cp = _mk_cp(hass)
+    cp._inventory = None
+
+    async def inventory_must_not_be_read():
+        raise AssertionError("clearing a profile does not need rate-unit inventory")
+
+    cp._get_inventory = inventory_must_not_be_read
 
     assert await cp.set_charge_rate(**kwargs) is True
     assert _sent(cp) == ["ClearChargingProfile"]
@@ -201,3 +209,244 @@ async def test_a_rejected_profile_still_raises(hass, kwargs):
         await cp.set_charge_rate(**kwargs)
 
     assert "charger said no" in str(excinfo.value.translation_placeholders)
+
+
+# --- #2101: the managed station profile must target EVSE 0 -------------------
+#
+# ChargingStationMaxProfile describes the whole station and OCPP 2.0.1 requires
+# it on evseId 0. The managed path used to route it to whatever EVSE conn_id
+# mapped to, so a compliant charger could refuse every call that passed a
+# positive connector. The invariant: every integration-generated
+# ChargingStationMaxProfile is sent with evse_id=0. A caller-supplied profile
+# keeps the requested connector's mapping, because its purpose decides which
+# EVSE is valid.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"limit_amps": 16}, {"limit_watts": 5000}],
+    ids=["amps", "watts"],
+)
+async def test_a_managed_limit_targets_the_station_whatever_the_connector(hass, kwargs):
+    """A managed limit below the maximum goes to EVSE 0, whichever connector is named.
+
+    Seeding global 2 -> EVSE 7 makes the wrong answer distinct from both 0
+    and the mapper's own (n, 1) fallback, so this cannot pass by coincidence:
+    the old code sent this request to EVSE 7.
+    """
+    cp = _mk_cp(hass)
+    cp._global_to_evse = {2: (7, 1)}
+
+    assert await cp.set_charge_rate(conn_id=2, **kwargs) is True
+
+    # Exactly one request and nothing behind it: a future rejection fallback
+    # must be a deliberate change that updates this line.
+    assert _sent(cp) == ["SetChargingProfile"]
+    req = cp.sent[0]
+    assert req.evse_id == 0
+    assert (
+        req.charging_profile["charging_profile_purpose"]
+        == ChargingProfilePurposeEnumType.charging_station_max_profile.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_custom_profile_keeps_the_requested_connectors_evse(hass):
+    """A caller-supplied profile still goes where conn_id maps.
+
+    The escape hatch is unchanged: a TxDefaultProfile may legitimately
+    target a positive EVSE, so it is sent to the mapped EVSE, here 7.
+    """
+    cp = _mk_cp(hass)
+    cp._global_to_evse = {2: (7, 1)}
+    profile = {
+        "id": 5,
+        "stack_level": 1,
+        "charging_profile_purpose": (
+            ChargingProfilePurposeEnumType.tx_default_profile.value
+        ),
+        "charging_profile_kind": "Relative",
+        "charging_schedule": [
+            {
+                "id": 5,
+                "charging_rate_unit": "A",
+                "charging_schedule_period": [{"start_period": 0, "limit": 10}],
+            }
+        ],
+    }
+
+    assert await cp.set_charge_rate(conn_id=2, profile=profile) is True
+
+    assert _sent(cp) == ["SetChargingProfile"]
+    assert cp.sent[0].evse_id == 7
+    assert cp.sent[0].charging_profile is profile
+
+
+@pytest.mark.asyncio
+async def test_watt_only_station_receives_converted_amp_limit(hass):
+    """RateUnit=W turns a managed amp request into the equivalent power."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(charging_rate_units=frozenset({"W"}))
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+
+    period = cp.sent[0].charging_profile["charging_schedule"][0][
+        "charging_schedule_period"
+    ][0]
+    assert (
+        cp.sent[0].charging_profile["charging_schedule"][0]["charging_rate_unit"] == "W"
+    )
+    assert period["limit"] == 3680
+
+
+@pytest.mark.asyncio
+async def test_amp_only_station_receives_converted_watt_limit(hass):
+    """RateUnit=A turns a managed watt request into the equivalent current."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(charging_rate_units=frozenset({"A"}))
+
+    assert await cp.set_charge_rate(limit_watts=3680) is True
+
+    schedule = cp.sent[0].charging_profile["charging_schedule"][0]
+    assert schedule["charging_rate_unit"] == "A"
+    assert schedule["charging_schedule_period"][0]["limit"] == 16.0
+
+
+@pytest.mark.asyncio
+async def test_rate_unit_report_reads_the_supported_units_not_the_domain(hass):
+    """A W-only station still lists the whole domain in valuesList."""
+    cp = _mk_cp(hass)
+    cp._inventory = None
+    cp._wait_inventory = asyncio.Event()
+
+    def report(value, values_list):
+        attribute = {"type": "Actual"}
+        if value is not None:
+            attribute["value"] = value
+        characteristics = {"data_type": "MemberList"}
+        if values_list is not None:
+            characteristics["values_list"] = values_list
+        cp.on_report(
+            1,
+            "2026-01-01T00:00:00Z",
+            0,
+            tbc=True,
+            report_data=[
+                {
+                    "component": {"name": "SmartChargingCtrlr"},
+                    "variable": {"name": "RateUnit"},
+                    "variable_attribute": [attribute],
+                    "variable_characteristics": characteristics,
+                }
+            ],
+        )
+
+    report("W", "A,W")
+    assert cp._inventory.charging_rate_units == frozenset({"W"})
+    report(None, "A,W")
+    assert cp._inventory.charging_rate_units == frozenset({"A", "W"})
+    report("A; W", None)
+    assert cp._inventory.charging_rate_units == frozenset({"A", "W"})
+
+
+@pytest.mark.asyncio
+async def test_managed_set_refreshes_the_report_after_a_boot(hass):
+    """A boot drops the cached report; the next set must read it again."""
+    cp = _mk_cp(hass)
+    cp._inventory = None
+
+    async def refresh():
+        cp._inventory = InventoryReport(charging_rate_units=frozenset({"W"}))
+
+    cp._get_inventory = refresh
+    assert await cp.set_charge_rate(limit_amps=16) is True
+    schedule = cp.sent[0].charging_profile["charging_schedule"][0]
+    assert schedule["charging_rate_unit"] == "W"
+    assert schedule["charging_schedule_period"][0]["limit"] == 3680
+
+    # A refresh that fails keeps the request going with today's amp default.
+    cp._inventory = None
+
+    async def failing_refresh():
+        raise TimeoutError
+
+    cp._get_inventory = failing_refresh
+    assert await cp.set_charge_rate(limit_amps=16) is True
+    schedule = cp.sent[-1].charging_profile["charging_schedule"][0]
+    assert schedule["charging_rate_unit"] == "A"
+
+
+@pytest.mark.asyncio
+async def test_managed_set_waits_for_an_inventory_attempt_already_in_flight(hass):
+    """An overlapping report settles before the rate unit is selected."""
+    cp = _mk_cp(hass)
+    cp._inventory = None
+    sent = []
+
+    async def record(req):
+        sent.append(req)
+        if type(req).__name__ == "GetBaseReport":
+            return SimpleNamespace(status="Accepted")
+        return SimpleNamespace(
+            status=ChargingProfileStatusEnumType.accepted,
+            status_info=None,
+        )
+
+    cp.call = record
+    inventory_owner = asyncio.create_task(cp._get_inventory())
+    await asyncio.sleep(0)
+    assert cp._wait_inventory is not None
+
+    managed_set = asyncio.create_task(cp.set_charge_rate(limit_amps=16))
+    await asyncio.sleep(0)
+    assert [type(req).__name__ for req in sent] == ["GetBaseReport"]
+
+    cp.on_report(
+        1,
+        "2026-01-01T00:00:00Z",
+        0,
+        report_data=[
+            {
+                "component": {"name": "SmartChargingCtrlr"},
+                "variable": {"name": "RateUnit"},
+                "variable_attribute": [{"value": "W"}],
+            }
+        ],
+    )
+    await asyncio.gather(inventory_owner, managed_set)
+
+    set_request = next(
+        req for req in sent if type(req).__name__ == "SetChargingProfile"
+    )
+    schedule = set_request.charging_profile["charging_schedule"][0]
+    assert schedule["charging_rate_unit"] == "W"
+    assert schedule["charging_schedule_period"][0]["limit"] == 3680
+
+
+@pytest.mark.asyncio
+async def test_inventory_owner_wakes_waiters_when_no_report_will_arrive(hass):
+    """A refused inventory request cannot strand callers sharing its attempt."""
+    cp = _mk_cp(hass)
+    cp._inventory = None
+    owner_started = asyncio.Event()
+    release_owner = asyncio.Event()
+
+    async def refuse(_req):
+        owner_started.set()
+        await release_owner.wait()
+        return SimpleNamespace(status="Rejected")
+
+    cp.call = refuse
+    owner = asyncio.create_task(cp._get_inventory())
+    await owner_started.wait()
+    waiter = asyncio.create_task(cp._get_inventory())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+
+    release_owner.set()
+    await owner
+    await asyncio.sleep(0)
+    assert waiter.done()
+    await waiter
+    assert cp._wait_inventory is None
