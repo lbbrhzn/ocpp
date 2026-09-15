@@ -93,6 +93,7 @@ If your integration shows extra attributes on the connector status sensor like a
 * `Charge Control`
 * `Availability` (must be set to ON before EV is plugged in)
 * `Maximum Current` (sets the station-wide maximum charging current available)
+* `Session Current Limit` (available only during a transaction observed starting on the current connection)
 * `Reset`
 
 ## Useful Entities for ABB Terra AC

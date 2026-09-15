@@ -46,7 +46,7 @@ set_charge_rate:
       default: 0
     custom_profile:
       name: Custom profile
-      description: Raw OCPP charging profile. Prefer a YAML mapping, including a template that returns a mapping. A valid JSON object string is also accepted; single-quoted object strings remain supported for compatibility.
+      description: Raw OCPP charging profile. Prefer a YAML mapping, including a template that returns a mapping. A valid JSON object string is also accepted; single-quoted object strings remain supported for compatibility. TxProfile calls are serialized with the managed session control, may return operation pending, and require a non-zero conn_id on multi-connector chargers.
       required: false
       advanced: true
       example: '{"chargingProfileId":8,"stackLevel":0,"chargingProfileKind":"Relative","chargingProfilePurpose":"ChargePointMaxProfile","chargingSchedule":{"chargingRateUnit":"A","chargingSchedulePeriod":[{"startPeriod":0,"limit":16}]}}'
@@ -70,7 +70,7 @@ trigger_custom_message:
 
 clear_profile:
   name: Clear charging profiles
-  description: Clears all charging profiles (limits) set (dependent on charger support)
+  description: Clears charging profiles (dependent on charger support). Waits for active managed session operations to drain, for up to 35 seconds, and reports partial failures.
   fields:
     devid:
       name: Charger identifier
@@ -78,6 +78,31 @@ clear_profile:
       required: false
       advanced: true
       example: charger
+
+reset_session_limits:
+  name: Reset session current limits
+  description: Clears only integration-owned transaction profile ids. Force discards ownership records without confirming removal and is unsafe, but can be used while the charger is offline.
+  fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or OCPP id
+      required: false
+      advanced: true
+      example: charger
+    connector:
+      name: Connector identifier
+      description: Limits recovery to one connector when supplied
+      required: false
+      advanced: true
+      example: 1
+    force:
+      name: Force discard
+      description: Unsafely releases ids without confirmation from the charger
+      required: false
+      advanced: true
+      default: false
+      selector:
+        boolean:
 
 update_firmware:
   name: Update charger firmware

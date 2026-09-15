@@ -125,6 +125,20 @@
             "message": "Charger id {message} is ambiguous: several central systems have a charger with that OCPP id. Use the HA charger id (cpid) instead, which is unique."
         }
     },
+    "issues": {
+        "session_limit_slots_exhausted": {
+            "title": "Session current limit needs recovery",
+            "description": "Both integration-owned profile slots for {charger} connector {connector} may still exist on the charger. Run the reset_session_limits action to clear them by exact id. Force discard is unsafe because a timed-out clear may still be processed later."
+        },
+        "session_limit_record_quarantined": {
+            "title": "Session current limit record was quarantined",
+            "description": "A saved cleanup record for {charger} connector {connector} was invalid and no profile id from it was sent to the charger. A genuine boot or new transaction retires the record; force reset can discard it explicitly."
+        },
+        "session_limit_cleanup_stalled": {
+            "title": "Session current limit cleanup stopped",
+            "description": "Cleanup retries for {charger} connector {connector} reached their per-connection limit. The profile id remains reserved. Run reset_session_limits to retry now, or reconnect the charger to start a new bounded retry cycle."
+        }
+    },
     "options": {
         "step": {
             "init": {

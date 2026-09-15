@@ -62,16 +62,24 @@ NUMBERS: Final = [
 async def async_setup_entry(hass, entry, async_add_devices):
     """Configure the number platform."""
     central_system = hass.data[DOMAIN][entry.entry_id]
-    entities: list[ChargePointNumber] = []
+    entities: list[ChargePointNumber | SessionCurrentLimitNumber] = []
     ent_reg = er.async_get(hass)
 
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
+        try:
+            connector_count = max(1, int(cp_id_settings.get("num_connectors", 1)))
+        except (TypeError, ValueError):
+            connector_count = 1
 
         legacy_uid = re.compile(
             rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn\d+\.maximum_current"
         )
+        session_connector_uid = re.compile(
+            rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn(\d+)\.session_current_limit"
+        )
+        session_flat_uid = f"{NUMBER_DOMAIN}.{DOMAIN}.{cpid}.session_current_limit"
         for registry_entry in er.async_entries_for_config_entry(
             ent_reg, entry.entry_id
         ):
@@ -83,6 +91,27 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 _LOGGER.info(
                     "Removing stale connector-level entity %s; "
                     "Maximum Current is station-wide on this charger",
+                    registry_entry.entity_id,
+                )
+                ent_reg.async_remove(registry_entry.entity_id)
+                continue
+            if (
+                registry_entry.platform != DOMAIN
+                or registry_entry.domain != NUMBER_DOMAIN
+            ):
+                continue
+            session_match = session_connector_uid.fullmatch(registry_entry.unique_id)
+            stale_session = (connector_count == 1 and session_match is not None) or (
+                connector_count > 1 and registry_entry.unique_id == session_flat_uid
+            )
+            if session_match is not None and int(session_match.group(1)) > min(
+                connector_count, 99
+            ):
+                stale_session = True
+            if stale_session:
+                _LOGGER.info(
+                    "Removing stale session-current entity %s after connector "
+                    "topology changed",
                     registry_entry.entity_id,
                 )
                 ent_reg.async_remove(registry_entry.entity_id)
@@ -118,6 +147,24 @@ async def async_setup_entry(hass, entry, async_add_devices):
                     connector_id=None,
                     op_connector_id=0,
                     fresh=fresh,
+                )
+            )
+
+        max_cur = float(cp_id_settings.get(CONF_MAX_CURRENT, DEFAULT_MAX_CURRENT))
+        if connector_count > 99:
+            _LOGGER.warning(
+                "%s: session current limit entities are limited to connectors 1..99",
+                cpid,
+            )
+        for connector_id in range(1, min(connector_count, 99) + 1):
+            entities.append(
+                SessionCurrentLimitNumber(
+                    hass,
+                    central_system,
+                    cpid,
+                    connector_id,
+                    connector_count,
+                    max_cur,
                 )
             )
 
@@ -245,7 +292,6 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         seq = self._request_seq
         self._attr_native_value = target
         self.async_write_ha_state()
-
         try:
             ok = await self.central_system.set_max_charge_rate_amps(self.cpid, target)
         except HomeAssistantError:
@@ -311,4 +357,123 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             self._confirmed_value,
         )
         self._attr_native_value = self._confirmed_value
+        self.async_write_ha_state()
+
+
+class SessionCurrentLimitNumber(NumberEntity):
+    """Non-restoring, non-optimistic limit for one observed transaction."""
+
+    _attr_has_entity_name = False
+    _attr_should_poll = False
+    _attr_icon = ICON
+    _attr_native_min_value = 0
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = ELECTRIC_CURRENT_AMPERE
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        central_system: CentralSystem,
+        cpid: str,
+        connector_id: int,
+        connector_count: int,
+        max_current: float,
+    ) -> None:
+        """Initialize a connector-scoped session number."""
+        self.central_system = central_system
+        self.cpid = cpid
+        self.connector_id = connector_id
+        self._attr_native_max_value = max_current
+        self._attr_name = "Session Current Limit"
+        if connector_count == 1:
+            self._attr_unique_id = ".".join(
+                [NUMBER_DOMAIN, DOMAIN, cpid, "session_current_limit"]
+            )
+            self.entity_id = (
+                f"{NUMBER_DOMAIN}.{slugify(f'{cpid}_session_current_limit')}"
+            )
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, cpid)},
+                name=cpid,
+            )
+        else:
+            self._attr_unique_id = ".".join(
+                [
+                    NUMBER_DOMAIN,
+                    DOMAIN,
+                    cpid,
+                    f"conn{connector_id}",
+                    "session_current_limit",
+                ]
+            )
+            object_id = f"{cpid}_connector_{connector_id}_session_current_limit"
+            self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"{cpid}-conn{connector_id}")},
+                name=f"{cpid} Connector {connector_id}",
+                via_device=(DOMAIN, cpid),
+            )
+
+    @property
+    def _controller(self):
+        return self.central_system.get_session_controller(self.cpid)
+
+    @property
+    def available(self) -> bool:
+        """Return whether an exact online-observed session can be changed."""
+        controller = self._controller
+        return bool(controller and controller.is_available(self.connector_id))
+
+    @property
+    def native_value(self) -> float:
+        """Return the confirmed session limit or neutral maximum."""
+        controller = self._controller
+        return (
+            controller.value(self.connector_id)
+            if controller is not None
+            else float(self._attr_native_max_value)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return transaction and transmitted-unit diagnostics."""
+        controller = self._controller
+        return controller.attributes(self.connector_id) if controller else {}
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to controller state changes."""
+        await super().async_added_to_hass()
+
+        @callback
+        def _update(*args) -> None:
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_write_ha_state()
+
+        self.async_on_remove(async_dispatcher_connect(self.hass, DATA_UPDATED, _update))
+        controller = self._controller
+        if controller is not None:
+            self.async_on_remove(
+                controller.register_entity(self.connector_id, self.entity_id)
+            )
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Wait for charger confirmation before the exposed value can change."""
+        controller = self._controller
+        if controller is None:
+            raise HomeAssistantError("session current limit controller not found")
+        token = controller.current_token(self.connector_id)
+        if token is None:
+            raise HomeAssistantError("there is no qualifying charging session")
+        await self.central_system.set_session_charge_rate_amps(
+            self.cpid,
+            self.connector_id,
+            token,
+            float(value),
+        )
         self.async_write_ha_state()

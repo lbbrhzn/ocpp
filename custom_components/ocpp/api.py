@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -35,6 +36,13 @@ from .enums import (
     HAChargerStatuses as cstat,
 )
 from .chargepoint import SetVariableResult
+from .session import (
+    SESSION_PROFILE_MAX_ID,
+    SESSION_PROFILE_MIN_ID,
+    SessionLimitController,
+    custom_profile_ids,
+    is_tx_profile,
+)
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 # Uncomment these when Debugging
@@ -96,6 +104,13 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
 CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
+    }
+)
+RESET_SESSION_LIMITS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+        vol.Optional("connector"): cv.positive_int,
+        vol.Optional("force", default=False): cv.boolean,
     }
 )
 
@@ -189,6 +204,20 @@ class CentralSystem:
         # live (connection count, current entry data) diverges from what
         # setup actually did whenever state changed in between.
         self.platforms_forwarded = False
+        self.session_controllers: dict[str, SessionLimitController] = {}
+        for cp_map in self.settings.cpids:
+            if not isinstance(cp_map, dict):
+                continue
+            for cp_id, raw_settings in cp_map.items():
+                settings = ChargerSystemSettings(**raw_settings)
+                self.session_controllers[cp_id] = SessionLimitController(
+                    hass,
+                    entry.entry_id,
+                    cp_id,
+                    settings.cpid,
+                    settings.max_current,
+                    settings.num_connectors,
+                )
 
         # Service registration is performed globally by the integration setup
         # (custom_components/ocpp/__init__.py) so that multiple central system
@@ -199,6 +228,12 @@ class CentralSystem:
     async def create(hass: HomeAssistant, entry: ConfigEntry):
         """Create instance and start listening for OCPP connections on given port."""
         self = CentralSystem(hass, entry)
+        await asyncio.gather(
+            *(
+                controller.async_load()
+                for controller in self.session_controllers.values()
+            )
+        )
 
         if self.settings.ssl:
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -359,6 +394,7 @@ class CentralSystem:
                 return
 
             charge_point = self._build_charge_point(cp_id, websocket, cp_settings)
+            await self.session_controllers[cp_id].async_bind(charge_point)
             self.charge_points[cp_id] = charge_point
             self.connections += 1
             _LOGGER.info(
@@ -408,6 +444,9 @@ class CentralSystem:
                 charge_point = self._build_charge_point(
                     cp_id, websocket, charge_point.settings
                 )
+                controller = self.session_controllers.get(cp_id)
+                if controller is not None:
+                    await controller.async_bind(charge_point)
                 self.charge_points[cp_id] = charge_point
                 await charge_point.start()
             else:
@@ -733,6 +772,25 @@ class CentralSystem:
             return self.charge_points[cp_id].supported_features
         return 0
 
+    def get_session_controller(self, id: str) -> SessionLimitController | None:
+        """Return the cleanup controller for either configured charger id."""
+        cp_id = self.cpids.get(id, id)
+        if cp_id in self.session_controllers:
+            return self.session_controllers[cp_id]
+        for candidate in self.session_controllers.values():
+            if candidate.cpid == id:
+                return candidate
+        return None
+
+    async def set_session_charge_rate_amps(
+        self, id: str, connector_id: int, token, value: float
+    ) -> None:
+        """Set a connector's transaction-bound current limit."""
+        controller = self.get_session_controller(id)
+        if controller is None:
+            raise HomeAssistantError("session current limit controller not found")
+        await controller.async_set_limit(connector_id, token, value)
+
     async def set_max_charge_rate_amps(
         self, id: str, value: float, connector_id: int = 0
     ):
@@ -825,7 +883,45 @@ class CentralSystem:
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
-        await cp.clear_profile()
+        controller = self.get_session_controller(cp.id)
+        if controller is None:
+            # Compatibility for a partially constructed CentralSystem (and a
+            # defensive fallback during setup failure). Fully configured
+            # chargers always have a controller before the server starts.
+            await cp.clear_profile()
+            return
+        await controller.async_clear_profiles()
+
+    async def handle_reset_session_limits(self, call):
+        """Clear owned ids, allowing an explicit force discard while offline."""
+        devid = call.data.get("devid") or ""
+        force = bool(call.data.get("force", False))
+        controller = self.get_session_controller(devid) if devid else None
+        if controller is None and not devid:
+            if len(self.charge_points) == 1:
+                cp_id = next(iter(self.charge_points))
+                controller = self.session_controllers.get(cp_id)
+            elif len(self.session_controllers) == 1:
+                controller = next(iter(self.session_controllers.values()))
+        if controller is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+                translation_placeholders={"message": devid},
+            )
+        if not force:
+            cp = self.charge_points.get(controller.cp_id)
+            if cp is None or cp.status == STATE_UNAVAILABLE:
+                _LOGGER.warning(
+                    "%s: charger is unavailable for confirmed session-limit reset",
+                    controller.cp_id,
+                )
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="unavailable",
+                    translation_placeholders={"message": controller.cp_id},
+                )
+        await controller.async_reset(call.data.get("connector"), force=force)
 
     @check_charger_available
     async def handle_update_firmware(self, call, cp):
@@ -857,6 +953,25 @@ class CentralSystem:
         custom_profile = call.data.get("custom_profile", None)
         if custom_profile is not None:
             profile = _parse_custom_profile(custom_profile, cp.id)
+            profile_ids = custom_profile_ids(profile)
+            if any(
+                SESSION_PROFILE_MIN_ID <= profile_id <= SESSION_PROFILE_MAX_ID
+                for profile_id in profile_ids
+            ):
+                raise HomeAssistantError(
+                    f"charging profile ids {SESSION_PROFILE_MIN_ID}.."
+                    f"{SESSION_PROFILE_MAX_ID} are reserved by the integration"
+                )
+            # TxProfile routing is completed by the controller implementation;
+            # non-session custom profiles retain their exact legacy path.
+            if is_tx_profile(profile):
+                controller = self.get_session_controller(cp.id)
+                if controller is None:
+                    raise HomeAssistantError(
+                        "session current limit controller not found"
+                    )
+                await controller.async_custom_profile(int(conn_id), profile)
+                return
             await cp.set_charge_rate(profile=profile, conn_id=conn_id)
         elif watts is not None:
             await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)

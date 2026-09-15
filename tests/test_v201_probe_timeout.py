@@ -14,6 +14,7 @@ is never created, so charge current cannot be set.
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from ocpp.exceptions import OCPPError
@@ -162,6 +163,20 @@ async def test_post_connect_is_not_aborted_by_a_stalled_probe(hass):
     await cp.post_connect()
 
     assert cp.post_connect_success is True
+
+
+@pytest.mark.asyncio
+async def test_post_connect_does_not_gate_on_an_untriggerable_boot(hass):
+    """2.0.1 has no boot trigger implementation, so startup must stay open."""
+    cp = _mk_cp(hass)
+    cp.received_boot_notification = False
+    cp.session_controller = SimpleNamespace(async_post_connect_ready=AsyncMock())
+    cp.trigger_boot_notification = AsyncMock()
+
+    await cp.post_connect()
+
+    cp.session_controller.async_post_connect_ready.assert_awaited_once_with(False)
+    cp.trigger_boot_notification.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 """Custom integration for Chargers that support the Open Charge Point Protocol."""
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -23,6 +24,7 @@ from .api import (
     CentralSystem,
     CHRGR_SERVICE_DATA_SCHEMA,
     CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
+    RESET_SESSION_LIMITS_SERVICE_DATA_SCHEMA,
     CONF_SERVICE_DATA_SCHEMA,
     GCONF_SERVICE_DATA_SCHEMA,
     GDIAG_SERVICE_DATA_SCHEMA,
@@ -131,7 +133,9 @@ def _iter_central_systems(hass: HomeAssistant):
             yield value
 
 
-def _resolve_central_system(hass: HomeAssistant, devid: str):
+def _resolve_central_system(
+    hass: HomeAssistant, devid: str, *, include_configured: bool = False
+):
     """Return the CentralSystem that owns *devid*.
 
     *devid* is matched against the HA charger id (``cpid``) first and the raw
@@ -153,11 +157,25 @@ def _resolve_central_system(hass: HomeAssistant, devid: str):
     if devid:
         # Pass 1: cpid, the identifier the config flow keeps globally unique.
         owners = [
-            cs for cs in central_systems if cs.cpids.get(devid) in cs.charge_points
+            cs
+            for cs in central_systems
+            if cs.cpids.get(devid) in cs.charge_points
+            or (
+                include_configured
+                and any(
+                    controller.cpid == devid
+                    for controller in cs.session_controllers.values()
+                )
+            )
         ]
         # Pass 2: cp_id as reported over OCPP, which carries no such guarantee.
         if not owners:
-            owners = [cs for cs in central_systems if devid in cs.charge_points]
+            owners = [
+                cs
+                for cs in central_systems
+                if devid in cs.charge_points
+                or (include_configured and devid in cs.session_controllers)
+            ]
 
         if len(owners) == 1:
             return owners[0]
@@ -217,6 +235,11 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
     async def _route_clear_profile(call: ServiceCall) -> None:
         await _route("handle_clear_profile", call)
 
+    async def _route_reset_session_limits(call: ServiceCall) -> None:
+        devid = call.data.get("devid") or ""
+        cs = _resolve_central_system(hass, devid, include_configured=True)
+        await cs.handle_reset_session_limits(call)
+
     async def _route_set_charge_rate(call: ServiceCall) -> None:
         await _route("handle_set_charge_rate", call)
 
@@ -232,6 +255,7 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         csvcs.service_data_transfer,
         csvcs.service_trigger_custom_message,
         csvcs.service_clear_profile,
+        csvcs.service_reset_session_limits,
         csvcs.service_set_charge_rate,
         csvcs.service_update_firmware,
         csvcs.service_get_diagnostics,
@@ -268,6 +292,12 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         csvcs.service_clear_profile,
         _route_clear_profile,
         CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_reset_session_limits,
+        _route_reset_session_limits,
+        RESET_SESSION_LIMITS_SERVICE_DATA_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
@@ -463,6 +493,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry.entry_id in hass.data[DOMAIN]:
             # Close server
             central_sys = hass.data[DOMAIN][entry.entry_id]
+            await asyncio.gather(
+                *(
+                    controller.async_shutdown()
+                    for controller in central_sys.session_controllers.values()
+                ),
+                return_exceptions=True,
+            )
             central_sys._server.close()
             await central_sys._server.wait_closed()
             # Unload the platforms if - and only if - setup forwarded them.

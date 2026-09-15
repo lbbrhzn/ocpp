@@ -19,6 +19,7 @@ class HAChargerServices(StrEnum):
     service_get_diagnostics = "get_diagnostics"
     service_trigger_custom_message = "trigger_custom_message"
     service_clear_profile = "clear_profile"
+    service_reset_session_limits = "reset_session_limits"
     service_data_transfer = "data_transfer"
 
 

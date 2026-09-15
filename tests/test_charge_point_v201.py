@@ -975,7 +975,9 @@ async def _test_charge_profiles(
     )
     assert error is None
     assert len(cp.charge_profiles_set) == 3
-    assert cp.charge_profiles_set[-1].evse_id == 0
+    # TxProfile custom profiles use connector 1 as the single-connector
+    # default so they participate in the session controller's ordering.
+    assert cp.charge_profiles_set[-1].evse_id == 1
     assert cp.charge_profiles_set[-1].charging_profile == {
         "id": 2,
         "stack_level": 1,

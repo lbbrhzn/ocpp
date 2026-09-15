@@ -23,7 +23,13 @@ from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 
-from ocpp.charge_point import ChargePoint as cp
+from ocpp.charge_point import (
+    ChargePoint as cp,
+    camel_to_snake_case,
+    remove_nones,
+    serialize_as_dict,
+    snake_to_camel_case,
+)
 from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
 from ocpp.v16.enums import (
@@ -34,8 +40,8 @@ from ocpp.v16.enums import (
 )
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
-from ocpp.messages import CallError
-from ocpp.exceptions import NotImplementedError
+from ocpp.messages import Call, CallError, MessageType, validate_payload
+from ocpp.exceptions import NotImplementedError, OCPPError
 
 from .enums import (
     HAChargerDetails as cdet,
@@ -68,6 +74,7 @@ from .const import (
     UNITS_OCCP_TO_HA,
     sensor_unique_id,
 )
+from .session import CallOutcome, ClassifiedCallResult
 
 TIME_MINUTES = UnitOfTime.MINUTES
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -239,6 +246,8 @@ class MeasurandValue:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    supports_trigger_boot_notification = False
+
     def __init__(
         self,
         id,  # is charger cp_id not HA cpid
@@ -385,12 +394,31 @@ class ChargePoint(cp):
             except Exception as ex:
                 _LOGGER.debug("post_connect: set_availability ignored error: %s", ex)
 
+            expect_boot = bool(
+                self.supports_trigger_boot_notification
+                and prof.REM in self._attr_supported_features
+                and self.received_boot_notification is False
+            )
+            if self.session_controller is not None:
+                await self.session_controller.async_post_connect_ready(expect_boot)
+
             if prof.REM in self._attr_supported_features:
-                if self.received_boot_notification is False:
+                if expect_boot:
                     try:
-                        await asyncio.wait_for(
+                        boot_requested = await asyncio.wait_for(
                             self.trigger_boot_notification(), timeout=3
                         )
+                        if (
+                            boot_requested is False
+                            and self.session_controller is not None
+                        ):
+                            # A definite TriggerMessage refusal proves that no
+                            # requested boot is coming. Reopen admission now;
+                            # timeouts and transport errors remain uncertain
+                            # and are released by the bounded gate timeout.
+                            await self.session_controller.async_post_connect_ready(
+                                False
+                            )
                     except Exception as ex:
                         _LOGGER.debug("trigger_boot_notification ignored: %s", ex)
                 try:
@@ -430,6 +458,34 @@ class ChargePoint(cp):
     async def clear_profile(self):
         """Clear all charging profiles."""
         pass
+
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve the protocol-specific unit, value, target and stack level."""
+        raise NotImplementedError
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a transaction-bound SetChargingProfile request."""
+        raise NotImplementedError
+
+    def build_session_clear_request(self, profile_id: int):
+        """Build an exact-id ClearChargingProfile request."""
+        raise NotImplementedError
+
+    def build_custom_profile_request(self, connector_id: int, profile: dict):
+        """Build a caller-supplied profile request for classified sending."""
+        raise NotImplementedError
 
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
@@ -504,6 +560,138 @@ class ChargePoint(cp):
             raise resp.to_exception()
 
         return resp
+
+    async def call_classified(self, payload) -> ClassifiedCallResult:
+        """Send one call while preserving which phase made it fail.
+
+        The upstream ``skip_schema_validation`` flag covers both directions,
+        while this controller needs a locally-invalid request to be clean and
+        an invalid reply to be uncertain.  Keep the phases separate instead of
+        trying to infer them later from exception classes shared by both.
+        """
+        unique_id = str(self._unique_id_generator())
+        action_name = payload.__class__.__name__
+        try:
+            wire_payload = remove_nones(snake_to_camel_case(serialize_as_dict(payload)))
+            request = Call(unique_id, action_name, wire_payload)
+            await validate_payload(request, self._ocpp_version)
+        except asyncio.CancelledError as ex:
+            # Validation is the first suspension point and no send lock has
+            # been taken yet, so cancellation here is conclusively pre-send.
+            ex.classified_result = ClassifiedCallResult(
+                CallOutcome.LOCAL_REQUEST_INVALID, error=ex
+            )
+            raise
+        except Exception as ex:
+            return ClassifiedCallResult(CallOutcome.LOCAL_REQUEST_INVALID, error=ex)
+
+        try:
+            await self._call_lock.acquire()
+        except asyncio.CancelledError as ex:
+            # No frame can have been sent while this call was queued behind
+            # the protocol-wide send lock.
+            ex.classified_result = ClassifiedCallResult(
+                CallOutcome.LOCAL_REQUEST_INVALID, error=ex
+            )
+            raise
+
+        try:
+            try:
+                await self._send(request.to_json())
+            except asyncio.CancelledError as ex:
+                # Cancellation during _send cannot prove how much of the frame
+                # reached the peer.
+                ex.classified_result = ClassifiedCallResult(
+                    CallOutcome.TRANSPORT_FAILURE, error=ex
+                )
+                raise
+            except Exception as ex:
+                return ClassifiedCallResult(CallOutcome.TRANSPORT_FAILURE, error=ex)
+
+            try:
+                response = await self._get_specific_response(
+                    unique_id, self._response_timeout
+                )
+            except asyncio.CancelledError as ex:
+                ex.classified_result = ClassifiedCallResult(
+                    CallOutcome.TRANSPORT_FAILURE, error=ex
+                )
+                raise
+            except TimeoutError as ex:
+                return ClassifiedCallResult(CallOutcome.TIMEOUT, error=ex)
+            except OCPPError as ex:
+                code = str(getattr(ex, "code", ""))
+                common = {
+                    "OccurenceConstraintViolation",
+                    "PropertyConstraintViolation",
+                    "TypeConstraintViolation",
+                    "ProtocolError",
+                    "NotSupported",
+                    "NotImplemented",
+                }
+                format_code = (
+                    "FormationViolation"
+                    if self._ocpp_version == OcppVersion.V16.value
+                    else "FormatViolation"
+                )
+                outcome = (
+                    CallOutcome.REMOTE_VALIDATION_ERROR
+                    if code in common or code == format_code
+                    else CallOutcome.REMOTE_ERROR
+                )
+                return ClassifiedCallResult(outcome, error=ex)
+            except Exception as ex:
+                return ClassifiedCallResult(CallOutcome.REMOTE_ERROR, error=ex)
+        finally:
+            self._call_lock.release()
+
+        try:
+            message_type_id = response.message_type_id
+        except Exception as ex:
+            return ClassifiedCallResult(CallOutcome.RESPONSE_INVALID, error=ex)
+
+        if message_type_id == MessageType.CallError:
+            try:
+                error = response.to_exception()
+            except Exception as ex:
+                return ClassifiedCallResult(CallOutcome.REMOTE_ERROR, error=ex)
+            code = str(getattr(error, "code", ""))
+            common = {
+                "OccurenceConstraintViolation",
+                "PropertyConstraintViolation",
+                "TypeConstraintViolation",
+                "ProtocolError",
+                "NotSupported",
+                "NotImplemented",
+            }
+            format_code = (
+                "FormationViolation"
+                if self._ocpp_version == OcppVersion.V16.value
+                else "FormatViolation"
+            )
+            outcome = (
+                CallOutcome.REMOTE_VALIDATION_ERROR
+                if code in common or code == format_code
+                else CallOutcome.REMOTE_ERROR
+            )
+            return ClassifiedCallResult(outcome, error=error)
+
+        try:
+            response.action = action_name
+            await validate_payload(response, self._ocpp_version)
+            snake_case_payload = camel_to_snake_case(response.payload)
+            cls = getattr(self._call_result, action_name)
+            result_payload = cls(**snake_case_payload)
+        except asyncio.CancelledError as ex:
+            # The frame was sent and a reply was obtained; cancellation while
+            # validating that reply cannot make the side effect clean.
+            ex.classified_result = ClassifiedCallResult(
+                CallOutcome.RESPONSE_INVALID, error=ex
+            )
+            raise
+        except Exception as ex:
+            return ClassifiedCallResult(CallOutcome.RESPONSE_INVALID, error=ex)
+        return ClassifiedCallResult(CallOutcome.SUCCESS, response=result_payload)
 
     async def monitor_connection(self):
         """Monitor the connection, by measuring the connection latency."""
@@ -605,6 +793,8 @@ class ChargePoint(cp):
     async def stop(self):
         """Close connection and cancel ongoing tasks."""
         self.status = STATE_UNAVAILABLE
+        if self.session_controller is not None:
+            self.session_controller.on_disconnect()
         try:
             if self._connection.state is State.OPEN:
                 _LOGGER.debug(f"Closing websocket to '{self.id}'")
@@ -625,6 +815,10 @@ class ChargePoint(cp):
         self.status = STATE_OK
         self._connection = connection
         self._metrics[(0, cstat.reconnects)].value += 1
+        if self.session_controller is not None:
+            await self.session_controller.async_bind(self)
+            if self.post_connect_success:
+                await self.session_controller.async_post_connect_ready(False)
         # post connect now handled on receiving boot notification or with backstop in monitor connection
         await self.run([super().start(), self.monitor_connection()])
 
