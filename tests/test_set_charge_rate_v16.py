@@ -27,6 +27,7 @@ from custom_components.ocpp.chargepoint import (
 from custom_components.ocpp.const import DEFAULT_MAX_CURRENT
 from custom_components.ocpp.enums import (
     ConfigurationKey as ckey,
+    HAChargerSession as csess,
     OcppMisc as om,
     Profiles as prof,
 )
@@ -511,3 +512,134 @@ def test_phase_count_ignores_phase_values_that_are_not_numbers(cp_v16):
     voltage.extra_attr = {"L1-N": 230.0, "L2-N": "n/a", "L3-N": 231.0}
     cp_v16._metrics[(1, Measurand.voltage.value)] = voltage
     assert cp_v16._phase_count(1) == 2
+
+
+@pytest.mark.asyncio
+async def test_power_only_session_conversion_exposes_its_assumptions(
+    cp_v16, monkeypatch
+):
+    """An amp slider converted to watts reports the voltage and phase count."""
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Power"
+        if key == ckey.charge_profile_max_stack_level:
+            return "2"
+        return None
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    prepared = await cp_v16.prepare_session_limit(1, 16)
+
+    assert prepared["unit"] == "W"
+    assert prepared["value"] == 3680
+    assert prepared["stack_level"] == 2
+    assert prepared["conversion_voltage"] == 230
+    assert prepared["conversion_phases"] == 1
+
+
+def test_session_request_builders_v16(cp_v16):
+    """The 1.6 builders address exactly the id, connector and transaction given."""
+    request = cp_v16.build_session_limit_request(
+        2, 77, 3002, {"unit": "A", "value": 12.0, "stack_level": 8}
+    )
+    assert request.connector_id == 2
+    profile = request.cs_charging_profiles
+    assert profile["chargingProfileId"] == 3002
+    assert profile["stackLevel"] == 8
+    assert profile["transactionId"] == 77
+    assert profile["chargingProfileKind"] == "Relative"
+    assert profile["chargingProfilePurpose"] == "TxProfile"
+    assert profile["chargingSchedule"]["chargingRateUnit"] == "A"
+
+
+def _show_transaction(cp, connector_id: int, transaction_id: int) -> None:
+    """Record a transaction as the 1.6 handlers do: map and metric together."""
+    cp._active_tx[connector_id] = transaction_id
+    cp._metrics[(connector_id, csess.transaction_id)].value = transaction_id
+
+
+@pytest.mark.asyncio
+async def test_set_session_limit_v16_binds_the_active_transaction(cp_v16, monkeypatch):
+    """Only an Accepted reply confirms; everything else raises a clear error."""
+    from homeassistant.exceptions import HomeAssistantError
+    from ocpp.v16.enums import ChargingProfileStatus
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp_v16, "call", accept)
+
+    with pytest.raises(HomeAssistantError, match="no active transaction"):
+        await cp_v16.set_session_limit(1, 10)
+    _show_transaction(cp_v16, 1, 0)  # what a StopTransaction leaves behind
+    with pytest.raises(HomeAssistantError, match="no active transaction"):
+        await cp_v16.set_session_limit(1, 10)
+    assert sent == []
+    _show_transaction(cp_v16, 1, 55)
+    cp_v16._tx_indeterminate = {1}
+    with pytest.raises(HomeAssistantError, match="settled"):
+        await cp_v16.set_session_limit(1, 10)
+    cp_v16._tx_indeterminate = set()
+
+    assert await cp_v16.set_session_limit(1, 10) is True
+    profile = sent[-1].cs_charging_profiles
+    assert (profile["chargingProfileId"], profile["transactionId"]) == (3001, 55)
+    assert profile["stackLevel"] == 5
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
+
+    async def reject(_request):
+        return SimpleNamespace(status=ChargingProfileStatus.rejected)
+
+    monkeypatch.setattr(cp_v16, "call", reject)
+    with pytest.raises(HomeAssistantError, match="rejected"):
+        await cp_v16.set_session_limit(1, 10)
+
+    async def timeout(_request):
+        raise TimeoutError()
+
+    monkeypatch.setattr(cp_v16, "call", timeout)
+    with pytest.raises(HomeAssistantError, match="did not answer"):
+        await cp_v16.set_session_limit(1, 10)
+
+    async def broken(_request):
+        raise RuntimeError("closed")
+
+    monkeypatch.setattr(cp_v16, "call", broken)
+    with pytest.raises(HomeAssistantError, match="failed"):
+        await cp_v16.set_session_limit(1, 10)
+
+
+@pytest.mark.asyncio
+async def test_set_session_limit_v16_aborts_when_the_transaction_changes(
+    cp_v16, monkeypatch
+):
+    """A stop or new start during preparation must not get the old id's profile."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    _show_transaction(cp_v16, 1, 55)
+    sent = []
+
+    async def prepare_and_stop(connector_id, amps, **_kwargs):
+        _show_transaction(cp_v16, connector_id, 0)  # StopTransaction arrived
+        return {"unit": "A", "value": float(amps), "stack_level": 1}
+
+    async def record(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    monkeypatch.setattr(cp_v16, "prepare_session_limit", prepare_and_stop)
+    monkeypatch.setattr(cp_v16, "call", record)
+    with pytest.raises(HomeAssistantError, match="changed while"):
+        await cp_v16.set_session_limit(1, 10)
+    assert sent == []
