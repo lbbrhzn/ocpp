@@ -1760,9 +1760,11 @@ class ChargePoint(cp):
             self.active_transaction_id = tx_id
             self._set_session_start(connector_id, time.time(), estimated=False)
             self._metrics[(connector_id, cstat.id_tag)].value = id_tag
-            # StartTransaction is not always preceded with an Authorize (local authorization by charger)
-            # Make sure charger-id_tag (connector 0) is also set with id_tag.
-            self._metrics[0][cstat.id_tag.value].value = id_tag
+            # StartTransaction is not always preceded by Authorize (local
+            # authorization / cache). The HA IdTag sensor is charger-level
+            # (connector 0); only set it on a single-connector charger.
+            if self.settings.num_connectors == 1:
+                self._metrics[0][cstat.id_tag.value].value = id_tag
             self._metrics[(connector_id, cstat.stop_reason)].value = ""
             self._metrics[(connector_id, csess.transaction_id)].value = tx_id
             try:
