@@ -33,7 +33,7 @@ Cancellation cannot interrupt settlement; a cleanup error takes precedence over 
 cancellation. This bounds caller latency on a responsive event loop, not task lifetime
 or complete process shutdown.
 
-This is not a fence for separately scheduled `post_connect` or external service work.
+This does not block separately scheduled `post_connect` or external service work.
 It also does not change the central system's different-protocol object-rebuild fallback:
 that fallback can construct a separate object after an old object's stop fails. Do not
 infer cross-object isolation, command replay, or charger recovery guarantees from these

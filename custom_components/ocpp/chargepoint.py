@@ -588,7 +588,7 @@ class ChargePoint(cp):
     async def start(self):
         """Start charge point."""
         # A subclass may await initialization (v1.6 loads transaction state)
-        # before reaching here. Stop/reconnect must fence that pending start.
+        # before reaching here. Stop/reconnect must block that pending start.
         # Check before creating coroutines; run publishes without yielding.
         if not self._start_pending:
             return
@@ -662,7 +662,7 @@ class ChargePoint(cp):
         if pending:
             for task in pending:
                 task.cancel()
-            raise TimeoutError("OCPP session retirement timed out; replacement fenced")
+            raise TimeoutError("OCPP session retirement timed out; replacement blocked")
         close_task.result()
 
     async def _stop_session(self, session):
@@ -723,7 +723,7 @@ class ChargePoint(cp):
             ):
                 self.status = STATE_UNAVAILABLE
                 raise TimeoutError(
-                    "OCPP retirement survivors still active; replacement fenced"
+                    "OCPP retirement survivors still active; replacement blocked"
                 )
             if (
                 cleanup is not None
@@ -739,7 +739,7 @@ class ChargePoint(cp):
                 not task.done() for task in session.get("retirement", session["tasks"])
             ):
                 raise TimeoutError(
-                    "OCPP retirement survivors still active; replacement fenced"
+                    "OCPP retirement survivors still active; replacement blocked"
                 )
             # No await between checking admission, installing, and run capturing
             # its task set. An overlapping reconnect supersedes this candidate;
