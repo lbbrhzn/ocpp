@@ -108,6 +108,7 @@ class OcppMisc(StrEnum):
     charging_schedule = "chargingSchedule"
     charging_rate_unit = "chargingRateUnit"
     charging_schedule_period = "chargingSchedulePeriod"
+    start_schedule = "startSchedule"
     start_period = "startPeriod"
     feature_profile_core = "Core"
     feature_profile_firmware = "FirmwareManagement"
