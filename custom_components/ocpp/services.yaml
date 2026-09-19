@@ -143,6 +143,42 @@ get_configuration:
       advanced: true
       example: "WebSocketPingInterval"
 
+get_composite_schedule:
+  name: Get composite charging schedule
+  description: Requests the effective charging schedule calculated by the charge point (OCPP 1.6)
+  fields:
+    devid:
+      name: Charger identifier
+      description: Either HA charger id or Ocpp id
+      required: false
+      advanced: true
+      example: charger
+    conn_id:
+      name: Connector identifier
+      description: Connector to request the composite schedule for
+      required: false
+      advanced: false
+      example: 1
+      default: 1
+    duration:
+      name: Duration
+      description: Schedule duration in seconds
+      required: false
+      advanced: false
+      example: 3600
+      default: 3600
+    charging_rate_unit:
+      name: Charging rate unit
+      description: Optional charging rate unit requested from the charger
+      required: false
+      advanced: false
+      example: "W"
+      selector:
+        select:
+          options:
+            - "A"
+            - "W"
+
 get_diagnostics:
   name: Request diagnostic data from charger
   description: Specify server url to upload diagnostic data to (dependent on charger support), supported transfer protocols can be requested by the configuration key SupportedFileTransferProtocols

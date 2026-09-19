@@ -16,6 +16,7 @@ class HAChargerServices(StrEnum):
     service_update_firmware = "update_firmware"
     service_configure = "configure"
     service_get_configuration = "get_configuration"
+    service_get_composite_schedule = "get_composite_schedule"
     service_get_diagnostics = "get_diagnostics"
     service_trigger_custom_message = "trigger_custom_message"
     service_clear_profile = "clear_profile"
