@@ -66,6 +66,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     MEASURANDS,
+    STATION_MAX_PROFILE_ABSOLUTE_START,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -89,11 +90,6 @@ def _to_message_trigger(name: str) -> MessageTrigger | None:
 # Charge-rate defaults plus conservative electrical conversion fallbacks.
 _DEFAULT_LIMIT_AMPS = DEFAULT_MAX_CURRENT
 _DEFAULT_LIMIT_WATTS = 22000
-
-# Anchor used when the station ceiling is sent as an absolute schedule
-# (charge_point_max_profile_absolute). Any fixed past instant works, since the
-# charger only needs an absolute reference to accept a non-relative profile.
-_STATION_MAX_PROFILE_ABSOLUTE_START = "2020-01-01T00:00:00Z"
 
 # Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
 _MAX_CONNECTORS = 10
@@ -920,7 +916,7 @@ class ChargePoint(cp):
         }
         if self.settings.charge_point_max_profile_absolute:
             charging_profile_kind = ChargingProfileKindType.absolute.value
-            charging_schedule[om.start_schedule] = _STATION_MAX_PROFILE_ABSOLUTE_START
+            charging_schedule[om.start_schedule] = STATION_MAX_PROFILE_ABSOLUTE_START
         else:
             charging_profile_kind = ChargingProfileKindType.relative.value
         return call.SetChargingProfile(

@@ -59,6 +59,12 @@ DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+# Anchor used when the station ceiling (ChargePointMaxProfile / 1.6,
+# ChargingStationMaxProfile / 2.0.1+) is sent as an absolute schedule
+# (charge_point_max_profile_absolute). Any fixed past instant works, since
+# the charger only needs an absolute reference to accept a non-relative
+# profile.
+STATION_MAX_PROFILE_ABSOLUTE_START = "2020-01-01T00:00:00Z"
 OCPP_1_6 = "ocpp1.6"
 OCPP_2_0 = "ocpp2"
 OCPP_VERSION_AUTO = "auto"
