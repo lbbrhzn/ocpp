@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v201.enums import (
+    ChargingProfileKindEnumType,
     ChargingProfilePurposeEnumType,
     ChargingProfileStatusEnumType,
     ClearChargingProfileStatusEnumType,
@@ -35,7 +36,12 @@ from custom_components.ocpp.ocppv201 import ChargePoint, InventoryReport
 from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
 
 
-def _mk_cp(hass, status=ChargingProfileStatusEnumType.accepted, max_current=32):
+def _mk_cp(
+    hass,
+    status=ChargingProfileStatusEnumType.accepted,
+    max_current=32,
+    charge_point_max_profile_absolute=False,
+):
     """Build a v201 ChargePoint whose charger answers with `status`."""
     data = {
         "host": "127.0.0.1",
@@ -63,6 +69,7 @@ def _mk_cp(hass, status=ChargingProfileStatusEnumType.accepted, max_current=32):
         monitored_variables_autoconfig=False,
         skip_schema_validation=False,
         force_smart_charging=False,
+        charge_point_max_profile_absolute=charge_point_max_profile_absolute,
     )
     conn = SimpleNamespace(
         state=State.CLOSED,
@@ -249,6 +256,39 @@ async def test_a_managed_limit_targets_the_station_whatever_the_connector(hass, 
         req.charging_profile["charging_profile_purpose"]
         == ChargingProfilePurposeEnumType.charging_station_max_profile.value
     )
+
+
+@pytest.mark.asyncio
+async def test_station_max_profile_relative_by_default(hass):
+    """Default settings keep the ChargingStationMaxProfile relative, with no startSchedule."""
+    cp = _mk_cp(hass)
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+
+    profile = cp.sent[0].charging_profile
+    assert (
+        profile["charging_profile_kind"] == ChargingProfileKindEnumType.relative.value
+    )
+    assert "start_schedule" not in profile["charging_schedule"][0]
+
+
+@pytest.mark.asyncio
+async def test_station_max_profile_absolute_when_enabled(hass):
+    """The advanced option anchors the ChargingStationMaxProfile at a fixed absolute start.
+
+    Some chargers (e.g. Autel MaxiCharger) reject a relative
+    ChargingStationMaxProfile outright; this lets a user opt into the
+    absolute form those chargers accept.
+    """
+    cp = _mk_cp(hass, charge_point_max_profile_absolute=True)
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+
+    profile = cp.sent[0].charging_profile
+    assert (
+        profile["charging_profile_kind"] == ChargingProfileKindEnumType.absolute.value
+    )
+    assert profile["charging_schedule"][0]["start_schedule"] == "2020-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
