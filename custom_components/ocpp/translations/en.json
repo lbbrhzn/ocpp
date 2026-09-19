@@ -52,6 +52,7 @@
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
                     "force_smart_charging": "Force Smart Charging feature profile",
+                    "charge_point_max_profile_absolute": "Send the station charging limit as an absolute schedule",
                     "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },
@@ -144,6 +145,7 @@
                     "idle_interval": "Charger idle sampling interval (seconds)",
                     "skip_schema_validation": "Skip OCPP schema validation",
                     "force_smart_charging": "Force Smart Charging feature profile",
+                    "charge_point_max_profile_absolute": "Send the station charging limit as an absolute schedule",
                     "enable_ha_notifications": "Enable Home Assistant notifications"
                 }
             },

@@ -90,6 +90,11 @@ def _to_message_trigger(name: str) -> MessageTrigger | None:
 _DEFAULT_LIMIT_AMPS = DEFAULT_MAX_CURRENT
 _DEFAULT_LIMIT_WATTS = 22000
 
+# Anchor used when the station ceiling is sent as an absolute schedule
+# (charge_point_max_profile_absolute). Any fixed past instant works, since the
+# charger only needs an absolute reference to accept a non-relative profile.
+_STATION_MAX_PROFILE_ABSOLUTE_START = "2020-01-01T00:00:00Z"
+
 # Limit connectors to prevent OOM in case a corrupted charger reports an invalid number.
 _MAX_CONNECTORS = 10
 
@@ -905,24 +910,27 @@ class ChargePoint(cp):
 
         return units_value, limit_value, stack_level
 
-    @staticmethod
     def _station_charge_rate_request(
-        units_value: str, limit_value: float, stack_level: int
+        self, units_value: str, limit_value: float, stack_level: int
     ) -> call.SetChargingProfile:
         """Build the shared station ceiling used by the slider and action."""
+        charging_schedule = {
+            om.charging_rate_unit: units_value,
+            om.charging_schedule_period: [{om.start_period: 0, om.limit: limit_value}],
+        }
+        if self.settings.charge_point_max_profile_absolute:
+            charging_profile_kind = ChargingProfileKindType.absolute.value
+            charging_schedule[om.start_schedule] = _STATION_MAX_PROFILE_ABSOLUTE_START
+        else:
+            charging_profile_kind = ChargingProfileKindType.relative.value
         return call.SetChargingProfile(
             connector_id=0,
             cs_charging_profiles={
                 om.charging_profile_id: 1000,
                 om.stack_level: stack_level,
-                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_kind: charging_profile_kind,
                 om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
-                om.charging_schedule: {
-                    om.charging_rate_unit: units_value,
-                    om.charging_schedule_period: [
-                        {om.start_period: 0, om.limit: limit_value}
-                    ],
-                },
+                om.charging_schedule: charging_schedule,
             },
         )
 

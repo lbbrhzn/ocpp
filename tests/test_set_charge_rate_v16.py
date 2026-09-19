@@ -50,6 +50,7 @@ def cp_v16():
     cp._active_tx = {}
     cp._tx_indeterminate = set()
     cp._metrics = _ConnectorAwareMetrics()
+    cp.settings = SimpleNamespace(charge_point_max_profile_absolute=False)
     # set_charge_rate calls these (we’ll monkeypatch per-test):
     # - cp.get_configuration(key)
     # - cp.call(req)
@@ -234,6 +235,28 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
     assert ok is True
     assert notices == []
+
+
+def test_station_charge_rate_request_relative_by_default(cp_v16):
+    """Default settings keep the ChargePointMaxProfile relative, with no startSchedule."""
+    req = cp_v16._station_charge_rate_request(ChargingRateUnitType.amps.value, 16, 1)
+    profile = req.cs_charging_profiles
+    assert profile[om.charging_profile_kind] == ChargingProfileKindType.relative.value
+    assert om.start_schedule not in profile[om.charging_schedule]
+
+
+def test_station_charge_rate_request_absolute_when_enabled(cp_v16):
+    """The advanced option anchors the ChargePointMaxProfile at a fixed absolute start.
+
+    Some chargers (e.g. Autel MaxiCharger) reject a relative
+    ChargePointMaxProfile outright; this lets a user opt into the absolute
+    form those chargers accept.
+    """
+    cp_v16.settings.charge_point_max_profile_absolute = True
+    req = cp_v16._station_charge_rate_request(ChargingRateUnitType.amps.value, 16, 1)
+    profile = req.cs_charging_profiles
+    assert profile[om.charging_profile_kind] == ChargingProfileKindType.absolute.value
+    assert profile[om.charging_schedule][om.start_schedule] == "2020-01-01T00:00:00Z"
 
 
 def test_allowed_charging_rate_units_tokens():
