@@ -435,6 +435,16 @@ class ChargePoint(cp):
         """Clear all charging profiles."""
         pass
 
+
+    async def get_composite_schedule(
+        self,
+        conn_id: int = 1,
+        duration: int = 3600,
+        charging_rate_unit: str | None = None,
+    ) -> dict:
+        """Return the effective charging schedule reported by the charger."""
+        raise NotImplementedError
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
         raise NotImplementedError
