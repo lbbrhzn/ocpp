@@ -24,6 +24,7 @@ If your charger reports more than one connector, the sensors below are created p
 | `sensor.<cpid>_transaction_id` | `sensor.<cpid>_connector_1_transaction_id` |
 | `sensor.<cpid>_current_import` | `sensor.<cpid>_connector_1_current_import` |
 | `number.<cpid>_maximum_current` | `number.<cpid>_maximum_current` |
+| `number.<cpid>_session_current_limit` | `number.<cpid>_connector_1_session_current_limit` |
 
 ## Adjusting the charge current
 
@@ -48,6 +49,20 @@ The upgrade does not clear stored charging profiles. Moving the master updates o
 ### TxProfile
 
 For session-scoped control, use a profile that is active exclusively during the current charging session. This allows you to adjust the charge current downwards while still respecting the upper limit defined by the ChargePointMaxProfile.
+
+### Session Current Limit
+
+`Session Current Limit` is a number per connector that limits only the transaction the connector is running. It is available while the charger is connected with SmartCharging, the connector reads Charging or Suspended, and a transaction id is displayed for it; on OCPP 1.6 it is also withheld for the few seconds after a StopTransaction the integration could not attribute (#2128), until the charger's next report settles the connector. Its value is the last limit the charger accepted for the displayed transaction and nothing else: it starts unknown, it is not restored across a restart, and it goes back to unknown when the transaction id changes, because the charger discards a `TxProfile` when its transaction ends.
+
+Moving the slider sends one `SetChargingProfile`: a `TxProfile` of kind `Relative` bound to the displayed transaction id, at the stack level the charger reports as its maximum (`ChargeProfileMaxStackLevel` on 1.6, `SmartChargingCtrlr/ProfileStackLevel` on 2.0.1), in amps or, on a watt-only station, in watts using the voltage and phase count described below. It uses profile id `3000+n`, where `n` is the connector, the same id the `ocpp.set_charge_rate` action uses for its TxProfile leg on 1.6, so a connector has one session limit whichever way it is set. The maximum is a limit like any other: the same profile is sent with the maximum current, and nothing is cleared, because the charger discards the profile when the transaction ends. The slider moves while the request is in flight and returns to the last accepted value on anything but an Accepted reply, with the charger's status in the error.
+
+What this control does not do, so that automations do not assume it:
+
+* It trusts the displayed transaction id. A compliant charger rejects a `TxProfile` whose transaction id no longer matches, which is the safety net; a charger that does not validate the id could apply the profile to its next transaction.
+* A request that times out but was applied by the charger leaves the slider showing the previous value until it is moved again. Use the current or power sensors, not the slider, when an automation needs the delivered current.
+* After a restart the slider is available for the running transaction but cannot know about a profile set before the restart.
+* Once moved, the slider's profile stays on the charger until the transaction ends; the slider cannot remove it. At the maximum it still takes precedence over a `TxDefaultProfile` or a `TxProfile` at a lower stack level rather than handing control back to it. On a watt-only station the maximum is converted to watts like any other value, so if fewer phases are counted than the supply has, it caps the session below what it could draw.
+* A custom `TxProfile` sent with the same stack level and connector replaces the slider's profile under the SetChargingProfile replacement rule, and the slider does not learn of it. When creating custom profiles, avoid the stack level the session slider uses, which is the charger's reported maximum, and its profile id. The slider and the 1.6 action's TxProfile leg share one profile id, so they overwrite each other. `ChargePointMaxProfile` remains a ceiling over everything regardless of stack level, so the station and session sliders never compete: the applied limit is the lower of the two.
 
 Essentially, the slider in your GUI maintains control over the absolute maximum current the charger can utilize.
 

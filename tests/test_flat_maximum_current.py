@@ -27,7 +27,12 @@ from custom_components.ocpp.const import (
     DOMAIN,
     ChargerSystemSettings,
 )
-from custom_components.ocpp.enums import ConfigurationKey, Profiles
+from custom_components.ocpp.enums import (
+    ConfigurationKey,
+    HAChargerSession as csess,
+    HAChargerStatuses as cstat,
+    Profiles,
+)
 from custom_components.ocpp.ocppv16 import ChargePoint as ChargePoint16
 from custom_components.ocpp.ocppv201 import (
     ChargePoint as ChargePoint201,
@@ -135,10 +140,25 @@ async def test_one_master_on_station_device(hass, flat_entry, setup_flat, connec
         for e in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
         if e.domain == "number"
     ]
-    assert len(numbers) == 1
-    assert numbers[0].unique_id == "number.ocpp.test_cpid.maximum_current"
+    assert len(numbers) == connectors + 1
+    master = next(
+        entry
+        for entry in numbers
+        if entry.unique_id == "number.ocpp.test_cpid.maximum_current"
+    )
+    expected_sessions = (
+        {"number.ocpp.test_cpid.session_current_limit"}
+        if connectors == 1
+        else {
+            f"number.ocpp.test_cpid.conn{connector}.session_current_limit"
+            for connector in range(1, connectors + 1)
+        }
+    )
+    assert {
+        entry.unique_id for entry in numbers if entry is not master
+    } == expected_sessions
     entity = _number(hass)
-    device = dr.async_get(hass).async_get(numbers[0].device_id)
+    device = dr.async_get(hass).async_get(master.device_id)
     assert (DOMAIN, "test_cpid") in device.identifiers
     assert entity.connector_id is None
     assert entity._op_connector_id == 0
@@ -460,3 +480,342 @@ async def test_slider201_uses_existing_station_path(
         assert req.charging_profile_criteria == {
             "charging_profile_purpose": "ChargingStationMaxProfile"
         }
+
+
+@pytest.mark.parametrize(
+    ("connectors", "stale_uids", "expected_session_uids"),
+    [
+        (
+            1,
+            (
+                "number.ocpp.test_cpid.conn1.session_current_limit",
+                "number.ocpp.test_cpid.conn2.session_current_limit",
+            ),
+            {"number.ocpp.test_cpid.session_current_limit"},
+        ),
+        (
+            2,
+            ("number.ocpp.test_cpid.session_current_limit",),
+            {
+                "number.ocpp.test_cpid.conn1.session_current_limit",
+                "number.ocpp.test_cpid.conn2.session_current_limit",
+            },
+        ),
+    ],
+)
+async def test_session_entities_follow_connector_topology_without_orphans(
+    hass,
+    flat_entry,
+    setup_flat,
+    connectors,
+    stale_uids,
+    expected_session_uids,
+):
+    """Discovery-driven one/many transitions remove the obsolete entity shape."""
+    _configure(hass, flat_entry, num_connectors=connectors)
+    registry = er.async_get(hass)
+    stale = [_register(hass, flat_entry, uid) for uid in stale_uids]
+    foreign = _register(
+        hass, flat_entry, "number.ocpp.other.conn1.session_current_limit"
+    )
+
+    await setup_flat()
+
+    assert all(registry.async_get(entry.entity_id) is None for entry in stale)
+    assert registry.async_get(foreign.entity_id) == foreign
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if entry.platform == DOMAIN
+        and entry.domain == "number"
+        and entry.unique_id.endswith("session_current_limit")
+        and ".test_cpid." in entry.unique_id
+    }
+    assert session_uids == expected_session_uids
+
+
+async def test_session_entities_follow_a_malformed_or_oversized_connector_count(
+    hass, flat_entry, setup_flat, caplog
+):
+    """A bad count falls back to one entity; a count over the cap stops at it."""
+    _configure(hass, flat_entry, num_connectors="many")
+    await setup_flat()
+    registry = er.async_get(hass)
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if "session_current_limit" in entry.unique_id
+    }
+    assert session_uids == {"number.ocpp.test_cpid.session_current_limit"}
+
+    await hass.config_entries.async_unload(flat_entry.entry_id)
+    _configure(hass, flat_entry, num_connectors=12)
+    await setup_flat()
+    session_uids = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if "conn" in entry.unique_id and "session_current_limit" in entry.unique_id
+    }
+    assert len(session_uids) == 10
+    assert "limited to connectors 1..10" in caplog.text
+
+
+def _session_number(hass):
+    return live_entity(hass, "number.test_cpid_session_current_limit", "number")
+
+
+def _charging(cp, connector: int, transaction_id: int | None) -> None:
+    cp._metrics[(connector, cstat.status_connector)].value = "Charging"
+    cp._metrics[(connector, csess.transaction_id)].value = transaction_id
+    if transaction_id:
+        cp._active_tx[connector] = transaction_id
+    else:
+        cp._active_tx.pop(connector, None)
+
+
+async def test_session_entity_follows_the_displayed_transaction(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """Available while a transaction is displayed; the value is what was accepted."""
+    from ocpp.v16.enums import ChargingProfileStatus
+
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    assert not entity.available
+    assert entity.native_value is None
+
+    cp = _attach_protocol(hass, flat_entry, central)
+    assert not entity.available  # no transaction displayed yet
+    _charging(cp, 1, 55)
+    assert entity.available
+    assert entity.native_value is None
+    assert entity.extra_state_attributes["transaction_id"] == "55"
+    assert entity.extra_state_attributes["profile_id"] == 3001
+
+    sent = []
+
+    async def configuration(key):
+        if key == ConfigurationKey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ConfigurationKey.charge_profile_max_stack_level:
+            return "8"
+        return None
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", accept)
+
+    await entity.async_set_native_value(10)
+    assert entity.native_value == 10
+    profile = sent[-1].cs_charging_profiles
+    assert sent[-1].connector_id == 1
+    assert profile["chargingProfileId"] == 3001
+    assert profile["stackLevel"] == 8
+    assert profile["transactionId"] == 55
+    assert profile["chargingProfilePurpose"] == "TxProfile"
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
+
+    async def reject(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatus.rejected)
+
+    monkeypatch.setattr(cp, "call", reject)
+    with pytest.raises(HomeAssistantError, match="rejected"):
+        await entity.async_set_native_value(6)
+    assert entity.native_value == 10  # back to the last accepted value
+
+    monkeypatch.setattr(cp, "call", accept)
+    # The maximum is a limit like any other: a profile is sent, nothing cleared.
+    await entity.async_set_native_value(entity.native_max_value)
+    assert type(sent[-1]).__name__ == "SetChargingProfile"
+    profile = sent[-1].cs_charging_profiles
+    assert profile["chargingProfileId"] == 3001
+    assert profile["transactionId"] == 55
+    period = profile["chargingSchedule"]["chargingSchedulePeriod"][0]
+    assert period["limit"] == float(entity.native_max_value)
+    assert entity.native_value == entity.native_max_value
+
+    await entity.async_set_native_value(12)
+    assert entity.native_value == 12
+    _charging(cp, 1, 56)  # the charger moved on: that profile died with 55
+    assert entity.native_value is None
+    assert entity.available
+    _charging(cp, 1, None)
+    assert not entity.available
+    with pytest.raises(HomeAssistantError, match="no active transaction"):
+        await entity.async_set_native_value(8)
+
+
+async def test_session_entity_reports_charger_errors_and_reverts(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A timeout or a transport failure surfaces as an error, value kept."""
+    from ocpp.v16.enums import ChargingProfileStatus
+
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+
+    async def configuration(key):
+        return "Current" if "Unit" in str(key) else "3"
+
+    async def accept(_request):
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", accept)
+    await entity.async_set_native_value(9)
+    assert entity.native_value == 9
+
+    async def timeout(_request):
+        raise TimeoutError("no reply")
+
+    monkeypatch.setattr(cp, "call", timeout)
+    with pytest.raises(HomeAssistantError, match="did not answer"):
+        await entity.async_set_native_value(7)
+    assert entity.native_value == 9
+
+    monkeypatch.setattr(cp, "call", accept)
+    await entity.async_set_native_value(11)
+
+    async def broken(_request):
+        raise RuntimeError("socket closed")
+
+    monkeypatch.setattr(cp, "call", broken)
+    with pytest.raises(HomeAssistantError, match="failed"):
+        await entity.async_set_native_value(5)
+    assert entity.native_value == 11
+
+
+async def test_session_entity_error_paths_and_ordering(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """Generic failures, a False reply, a no-op revert, and strict ordering."""
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    from custom_components.ocpp.const import DATA_UPDATED
+
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+
+    # A dispatcher payload that is not a collection still refreshes the entity.
+    async_dispatcher_send(hass, DATA_UPDATED, 5)
+    await hass.async_block_till_done()
+
+    async def explode(_id, _connector, _value):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", explode)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(10)
+    assert entity.native_value is None
+
+    async def refused(_id, _connector, _value):
+        return False
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", refused)
+    with pytest.raises(HomeAssistantError, match="did not accept"):
+        await entity.async_set_native_value(10)
+    assert entity.native_value is None
+
+    async def accepted(_id, _connector, _value):
+        return True
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", accepted)
+    await entity.async_set_native_value(10)
+    assert entity.native_value == 10
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", refused)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(10)  # same target: nothing to revert
+    assert entity.native_value == 10
+
+    # A set spends its first round trips in capability discovery, so a request
+    # asked for just behind it must wait its turn rather than overtake it.
+    calls = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def gated(_id, _connector, value):
+        calls.append(value)
+        if value == 6:
+            first_started.set()
+            await release_first.wait()
+        return True
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", gated)
+    first = asyncio.create_task(entity.async_set_native_value(6))
+    await first_started.wait()
+    second = asyncio.create_task(entity.async_set_native_value(entity.native_max_value))
+    await asyncio.sleep(0)
+    assert calls == [6]  # the second request has not been sent yet
+    release_first.set()
+    await first
+    await second
+    assert calls == [6, entity.native_max_value]
+    assert entity.native_value == entity.native_max_value  # the later one stands
+
+
+async def test_session_entity_shows_the_first_request_while_pending(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """The optimistic value is visible from the first request of a transaction."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def gated(_id, _connector, _value):
+        started.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", gated)
+    task = asyncio.create_task(entity.async_set_native_value(9))
+    await started.wait()
+    assert entity.native_value == 9
+    assert hass.states.get(entity.entity_id).state == "9.0"
+    release.set()
+    await task
+    assert entity.native_value == 9
+
+
+async def test_session_entity_forgets_a_confirmation_after_a_boot(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A reused transaction id after a BootNotification is a new transaction."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
+    cp._active_tx = {}
+    cp._metrics[(1, cstat.status_connector)].value = "Charging"
+    cp._metrics[(1, csess.transaction_id)].value = "same"
+
+    async def accepted(_id, _connector, _value):
+        return True
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", accepted)
+    await entity.async_set_native_value(6)
+    assert entity.native_value == 6
+    assert entity.extra_state_attributes["charger_generation"] == 0
+
+    cp.triggered_boot_notification = True  # keep the boot's side effects quiet
+    cp._register_boot_notification()
+    assert entity.extra_state_attributes["charger_generation"] == 1
+    assert entity.native_value is None  # same id, new charger generation
+    assert entity.extra_state_attributes["transaction_id"] == "same"
+
+    await entity.async_set_native_value(7)
+    assert entity.native_value == 7

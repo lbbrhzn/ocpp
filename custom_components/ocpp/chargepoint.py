@@ -14,6 +14,7 @@ import time
 from homeassistant.components.persistent_notification import DOMAIN as PN_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import STATE_OK, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.const import UnitOfTime
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
@@ -28,6 +29,7 @@ from ocpp.v16 import call as callv16
 from ocpp.v16 import call_result as call_resultv16
 from ocpp.v16.enums import (
     AuthorizationStatus,
+    ChargingProfileStatus,
     Measurand,
     Phase,
     ReadingContext,
@@ -83,6 +85,19 @@ _PHASE_KEY_GROUPS = (
     frozenset({Phase.l1_n.value, Phase.l2_n.value, Phase.l3_n.value}),
     frozenset({Phase.l1_l2.value, Phase.l2_l3.value, Phase.l3_l1.value}),
 )
+
+
+SESSION_PROFILE_BASE_ID = 3000
+
+
+def session_profile_id(connector_id: int) -> int:
+    """Return the profile id a connector's session limit uses on both protocols.
+
+    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
+    TxProfile leg, so a connector has one session limit whichever way it is
+    set.
+    """
+    return SESSION_PROFILE_BASE_ID + int(connector_id)
 
 
 class Metric:
@@ -310,6 +325,9 @@ class ChargePoint(cp):
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
         self.session_controller = None
+        # Counts BootNotifications. A rebooted charger may reuse transaction
+        # ids, so anything keyed on an id alone must also carry this number.
+        self.charger_generation: int = 0
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -438,6 +456,88 @@ class ChargePoint(cp):
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
         raise NotImplementedError
+
+    def transaction_is_unsafe(self, connector_id: int | None) -> bool:
+        """Return whether the connector's transaction cannot be acted on now.
+
+        Only 1.6 has such a state, a connector held after an unattributed
+        StopTransaction, and overrides this.
+        """
+        return False
+
+    def session_transaction_id(self, connector_id: int) -> str | None:
+        """Return the transaction id displayed for the connector, or None."""
+        value = self._metrics[(int(connector_id), csess.transaction_id)].value
+        return None if value in (None, "", 0) else str(value)
+
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve the unit, value and stack level a session profile will use."""
+        raise NotImplementedError
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build the protocol's SetChargingProfile for a transaction-bound limit."""
+        raise NotImplementedError
+
+    async def set_session_limit(self, connector_id: int, limit_amps: float) -> bool:
+        """Bind a TxProfile to the connector's displayed transaction.
+
+        Returns True only for an Accepted reply. Anything else - a rejection,
+        a timeout, a transport error, no displayed transaction - raises a
+        HomeAssistantError so the entity reverts to its last accepted value.
+        The flow is shared; each protocol supplies prepare_session_limit and
+        build_session_limit_request. Nothing is ever cleared: the charger
+        discards a TxProfile when its transaction ends.
+        """
+        conn = int(connector_id)
+        transaction_id = self.session_transaction_id(conn)
+        if transaction_id is None:
+            raise HomeAssistantError(
+                f"connector {conn} has no active transaction to limit"
+            )
+        if self.transaction_is_unsafe(conn):
+            raise HomeAssistantError(
+                f"connector {conn} is being settled after an unattributed stop"
+            )
+        prepared = await self.prepare_session_limit(conn, float(limit_amps))
+        # Preparation waits on the charger; a stop or a new start in that
+        # window would leave this request bound to a transaction that is gone.
+        if self.session_transaction_id(conn) != transaction_id:
+            raise HomeAssistantError(
+                f"the transaction on connector {conn} changed while the session "
+                "limit was being prepared"
+            )
+        request = self.build_session_limit_request(
+            conn, transaction_id, session_profile_id(conn), prepared
+        )
+        try:
+            resp = await self.call(request)
+        except TimeoutError as ex:
+            raise HomeAssistantError(
+                f"the charger did not answer the session limit for connector {conn}"
+            ) from ex
+        except Exception as ex:
+            raise HomeAssistantError(
+                f"session limit for connector {conn} failed: {ex}"
+            ) from ex
+        status = getattr(resp, "status", None)
+        # Both protocols answer with the same word, so the 1.6 enum serves both.
+        if status == ChargingProfileStatus.accepted:
+            return True
+        raise HomeAssistantError(
+            f"charger rejected the session limit for connector {conn} ({status})"
+        )
 
     async def set_charge_rate(
         self,
@@ -826,6 +926,7 @@ class ChargePoint(cp):
         )
 
     def _register_boot_notification(self):
+        self.charger_generation += 1
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
