@@ -19,7 +19,9 @@ from custom_components.ocpp.api import CHRGR_SERVICE_DATA_SCHEMA, CentralSystem
 from custom_components.ocpp.const import DOMAIN
 from custom_components.ocpp.enums import (
     HAChargerServices as csvcs,
+    HAChargerSession as csess,
     HAChargerStatuses as cstat,
+    Profiles as prof,
 )
 from custom_components.ocpp.chargepoint import Metric as M
 from custom_components.ocpp.chargepoint import SetVariableResult
@@ -1302,3 +1304,95 @@ async def test_cpid_wins_over_a_colliding_cp_id(hass):
 
     # cs_a is registered first, but the cpid owner must win.
     assert _resolve_central_system(hass, "shared_name") is cs_b
+
+
+class _SessionMetric:
+    def __init__(self, value=None):
+        self.value = value
+
+
+def _session_cp(**overrides):
+    metrics = {
+        (1, cstat.status_connector): _SessionMetric("Charging"),
+        (1, csess.transaction_id): _SessionMetric(55),
+    }
+    cp = SimpleNamespace(
+        status=STATE_OK,
+        supported_features=prof.SMART,
+        settings=SimpleNamespace(max_current=32),
+        num_connectors=2,
+        _metrics=metrics,
+        transaction_is_unsafe=lambda _c: False,
+    )
+    for key, value in overrides.items():
+        setattr(cp, key, value)
+    return cp, metrics
+
+
+@pytest.mark.asyncio
+async def test_session_limit_availability_rule(hass):
+    """Charger up with SMART, connector charging, transaction shown, not held."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA)
+    entry.add_to_hass(hass)
+    cs = CentralSystem(hass, entry)
+    cp, metrics = _session_cp()
+    cs.charge_points["CP_1"] = cp
+    cs.cpids["cpid_1"] = "CP_1"
+
+    assert cs.session_limit_available("cpid_1", 1)
+    assert cs.session_transaction_id("cpid_1", 1) == "55"
+    assert cs.charger_generation("cpid_1") == 0
+    cp.charger_generation = 3
+    assert cs.charger_generation("cpid_1") == 3
+    assert cs.charger_generation("missing") == 0
+    assert not cs.session_limit_available("cpid_1", 2)  # nothing displayed
+    assert cs.session_transaction_id("cpid_1", 2) is None
+    assert not cs.session_limit_available("missing", 1)
+    assert cs.session_transaction_id("missing", 1) is None
+
+    for status in ("SuspendedEV", "SuspendedEVSE"):
+        metrics[(1, cstat.status_connector)].value = status
+        assert cs.session_limit_available("cpid_1", 1)
+    for status in ("Preparing", "Finishing", "Available", None):
+        metrics[(1, cstat.status_connector)].value = status
+        assert not cs.session_limit_available("cpid_1", 1)
+    metrics[(1, cstat.status_connector)].value = "Charging"
+
+    for tx in (None, "", 0):
+        metrics[(1, csess.transaction_id)].value = tx
+        assert not cs.session_limit_available("cpid_1", 1)
+    metrics[(1, csess.transaction_id)].value = "tx-201"
+    assert cs.session_transaction_id("cpid_1", 1) == "tx-201"
+    assert cs.session_limit_available("cpid_1", 1)
+
+    cp.transaction_is_unsafe = lambda _c: True
+    assert not cs.session_limit_available("cpid_1", 1)
+    cp.transaction_is_unsafe = lambda _c: False
+    cp.supported_features = 0
+    assert not cs.session_limit_available("cpid_1", 1)
+    cp.supported_features = prof.SMART
+    cp.status = STATE_UNAVAILABLE
+    assert not cs.session_limit_available("cpid_1", 1)
+
+
+@pytest.mark.asyncio
+async def test_set_session_charge_rate_amps_reaches_the_charge_point(hass):
+    """Every value, the configured maximum included, is set on the connector."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA)
+    entry.add_to_hass(hass)
+    cs = CentralSystem(hass, entry)
+    calls = []
+
+    async def set_limit(connector_id, amps):
+        calls.append((connector_id, amps))
+        return True
+
+    cp, _metrics = _session_cp(set_session_limit=set_limit)
+    cs.charge_points["CP_1"] = cp
+    cs.cpids["cpid_1"] = "CP_1"
+
+    assert await cs.set_session_charge_rate_amps("cpid_1", 1, 16) is True
+    assert await cs.set_session_charge_rate_amps("CP_1", 2, 32) is True
+    assert calls == [(1, 16.0), (2, 32.0)]
+    with pytest.raises(HomeAssistantError):
+        await cs.set_session_charge_rate_amps("missing", 1, 16)

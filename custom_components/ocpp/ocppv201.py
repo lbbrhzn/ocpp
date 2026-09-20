@@ -83,6 +83,7 @@ class InventoryReport:
     # unknown case is resolved by probing. An explicit false stands.
     smart_charging_available: bool | None = None
     charging_rate_units: frozenset[str] = field(default_factory=frozenset)
+    profile_stack_level: int | None = None
     reservation_available: bool = False
     local_auth_available: bool = False
     tx_updated_measurands: list[MeasurandEnumType] = field(default_factory=list)
@@ -834,6 +835,81 @@ class ChargePoint(cp):
             ClearChargingProfileStatusEnumType.unknown,
         )
 
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve 2.0.1 smart-charging capabilities for a session profile."""
+        await self._get_inventory()
+        units = self._inventory.charging_rate_units if self._inventory else frozenset()
+        voltage = self._line_voltage(connector_id)
+        phases = self._phase_count(connector_id)
+        # Unknown capability retains today's amp behaviour. Only an explicit
+        # W-only report authorizes automatic conversion.
+        watts_only = units == {ChargingRateUnitEnumType.watts.value}
+        supports_watts = ChargingRateUnitEnumType.watts.value in units
+        if source_watts is not None and supports_watts:
+            unit = ChargingRateUnitEnumType.watts.value
+            value = float(source_watts)
+            amps = round(value / (voltage * phases), 1)
+        elif watts_only:
+            unit = ChargingRateUnitEnumType.watts.value
+            value = self._amps_to_watts(float(limit_amps), connector_id)
+            amps = float(limit_amps)
+        else:
+            unit = ChargingRateUnitEnumType.amps.value
+            amps = (
+                round(float(source_watts) / (voltage * phases), 1)
+                if source_watts is not None
+                else float(limit_amps)
+            )
+            value = amps
+        evse_id, connector = self._global_to_pair(int(connector_id))
+        stack = (
+            self._inventory.profile_stack_level
+            if self._inventory and self._inventory.profile_stack_level is not None
+            else 0
+        )
+        converted = source_watts is not None or watts_only
+        return {
+            "unit": unit,
+            "value": value,
+            "amps": amps,
+            "stack_level": max(0, int(stack)),
+            "target": (evse_id, connector),
+            "evse_id": evse_id,
+            "conversion_voltage": voltage if converted else None,
+            "conversion_phases": phases if converted else None,
+        }
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a transaction-bound 2.0.1 TxProfile."""
+        schedule = {
+            "id": 1,
+            "charging_rate_unit": prepared["unit"],
+            "charging_schedule_period": [
+                {"start_period": 0, "limit": prepared["value"]}
+            ],
+        }
+        profile = {
+            "id": int(profile_id),
+            "stack_level": int(prepared["stack_level"]),
+            "charging_profile_purpose": ChargingProfilePurposeEnumType.tx_profile.value,
+            "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
+            "transaction_id": str(transaction_id),
+            "charging_schedule": [schedule],
+        }
+        return call.SetChargingProfile(int(prepared["evse_id"]), profile)
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Use the managed station limit for the Maximum Current entity."""
         return await self.set_charge_rate(limit_amps=limit_amps, conn_id=0)
@@ -1335,6 +1411,17 @@ class ChargePoint(cp):
                     if token.strip().upper() in {"A", "W"}
                 }
                 self._inventory.charging_rate_units = frozenset(units)
+                continue
+            if (
+                component_name == "SmartChargingCtrlr"
+                and variable_name == "ProfileStackLevel"
+            ):
+                try:
+                    parsed_stack = int(str(value).strip())
+                except (TypeError, ValueError):
+                    parsed_stack = None
+                if parsed_stack is not None and parsed_stack >= 0:
+                    self._inventory.profile_stack_level = parsed_stack
                 continue
             if (component_name == "ReservationCtrlr") and (
                 variable_name == "Available"

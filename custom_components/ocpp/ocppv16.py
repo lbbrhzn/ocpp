@@ -930,6 +930,63 @@ class ChargePoint(cp):
             },
         )
 
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve unit and stack before a transaction-bound set is recorded."""
+        unit, value, stack_level = await self._resolve_charge_rate(
+            None if source_watts is not None else limit_amps,
+            source_watts,
+            connector_id,
+        )
+        voltage = self._line_voltage(connector_id)
+        phases = self._phase_count(connector_id)
+        converted = source_watts is not None or (
+            unit == ChargingRateUnitType.watts.value and limit_amps is not None
+        )
+        return {
+            "unit": unit,
+            "value": value,
+            "amps": (
+                round(float(source_watts) / (voltage * phases), 1)
+                if source_watts is not None
+                else float(limit_amps)
+            ),
+            "stack_level": max(0, int(stack_level)),
+            "target": connector_id,
+            "conversion_voltage": voltage if converted else None,
+            "conversion_phases": phases if converted else None,
+        }
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxProfile bound to the active 1.6 transaction."""
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: int(prepared["stack_level"]),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
+                om.transaction_id: int(transaction_id),
+                om.charging_schedule: {
+                    om.charging_rate_unit: prepared["unit"],
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: prepared["value"]}
+                    ],
+                },
+            },
+        )
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set only a station ceiling; transaction defaults cannot replace one."""
         try:
