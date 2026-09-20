@@ -59,6 +59,7 @@ from .const import (
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
     HA_ENERGY_UNIT,
+    STATION_MAX_PROFILE_ABSOLUTE_START,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -1018,12 +1019,17 @@ class ChargePoint(cp):
             "charging_rate_unit": unit_value,
             "charging_schedule_period": [{"start_period": 0, "limit": period_limit}],
         }
+        if self.settings.charge_point_max_profile_absolute:
+            charging_profile_kind = ChargingProfileKindEnumType.absolute.value
+            schedule["start_schedule"] = STATION_MAX_PROFILE_ABSOLUTE_START
+        else:
+            charging_profile_kind = ChargingProfileKindEnumType.relative.value
 
         charging_profile: dict = {
             "id": 1,
             "stack_level": 0,
             "charging_profile_purpose": ChargingProfilePurposeEnumType.charging_station_max_profile.value,
-            "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
+            "charging_profile_kind": charging_profile_kind,
             "charging_schedule": [schedule],
         }
 

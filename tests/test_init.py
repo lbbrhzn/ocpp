@@ -15,10 +15,12 @@ from custom_components.ocpp import (
     async_remove_config_entry_device,
 )
 from custom_components.ocpp.const import (
+    CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
     CONF_CPID,
     CONF_CPIDS,
     CONF_CSID,
     CONF_ENABLE_HA_NOTIFICATIONS,
+    DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
     DEFAULT_ENABLE_HA_NOTIFICATIONS,
     DOMAIN,
 )
@@ -183,7 +185,7 @@ async def test_migration_entry(
     assert migrated_key == "CP_migration_1"
     # check versions match
     assert config_entry.version == 2
-    assert config_entry.minor_version == 2
+    assert config_entry.minor_version == 3
 
     # Unload the entry and verify that the data has been removed
     assert await hass.config_entries.async_remove(config_entry.entry_id)
@@ -226,7 +228,39 @@ async def test_migration_adds_notification_preference_to_existing_chargers(
     )
     assert migrated_cp_map["legacy_value"] == "preserved"
     assert config_entry.version == 2
-    assert config_entry.minor_version == 2
+    assert config_entry.minor_version == 3
+
+
+async def test_migration_adds_absolute_charge_point_max_profile_default(
+    hass: HomeAssistant,
+):
+    """Version 2.2 entries get the absolute-station-profile default."""
+    old_data = deepcopy(MOCK_CONFIG_DATA_1)
+    for cp_map in old_data[CONF_CPIDS]:
+        for cp_data in cp_map.values():
+            cp_data.pop(CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE, None)
+    old_data[CONF_CPIDS].append({})
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=old_data,
+        entry_id="test_absolute_profile_migration",
+        version=2,
+        minor_version=2,
+    )
+    config_entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, config_entry)
+    assert config_entry.data[CONF_CPIDS][-1] == {}
+    migrated_cp_map = config_entry.data[CONF_CPIDS][0]
+    assert all(
+        cp_data[CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE]
+        is DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE
+        for cp_data in migrated_cp_map.values()
+        if isinstance(cp_data, dict)
+    )
+    assert config_entry.version == 2
+    assert config_entry.minor_version == 3
 
 
 # async def test_setup_entry_exception(hass, error_on_get_data):

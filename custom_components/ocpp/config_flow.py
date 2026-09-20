@@ -13,6 +13,7 @@ from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
 from .const import (
+    CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
     CONF_CPID,
     CONF_CPIDS,
     CONF_CSID,
@@ -35,6 +36,7 @@ from .const import (
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
     CONF_WEBSOCKET_PING_TRIES,
+    DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
     DEFAULT_CPID,
     DEFAULT_CSID,
     DEFAULT_ENABLE_HA_NOTIFICATIONS,
@@ -105,6 +107,10 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
             CONF_FORCE_SMART_CHARGING, default=DEFAULT_FORCE_SMART_CHARGING
         ): bool,
         vol.Required(
+            CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
+            default=DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
+        ): bool,
+        vol.Required(
             CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
     }
@@ -122,7 +128,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OCPP."""
 
     VERSION = 2
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
@@ -453,6 +459,13 @@ class OCPPOptionsFlow(OptionsFlow):
                     CONF_FORCE_SMART_CHARGING,
                     default=current.get(
                         CONF_FORCE_SMART_CHARGING, DEFAULT_FORCE_SMART_CHARGING
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
+                    default=current.get(
+                        CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
+                        DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
                     ),
                 ): bool,
                 vol.Required(

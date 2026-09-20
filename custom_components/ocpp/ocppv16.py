@@ -66,6 +66,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     MEASURANDS,
+    STATION_MAX_PROFILE_ABSOLUTE_START,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -905,24 +906,27 @@ class ChargePoint(cp):
 
         return units_value, limit_value, stack_level
 
-    @staticmethod
     def _station_charge_rate_request(
-        units_value: str, limit_value: float, stack_level: int
+        self, units_value: str, limit_value: float, stack_level: int
     ) -> call.SetChargingProfile:
         """Build the shared station ceiling used by the slider and action."""
+        charging_schedule = {
+            om.charging_rate_unit: units_value,
+            om.charging_schedule_period: [{om.start_period: 0, om.limit: limit_value}],
+        }
+        if self.settings.charge_point_max_profile_absolute:
+            charging_profile_kind = ChargingProfileKindType.absolute.value
+            charging_schedule[om.start_schedule] = STATION_MAX_PROFILE_ABSOLUTE_START
+        else:
+            charging_profile_kind = ChargingProfileKindType.relative.value
         return call.SetChargingProfile(
             connector_id=0,
             cs_charging_profiles={
                 om.charging_profile_id: 1000,
                 om.stack_level: stack_level,
-                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_kind: charging_profile_kind,
                 om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
-                om.charging_schedule: {
-                    om.charging_rate_unit: units_value,
-                    om.charging_schedule_period: [
-                        {om.start_period: 0, om.limit: limit_value}
-                    ],
-                },
+                om.charging_schedule: charging_schedule,
             },
         )
 
