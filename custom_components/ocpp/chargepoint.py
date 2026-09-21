@@ -336,6 +336,7 @@ class ChargePoint(cp):
         self.charger_generation: int = 0
         self._command_queue = CommandQueue()
         self._replaying = False
+        self._closing_tasks: set[asyncio.Task] = set()
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -901,11 +902,11 @@ class ChargePoint(cp):
                 profile_purpose=profile_purpose,
             )
             await self._command_queue.enqueue(cmd)
-            await self._fail_connection_for_replay()
+            self._fail_connection_for_replay()
 
             raise
 
-    async def _fail_connection_for_replay(self) -> None:
+    def _fail_connection_for_replay(self) -> None:
         """Drop the transport so the queued command is replayed on reconnect.
 
         Queueing alone changes nothing. The ocpp library raises TimeoutError
@@ -914,9 +915,12 @@ class ChargePoint(cp):
         thing that drains the queue - never runs. Failing the transport is what
         turns the queue into a retry.
 
-        Closing is bounded and best-effort: the peer that just missed a
-        response deadline is the same peer expected to answer the closing
-        handshake. Either way the receiver ends and the charger reconnects.
+        The close is deliberately not awaited. A charger that has just let a
+        response deadline pass is in no hurry to answer a closing handshake
+        either: measured against a real one, close() took 9.6s of a 10s budget
+        while the charger had already reconnected on a new socket. The caller
+        is a service call or an automation, and holding it open for that buys
+        nothing - the receiver ends either way, and reconnect() does the rest.
         """
         if self._replaying:
             return
@@ -927,15 +931,23 @@ class ChargePoint(cp):
             "%s: failing the connection so queued commands replay on reconnect",
             self.id,
         )
-        try:
-            await asyncio.wait_for(
-                connection.close(),
-                timeout=getattr(self, "_retirement_timeout", 10.0),
-            )
-        except Exception as ex:
-            # An unresponsive or already-broken peer is the expected case here,
-            # not an error: the receiver still ends and a reconnect follows.
-            _LOGGER.debug("%s: closing the connection raised: %s", self.id, ex)
+
+        async def close() -> None:
+            """Close in the background, bounded so it cannot linger forever."""
+            try:
+                await asyncio.wait_for(
+                    connection.close(),
+                    timeout=getattr(self, "_retirement_timeout", 10.0),
+                )
+            except Exception as ex:
+                # An unresponsive or already-broken peer is the expected case
+                # here, not an error: the receiver ends regardless.
+                _LOGGER.debug("%s: closing the connection raised: %s", self.id, ex)
+
+        task = asyncio.create_task(close())
+        # Keep a reference so the task is not garbage collected mid-flight.
+        self._closing_tasks.add(task)
+        task.add_done_callback(self._closing_tasks.discard)
 
     async def reconnect(self, connection: ServerConnection):
         """Retire the previous session before publishing the newest replacement."""

@@ -1,6 +1,7 @@
 """Tests for OCPP timeout handling and command queue."""
 
 import asyncio
+import contextlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock
 import pytest
@@ -421,6 +422,7 @@ class TestFailConnectionOnTimeout:
         chargepoint.id = "test_charger"
         chargepoint._command_queue = CommandQueue()
         chargepoint._replaying = False
+        chargepoint._closing_tasks = set()
         chargepoint._connection = MagicMock()
         chargepoint._connection.state = state
         chargepoint._connection.close = AsyncMock()
@@ -447,8 +449,60 @@ class TestFailConnectionOnTimeout:
                 MagicMock(), call_type="SetChargingProfile", connector_id=1
             )
 
+        # The close runs as a background task, so let it start.
+        await asyncio.sleep(0)
         cp._connection.close.assert_awaited_once()
         assert not cp._command_queue.is_empty()
+
+    @pytest.mark.asyncio
+    async def test_caller_is_not_blocked_by_the_close(self):
+        """The caller must not wait on the closing handshake.
+
+        A charger that has just let a response deadline pass is in no hurry to
+        answer a close either; measured against a real one this cost 9.6s of a
+        10s budget, all of it with the calling automation held open.
+        """
+        cp = self._cp()
+        cp._retirement_timeout = 30
+        entered = asyncio.Event()
+
+        async def never_completes():
+            entered.set()
+            await asyncio.Event().wait()
+
+        cp._connection.close = AsyncMock(side_effect=never_completes)
+
+        # Fails fast despite the close never finishing.
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                cp._call_with_timeout_handling(
+                    MagicMock(), call_type="SetChargingProfile", connector_id=1
+                ),
+                timeout=1,
+            )
+
+        # The close really was started, and is still outstanding.
+        await asyncio.wait_for(entered.wait(), 1)
+        assert len(cp._closing_tasks) == 1
+        task = next(iter(cp._closing_tasks))
+        assert not task.done()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    @pytest.mark.asyncio
+    async def test_finished_close_stops_being_tracked(self):
+        """A completed close releases its own reference."""
+        cp = self._cp()
+
+        with pytest.raises(TimeoutError):
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
+            )
+
+        task = next(iter(cp._closing_tasks))
+        await task
+        assert cp._closing_tasks == set()
 
     @pytest.mark.asyncio
     async def test_replay_timeout_does_not_drop_the_new_session(self):
@@ -490,23 +544,25 @@ class TestFailConnectionOnTimeout:
             )
 
     @pytest.mark.asyncio
-    async def test_slow_close_is_bounded(self):
-        """A close that never completes must not hang the calling automation."""
+    async def test_background_close_is_still_bounded(self):
+        """Not awaiting it must not let the close linger forever."""
         cp = self._cp()
         cp._retirement_timeout = 0.05
 
-        async def never():
+        async def never_completes():
             await asyncio.Event().wait()
 
-        cp._connection.close = AsyncMock(side_effect=never)
+        cp._connection.close = AsyncMock(side_effect=never_completes)
 
         with pytest.raises(TimeoutError):
-            await asyncio.wait_for(
-                cp._call_with_timeout_handling(
-                    MagicMock(), call_type="SetChargingProfile", connector_id=1
-                ),
-                timeout=2,
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
             )
+
+        task = next(iter(cp._closing_tasks))
+        # Completes on its own via the bound, without being cancelled.
+        await asyncio.wait_for(task, timeout=2)
+        assert task.done() and not task.cancelled()
 
 
 class TestReconnectReplay:
