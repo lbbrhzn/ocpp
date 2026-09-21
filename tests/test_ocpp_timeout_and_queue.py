@@ -1,9 +1,16 @@
 """Tests for OCPP timeout handling and command queue."""
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock
 import pytest
+from websockets.protocol import State
 from homeassistant.const import STATE_OK
-from custom_components.ocpp.command_queue import CommandQueue, QueuedCommand
+from custom_components.ocpp.command_queue import (
+    CommandQueue,
+    QueuedCommand,
+    profile_purpose,
+)
 from custom_components.ocpp.chargepoint import ChargePoint
 from custom_components.ocpp.ocppv201 import ChargePoint as ChargePointV201
 from ocpp.v201.enums import RequestStartStopStatusEnumType
@@ -354,6 +361,152 @@ class TestTimeoutHandling:
 
         # Queue should be empty after replay
         assert chargepoint._command_queue.is_empty()
+
+
+class TestProfilePurpose:
+    """The coalescing key has to survive every shape a request arrives in."""
+
+    async def test_v16_wire_key(self):
+        """1.6 builds the dict with OcppMisc's wire names."""
+        req = MagicMock()
+        req.cs_charging_profiles = {"chargingProfilePurpose": "TxProfile"}
+        assert profile_purpose(req) == "TxProfile"
+
+    async def test_snake_case_key(self):
+        """A snake_case dict is read too."""
+        req = MagicMock()
+        req.cs_charging_profiles = {"charging_profile_purpose": "TxDefaultProfile"}
+        assert profile_purpose(req) == "TxDefaultProfile"
+
+    async def test_v201_charging_profile_attribute(self):
+        """2.0.1 names the field differently and may pass a dataclass."""
+        req = MagicMock(spec=["charging_profile"])
+        req.charging_profile = SimpleNamespace(
+            charging_profile_purpose="ChargingStationMaxProfile"
+        )
+        assert profile_purpose(req) == "ChargingStationMaxProfile"
+
+    async def test_v201_charging_profile_dict(self):
+        """2.0.1 as a snake_case dict under its own field name."""
+        req = MagicMock(spec=["charging_profile"])
+        req.charging_profile = {"charging_profile_purpose": "TxProfile"}
+        assert profile_purpose(req) == "TxProfile"
+
+    async def test_dict_without_a_purpose(self):
+        """A profile dict carrying no purpose coalesces by connector alone."""
+        req = MagicMock()
+        req.cs_charging_profiles = {"chargingProfileId": 1, "stackLevel": 0}
+        assert profile_purpose(req) is None
+
+    async def test_no_profile_at_all(self):
+        """A request that is not a charging profile has no purpose."""
+        assert profile_purpose(MagicMock(spec=[])) is None
+
+    async def test_explicit_none_purpose(self):
+        """An explicit null is None, not the string "None"."""
+        req = MagicMock()
+        req.cs_charging_profiles = {"chargingProfilePurpose": None}
+        assert profile_purpose(req) is None
+
+
+class TestFailConnectionOnTimeout:
+    """Queueing only matters if something then causes a reconnect.
+
+    The ocpp library raises TimeoutError without touching the socket, so
+    without an explicit failure here the queue is never drained.
+    """
+
+    def _cp(self, state=State.OPEN):
+        chargepoint = MagicMock(spec=ChargePoint)
+        chargepoint.id = "test_charger"
+        chargepoint._command_queue = CommandQueue()
+        chargepoint._replaying = False
+        chargepoint._connection = MagicMock()
+        chargepoint._connection.state = state
+        chargepoint._connection.close = AsyncMock()
+
+        async def mock_call(*args, **kwargs):
+            raise TimeoutError("Timeout")
+
+        chargepoint.call = mock_call
+        for name in ("_call_with_timeout_handling", "_fail_connection_for_replay"):
+            setattr(
+                chargepoint,
+                name,
+                getattr(ChargePoint, name).__get__(chargepoint, ChargePoint),
+            )
+        return chargepoint
+
+    @pytest.mark.asyncio
+    async def test_timeout_fails_the_connection(self):
+        """A timed-out call queues the command and drops the transport."""
+        cp = self._cp()
+
+        with pytest.raises(TimeoutError):
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
+            )
+
+        cp._connection.close.assert_awaited_once()
+        assert not cp._command_queue.is_empty()
+
+    @pytest.mark.asyncio
+    async def test_replay_timeout_does_not_drop_the_new_session(self):
+        """A replayed command that times out again must not start a drop loop."""
+        cp = self._cp()
+        cp._replaying = True
+
+        with pytest.raises(TimeoutError):
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
+            )
+
+        cp._connection.close.assert_not_awaited()
+        # Still queued, to go out on a reconnect this session did not cause.
+        assert not cp._command_queue.is_empty()
+
+    @pytest.mark.asyncio
+    async def test_already_closed_connection_is_left_alone(self):
+        """Nothing to fail when the transport has already gone."""
+        cp = self._cp(state=State.CLOSED)
+
+        with pytest.raises(TimeoutError):
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
+            )
+
+        cp._connection.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_close_failure_is_not_fatal(self):
+        """An unresponsive peer is the expected case, not an error."""
+        cp = self._cp()
+        cp._connection.close = AsyncMock(side_effect=RuntimeError("peer is gone"))
+
+        # The caller still sees the original timeout, not the close failure.
+        with pytest.raises(TimeoutError):
+            await cp._call_with_timeout_handling(
+                MagicMock(), call_type="SetChargingProfile", connector_id=1
+            )
+
+    @pytest.mark.asyncio
+    async def test_slow_close_is_bounded(self):
+        """A close that never completes must not hang the calling automation."""
+        cp = self._cp()
+        cp._retirement_timeout = 0.05
+
+        async def never():
+            await asyncio.Event().wait()
+
+        cp._connection.close = AsyncMock(side_effect=never)
+
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                cp._call_with_timeout_handling(
+                    MagicMock(), call_type="SetChargingProfile", connector_id=1
+                ),
+                timeout=2,
+            )
 
 
 class TestReconnectReplay:

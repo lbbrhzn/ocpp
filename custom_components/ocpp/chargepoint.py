@@ -335,6 +335,7 @@ class ChargePoint(cp):
         # ids, so anything keyed on an id alone must also carry this number.
         self.charger_generation: int = 0
         self._command_queue = CommandQueue()
+        self._replaying = False
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -831,42 +832,42 @@ class ChargePoint(cp):
         """Replay commands queued by timeouts, once the new session is live.
 
         It must not take the session down with it: every per-command failure
-        is logged and the rest still replay. Only cancellation propagates,
-        which is teardown asking it to stop.
+        is logged and the rest still replay. Cancellation is a BaseException,
+        so it still propagates - that is teardown asking it to stop.
         """
-        try:
-            commands = await self._command_queue.dequeue_all()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            _LOGGER.exception("%s: could not drain the command queue", self.id)
-            return
+        commands = await self._command_queue.dequeue_all()
         if not commands:
             return
         # Yield so the receiver task started alongside this one is listening
         # before the first replayed call goes out and its response comes back.
         await asyncio.sleep(0)
         _LOGGER.debug("%s: replaying %d queued command(s)", self.id, len(commands))
-        for cmd in commands:
-            try:
-                await cmd.execute()
-            except asyncio.CancelledError:
-                raise
-            except Exception as ex:
-                _LOGGER.warning("Replay of %s failed: %s", cmd.call_type, ex)
+        # A command that times out again must not drop this session too: that
+        # is a reconnect loop, one drop per replay, for as long as the charger
+        # keeps ignoring it. It goes back on the queue and waits for the next
+        # reconnect to come from somewhere else.
+        self._replaying = True
+        try:
+            for cmd in commands:
+                try:
+                    await cmd.execute()
+                except Exception as ex:
+                    _LOGGER.warning("Replay of %s failed: %s", cmd.call_type, ex)
+        finally:
+            self._replaying = False
 
     async def _call_with_timeout_handling(
         self, req, call_type: str, connector_id: int | None = None, **call_kwargs
     ):
         """Wrap self.call() to handle timeouts by queuing for reconnect replay.
 
-        On timeout: queues the failed command for replay on next reconnect.
+        On timeout: queues the failed command and fails the connection, so the
+        charger reconnects and the queue is replayed in order.
         On success: returns the response.
         On charger rejection: returns the response (no retry needed).
 
-        Timeouts are queued but the exception is re-raised to let the caller handle
-        the immediate failure. Reconnection happens naturally via monitor_connection
-        when the websocket detects the disconnect.
+        The exception is still re-raised, so the caller handles the immediate
+        failure exactly as before; the queue only decides what happens next.
         """
         try:
             return await self.call(req, **call_kwargs)
@@ -900,8 +901,41 @@ class ChargePoint(cp):
                 profile_purpose=profile_purpose,
             )
             await self._command_queue.enqueue(cmd)
+            await self._fail_connection_for_replay()
 
             raise
+
+    async def _fail_connection_for_replay(self) -> None:
+        """Drop the transport so the queued command is replayed on reconnect.
+
+        Queueing alone changes nothing. The ocpp library raises TimeoutError
+        without touching the socket, so a charger that merely ignored one
+        request leaves a healthy connection behind, and reconnect() - the only
+        thing that drains the queue - never runs. Failing the transport is what
+        turns the queue into a retry.
+
+        Closing is bounded and best-effort: the peer that just missed a
+        response deadline is the same peer expected to answer the closing
+        handshake. Either way the receiver ends and the charger reconnects.
+        """
+        if self._replaying:
+            return
+        connection = self._connection
+        if connection is None or connection.state is not State.OPEN:
+            return
+        _LOGGER.debug(
+            "%s: failing the connection so queued commands replay on reconnect",
+            self.id,
+        )
+        try:
+            await asyncio.wait_for(
+                connection.close(),
+                timeout=getattr(self, "_retirement_timeout", 10.0),
+            )
+        except Exception as ex:
+            # An unresponsive or already-broken peer is the expected case here,
+            # not an error: the receiver still ends and a reconnect follows.
+            _LOGGER.debug("%s: closing the connection raised: %s", self.id, ex)
 
     async def reconnect(self, connection: ServerConnection):
         """Retire the previous session before publishing the newest replacement."""
