@@ -855,8 +855,8 @@ async def test_stop_transaction_paths_v16_b(
         await cp.send_boot_notification()
         await wait_ready(cs.charge_points[cp_id])
 
-        cs.charge_points[cp_id]._charger_reports_session_energy = True
         await cp.send_start_transaction(meter_start=0)
+        cs.charge_points[cp_id]._charger_reports_session_energy = True
 
         m = cs.charge_points[cp_id]._metrics
         # Pre-set SessionEnergy (should remain unchanged)
@@ -4152,6 +4152,306 @@ async def test_eair_session_relative_against_lifetime_meter_start(
             assert s2 >= 0, f"session energy went negative: {s2}"
             assert s2 == pytest.approx(0.236, rel=1e-6)
             assert s2 >= s1
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+def _eair_sample(connector_id: int, transaction_id: int, wh: int) -> call.MeterValues:
+    """Build a transaction-bound Energy.Active.Import.Register sample in Wh."""
+    return call.MeterValues(
+        connector_id=connector_id,
+        transaction_id=transaction_id,
+        meter_value=[
+            {
+                "timestamp": datetime.now(tz=UTC).isoformat(),
+                "sampledValue": [
+                    {
+                        "value": str(wh),
+                        "measurand": "Energy.Active.Import.Register",
+                        "unit": "Wh",
+                        "context": "Sample.Periodic",
+                    }
+                ],
+            }
+        ],
+    )
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9399, "cp_id": "CP_session_mode_per_tx", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_session_mode_per_tx"])
+@pytest.mark.parametrize("port", [9399])
+async def test_session_energy_mode_does_not_outlive_its_transaction(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """A session-energy detection must not decide how the next session is read.
+
+    The charger reports a lifetime register. One sample below meter_start
+    switches the charger to session-energy mode for that transaction. The
+    next transaction is a normal lifetime reading, so its session energy is
+    EAIR - meter_start, not the raw register (#2143).
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            cpid = cs.charge_points[cp_id].settings.cpid
+
+            await client.send_start_transaction(meter_start=356000)
+            tx1 = client.active_transactionId
+            assert await client.call(_eair_sample(1, tx1, 8620)) is not None
+            # The sample below meter_start was taken as session energy.
+            s1 = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s1 == pytest.approx(8.62, rel=1e-6)
+            await client.send_stop_transaction(0)
+
+            await client.send_start_transaction(meter_start=356040)
+            tx2 = client.active_transactionId
+            assert await client.call(_eair_sample(1, tx2, 357040)) is not None
+            s2 = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s2 == pytest.approx(1.0, rel=1e-6), (
+                f"session energy is the raw register, not EAIR - meter_start: {s2}"
+            )
+            eair = cs.get_metric(cpid, "Energy.Active.Import.Register", connector_id=1)
+            assert eair == pytest.approx(357.04, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9400, "cp_id": "CP_session_mode_two_conn", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_session_mode_two_conn"])
+@pytest.mark.parametrize("port", [9400])
+async def test_session_energy_mode_cleared_while_another_connector_runs(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """A new transaction clears the mode even while another connector charges.
+
+    The mode is charger-wide. On a lifetime-register charger, an anomalous
+    sample on connector 1 switches it on while connector 2 is mid-session.
+    Once connector 1 starts its next transaction, both sessions are derived
+    as EAIR - meter_start again, and connector 2's stop is too.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws, no_connectors=2)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            cpid = cs.charge_points[cp_id].settings.cpid
+
+            async def start(connector_id: int, meter_start: int) -> int:
+                resp = await client.call(
+                    call.StartTransaction(
+                        connector_id=connector_id,
+                        id_tag="test_cp",
+                        meter_start=meter_start,
+                        timestamp=datetime.now(tz=UTC).isoformat(),
+                    )
+                )
+                return resp.transaction_id
+
+            async def stop(transaction_id: int, meter_stop: int) -> None:
+                await client.call(
+                    call.StopTransaction(
+                        meter_stop=meter_stop,
+                        timestamp=datetime.now(tz=UTC).isoformat(),
+                        transaction_id=transaction_id,
+                        reason="EVDisconnected",
+                        id_tag="test_cp",
+                    )
+                )
+
+            def session(connector_id: int) -> float:
+                return cs.get_metric(cpid, "Energy.Session", connector_id=connector_id)
+
+            tx1 = await start(1, 356000)
+            tx2 = await start(2, 356000)
+            assert await client.call(_eair_sample(2, tx2, 356200)) is not None
+            assert session(2) == pytest.approx(0.2, rel=1e-6)
+
+            # Anomalous sample on connector 1: taken as session energy.
+            assert await client.call(_eair_sample(1, tx1, 8620)) is not None
+            assert session(1) == pytest.approx(8.62, rel=1e-6)
+            await stop(tx1, 356300)
+
+            tx1 = await start(1, 356300)
+            assert await client.call(_eair_sample(2, tx2, 357000)) is not None
+            assert session(2) == pytest.approx(1.0, rel=1e-6), (
+                f"connector 2 shows the raw register: {session(2)}"
+            )
+            assert await client.call(_eair_sample(1, tx1, 356800)) is not None
+            assert session(1) == pytest.approx(0.5, rel=1e-6)
+
+            await stop(tx2, 357100)
+            assert session(2) == pytest.approx(1.1, rel=1e-6)
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9401, "cp_id": "CP_session_mode_main_meter", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_session_mode_main_meter"])
+@pytest.mark.parametrize("port", [9401])
+async def test_session_energy_mode_not_held_by_the_main_meter(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """MeterValues for connector 0 must not keep the mode alive.
+
+    Connector 0 is the charger's main meter. A sample for it restores
+    connector 1's transaction id onto connector 0. Because the same id is then
+    on two connectors, the send_stop_transaction below is not applied: it is
+    held as ambiguous. That is a separate, pre-existing behaviour of main and
+    is not what this test is about; tx2's StartTransaction still clears the
+    mode.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            cpid = cs.charge_points[cp_id].settings.cpid
+
+            await client.send_start_transaction(meter_start=356000)
+            tx1 = client.active_transactionId
+            assert await client.call(_eair_sample(1, tx1, 8620)) is not None
+            await hass.async_block_till_done()
+            main_meter = call.MeterValues(
+                connector_id=0,
+                meter_value=[
+                    {
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "sampledValue": [
+                            {
+                                "value": "1000",
+                                "measurand": "Power.Active.Import",
+                                "unit": "W",
+                                "context": "Sample.Periodic",
+                            }
+                        ],
+                    }
+                ],
+            )
+            assert await client.call(main_meter) is not None
+            await client.send_stop_transaction(0)
+
+            await client.send_start_transaction(meter_start=356040)
+            tx2 = client.active_transactionId
+            assert await client.call(_eair_sample(1, tx2, 357040)) is not None
+            s2 = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s2 == pytest.approx(1.0, rel=1e-6), (
+                f"session energy is the raw register, not EAIR - meter_start: {s2}"
+            )
+
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    ("setup_config_entry", "cp_id", "port", "sample_wh", "meter_stop"),
+    [
+        # No MeterValues; the stop is far below a lifetime meter_start.
+        (
+            {"port": 9402, "cp_id": "CP_stop_below_start_a", "cms": "cms_services"},
+            "CP_stop_below_start_a",
+            9402,
+            None,
+            153,
+        ),
+        # A sample at meter_start, then a stop 1 Wh below it.
+        (
+            {"port": 9403, "cp_id": "CP_stop_below_start_b", "cms": "cms_services"},
+            "CP_stop_below_start_b",
+            9403,
+            356000,
+            355999,
+        ),
+    ],
+    indirect=["setup_config_entry"],
+)
+async def test_stop_below_meter_start_does_not_publish_a_negative(
+    hass, socket_enabled, cp_id, port, setup_config_entry, sample_wh, meter_stop
+):
+    """A meter_stop below meter_start keeps the session value already derived.
+
+    Such a stop can't be told apart from a session-relative meter, a meter
+    replacement, a reset or a rollover. Deriving meter_stop - meter_start
+    would publish a negative on a total_increasing sensor, and taking the
+    stop as the session would publish the raw register, so neither is done.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            cpid = cs.charge_points[cp_id].settings.cpid
+
+            meter_start = 4076447 if sample_wh is None else 356000
+            await client.send_start_transaction(meter_start=meter_start)
+            txid = client.active_transactionId
+            if sample_wh is not None:
+                assert await client.call(_eair_sample(1, txid, sample_wh)) is not None
+            before = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert before == pytest.approx(0.0, abs=1e-9)
+
+            await client.call(
+                call.StopTransaction(
+                    meter_stop=meter_stop,
+                    timestamp=datetime.now(tz=UTC).isoformat(),
+                    transaction_id=txid,
+                    reason="EVDisconnected",
+                    id_tag="test_cp",
+                )
+            )
+            s = cs.get_metric(cpid, "Energy.Session", connector_id=1)
+            assert s >= 0, f"session energy went negative: {s}"
+            assert s == pytest.approx(before, abs=1e-9), (
+                f"session energy was not kept at {before}: {s}"
+            )
 
         finally:
             task.cancel()
