@@ -728,11 +728,23 @@ class ChargePoint(cp):
         """Get features supported by the charger."""
         features = prof.NONE
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles])
-        resp = await self.call(req)
         try:
-            feature_list = (resp.configuration_key[0][om.value]).split(",")
-        except (IndexError, KeyError, TypeError):
-            feature_list = [""]
+            resp = await self.call(req)
+        except TimeoutError:
+            _LOGGER.warning(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            await self.notify_ha(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            feature_list = [om.feature_profile_core]
+        else:
+            try:
+                feature_list = (resp.configuration_key[0][om.value]).split(",")
+            except (IndexError, KeyError, TypeError):
+                feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
