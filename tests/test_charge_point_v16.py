@@ -3281,6 +3281,59 @@ async def test_post_connect_fetch_supported_features_raises(
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",
+    [{"port": 9122, "cp_id": "CP_postconn_timeout", "cms": "cms_postconn_timeout"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_timeout"])
+@pytest.mark.parametrize("port", [9122])
+async def test_post_connect_defaults_to_core_after_feature_profile_timeout(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """A stalled optional feature query must not abort charger setup."""
+    cs: CentralSystem = setup_config_entry
+    original_call = ServerCP.call
+
+    async def timeout_feature_profiles(self, req):
+        if isinstance(req, call.GetConfiguration) and req.key == [
+            ckey.supported_feature_profiles
+        ]:
+            raise TimeoutError("no SupportedFeatureProfiles response")
+        return await original_call(self, req)
+
+    monkeypatch.setattr(ServerCP, "call", timeout_feature_profiles, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            await srv_cp.post_connect()
+
+            assert srv_cp.post_connect_success is True
+            expected_features = prof.CORE
+            if srv_cp.settings.force_smart_charging:
+                expected_features |= prof.SMART
+            assert srv_cp._attr_supported_features == expected_features
+            assert srv_cp.num_connectors > 0
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
     [{"port": 9121, "cp_id": "CP_postconn_ex_2", "cms": "cms_postconn_ex_2"}],
     indirect=True,
 )
