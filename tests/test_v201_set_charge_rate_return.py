@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from ocpp.v201.enums import (
+    ChargingProfileKindEnumType,
     ChargingProfilePurposeEnumType,
     ChargingProfileStatusEnumType,
     ClearChargingProfileStatusEnumType,
@@ -35,7 +36,12 @@ from custom_components.ocpp.ocppv201 import ChargePoint, InventoryReport
 from .const import CONF_SSL_CERTFILE_PATH, CONF_SSL_KEYFILE_PATH
 
 
-def _mk_cp(hass, status=ChargingProfileStatusEnumType.accepted, max_current=32):
+def _mk_cp(
+    hass,
+    status=ChargingProfileStatusEnumType.accepted,
+    max_current=32,
+    charge_point_max_profile_absolute=False,
+):
     """Build a v201 ChargePoint whose charger answers with `status`."""
     data = {
         "host": "127.0.0.1",
@@ -63,6 +69,7 @@ def _mk_cp(hass, status=ChargingProfileStatusEnumType.accepted, max_current=32):
         monitored_variables_autoconfig=False,
         skip_schema_validation=False,
         force_smart_charging=False,
+        charge_point_max_profile_absolute=charge_point_max_profile_absolute,
     )
     conn = SimpleNamespace(
         state=State.CLOSED,
@@ -249,6 +256,39 @@ async def test_a_managed_limit_targets_the_station_whatever_the_connector(hass, 
         req.charging_profile["charging_profile_purpose"]
         == ChargingProfilePurposeEnumType.charging_station_max_profile.value
     )
+
+
+@pytest.mark.asyncio
+async def test_station_max_profile_relative_by_default(hass):
+    """Default settings keep the ChargingStationMaxProfile relative, with no startSchedule."""
+    cp = _mk_cp(hass)
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+
+    profile = cp.sent[0].charging_profile
+    assert (
+        profile["charging_profile_kind"] == ChargingProfileKindEnumType.relative.value
+    )
+    assert "start_schedule" not in profile["charging_schedule"][0]
+
+
+@pytest.mark.asyncio
+async def test_station_max_profile_absolute_when_enabled(hass):
+    """The advanced option anchors the ChargingStationMaxProfile at a fixed absolute start.
+
+    Some chargers (e.g. Autel MaxiCharger) reject a relative
+    ChargingStationMaxProfile outright; this lets a user opt into the
+    absolute form those chargers accept.
+    """
+    cp = _mk_cp(hass, charge_point_max_profile_absolute=True)
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+
+    profile = cp.sent[0].charging_profile
+    assert (
+        profile["charging_profile_kind"] == ChargingProfileKindEnumType.absolute.value
+    )
+    assert profile["charging_schedule"][0]["start_schedule"] == "2020-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -450,3 +490,176 @@ async def test_inventory_owner_wakes_waiters_when_no_report_will_arrive(hass):
     assert waiter.done()
     await waiter
     assert cp._wait_inventory is None
+
+
+@pytest.mark.asyncio
+async def test_session_watt_request_preserves_watts_and_reports_decimal_amps(hass):
+    """A routed watt limit is not lossy-converted back before transmission."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=1,
+        connector_count=[1],
+        charging_rate_units=frozenset({"A", "W"}),
+    )
+    cp._build_connector_map()
+
+    prepared = await cp.prepare_session_limit(1, 0, source_watts=3575)
+
+    assert prepared["unit"] == "W"
+    assert prepared["value"] == 3575
+    assert prepared["amps"] == 15.5
+    assert prepared["conversion_voltage"] == 230
+    assert prepared["conversion_phases"] == 1
+
+
+@pytest.mark.asyncio
+async def test_session_watt_request_is_converted_when_watts_are_unsupported(hass):
+    """Without watt support a routed watt limit goes out as amps."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=1, connector_count=[1], charging_rate_units=frozenset({"A"})
+    )
+    cp._build_connector_map()
+
+    prepared = await cp.prepare_session_limit(1, 0, source_watts=3680)
+
+    assert prepared["unit"] == "A"
+    assert prepared["value"] == 16.0
+    assert prepared["amps"] == 16.0
+    assert prepared["conversion_voltage"] == 230
+
+    request = cp.build_session_limit_request(1, "tx-1", 3001, prepared)
+    assert request.evse_id == 1
+    assert request.charging_profile["id"] == 3001
+    assert request.charging_profile["transaction_id"] == "tx-1"
+
+
+@pytest.mark.asyncio
+async def test_profile_stack_level_report_is_parsed_defensively(hass):
+    """Only a non-negative integer stack level is taken from the report."""
+    cp = _mk_cp(hass)
+    cp._inventory = None
+    cp._wait_inventory = asyncio.Event()
+
+    def report(value):
+        cp.on_report(
+            1,
+            "2026-01-01T00:00:00Z",
+            0,
+            tbc=True,
+            report_data=[
+                {
+                    "component": {"name": "SmartChargingCtrlr"},
+                    "variable": {"name": "ProfileStackLevel"},
+                    "variable_attribute": [{"type": "Actual", "value": value}],
+                }
+            ],
+        )
+
+    report("8")
+    assert cp._inventory.profile_stack_level == 8
+    report("x")
+    assert cp._inventory.profile_stack_level == 8
+    report("-1")
+    assert cp._inventory.profile_stack_level == 8
+
+
+@pytest.mark.asyncio
+async def test_set_session_limit_v201_binds_the_displayed_transaction(hass):
+    """Only an Accepted reply confirms; everything else raises a clear error."""
+    from ocpp.v201.enums import ChargingProfileStatusEnumType
+
+    from custom_components.ocpp.enums import HAChargerSession as csess
+
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=1,
+        connector_count=[1],
+        charging_rate_units=frozenset({"A", "W"}),
+        profile_stack_level=8,
+    )
+    cp._build_connector_map()
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatusEnumType.accepted)
+
+    cp.call = accept
+    with pytest.raises(HomeAssistantError, match="no active transaction"):
+        await cp.set_session_limit(1, 10)
+
+    cp._metrics[(1, csess.transaction_id)].value = "tx-abc"
+    assert await cp.set_session_limit(1, 10) is True
+    profile = sent[-1].charging_profile
+    assert sent[-1].evse_id == 1
+    assert profile["id"] == 3001
+    assert profile["transaction_id"] == "tx-abc"
+    assert profile["stack_level"] == 8
+    period = profile["charging_schedule"][0]["charging_schedule_period"][0]
+    assert period["limit"] == 10.0
+
+    async def reject(_request):
+        return SimpleNamespace(status=ChargingProfileStatusEnumType.rejected)
+
+    cp.call = reject
+    with pytest.raises(HomeAssistantError, match="rejected"):
+        await cp.set_session_limit(1, 10)
+
+    async def timeout(_request):
+        raise TimeoutError()
+
+    cp.call = timeout
+    with pytest.raises(HomeAssistantError, match="did not answer"):
+        await cp.set_session_limit(1, 10)
+
+    async def broken(_request):
+        raise RuntimeError("closed")
+
+    cp.call = broken
+    with pytest.raises(HomeAssistantError, match="failed"):
+        await cp.set_session_limit(1, 10)
+
+
+@pytest.mark.asyncio
+async def test_session_amp_request_is_converted_for_a_watt_only_station(hass):
+    """A watt-only station gets the amp slider value in watts."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=1, connector_count=[1], charging_rate_units=frozenset({"W"})
+    )
+    cp._build_connector_map()
+
+    prepared = await cp.prepare_session_limit(1, 16)
+
+    assert prepared["unit"] == "W"
+    assert prepared["value"] == 3680
+    assert prepared["amps"] == 16.0
+    assert prepared["conversion_voltage"] == 230
+    assert prepared["conversion_phases"] == 1
+
+
+@pytest.mark.asyncio
+async def test_set_session_limit_v201_aborts_when_the_transaction_changes(hass):
+    """A transaction that changes during the inventory wait gets no stale profile."""
+    from custom_components.ocpp.enums import HAChargerSession as csess
+
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(evse_count=1, connector_count=[1])
+    cp._build_connector_map()
+    cp._metrics[(1, csess.transaction_id)].value = "tx-old"
+    sent = []
+
+    async def prepare_and_switch(connector_id, amps, **_kwargs):
+        cp._metrics[(connector_id, csess.transaction_id)].value = "tx-new"
+        return {"unit": "A", "value": float(amps), "stack_level": 0, "evse_id": 1}
+
+    async def record(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    cp.prepare_session_limit = prepare_and_switch
+    cp.call = record
+    with pytest.raises(HomeAssistantError, match="changed while"):
+        await cp.set_session_limit(1, 10)
+    assert sent == []

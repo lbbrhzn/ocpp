@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant import data_entry_flow
 
 from custom_components.ocpp.const import (
+    CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
     CONF_CPID,
     CONF_CPIDS,
     CONF_ENABLE_HA_NOTIFICATIONS,
@@ -147,6 +148,27 @@ async def test_editing_settings_preserves_what_the_form_does_not_show(hass):
     assert stored[CONF_MONITORED_VARIABLES] == "Power.Active.Import,Voltage"
     # Settings stay in entry.data; nothing moves into entry.options.
     assert entry.options == {}
+
+
+async def test_editing_absolute_charge_point_max_profile(hass):
+    """The absolute-station-profile toggle round-trips through the options flow."""
+    entry = _entry(hass, [{"CP_1": _cp_settings()}])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 32,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+            CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE: True,
+        },
+    )
+
+    assert _stored(entry, "CP_1")[CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE] is True
 
 
 async def test_the_entry_is_updated_exactly_once(hass):

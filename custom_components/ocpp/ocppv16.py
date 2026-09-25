@@ -66,6 +66,7 @@ from .const import (
     DOMAIN,
     HA_ENERGY_UNIT,
     MEASURANDS,
+    STATION_MAX_PROFILE_ABSOLUTE_START,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -727,11 +728,23 @@ class ChargePoint(cp):
         """Get features supported by the charger."""
         features = prof.NONE
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles])
-        resp = await self.call(req)
         try:
-            feature_list = (resp.configuration_key[0][om.value]).split(",")
-        except (IndexError, KeyError, TypeError):
-            feature_list = [""]
+            resp = await self.call(req)
+        except TimeoutError:
+            _LOGGER.warning(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            await self.notify_ha(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            feature_list = [om.feature_profile_core]
+        else:
+            try:
+                feature_list = (resp.configuration_key[0][om.value]).split(",")
+            except (IndexError, KeyError, TypeError):
+                feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
@@ -905,22 +918,82 @@ class ChargePoint(cp):
 
         return units_value, limit_value, stack_level
 
-    @staticmethod
     def _station_charge_rate_request(
-        units_value: str, limit_value: float, stack_level: int
+        self, units_value: str, limit_value: float, stack_level: int
     ) -> call.SetChargingProfile:
         """Build the shared station ceiling used by the slider and action."""
+        charging_schedule = {
+            om.charging_rate_unit: units_value,
+            om.charging_schedule_period: [{om.start_period: 0, om.limit: limit_value}],
+        }
+        if self.settings.charge_point_max_profile_absolute:
+            charging_profile_kind = ChargingProfileKindType.absolute.value
+            charging_schedule[om.start_schedule] = STATION_MAX_PROFILE_ABSOLUTE_START
+        else:
+            charging_profile_kind = ChargingProfileKindType.relative.value
         return call.SetChargingProfile(
             connector_id=0,
             cs_charging_profiles={
                 om.charging_profile_id: 1000,
                 om.stack_level: stack_level,
-                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_kind: charging_profile_kind,
                 om.charging_profile_purpose: ChargingProfilePurposeType.charge_point_max_profile.value,
+                om.charging_schedule: charging_schedule,
+            },
+        )
+
+    async def prepare_session_limit(
+        self,
+        connector_id: int,
+        limit_amps: float,
+        *,
+        source_watts: float | None = None,
+    ) -> dict:
+        """Resolve unit and stack before a transaction-bound set is recorded."""
+        unit, value, stack_level = await self._resolve_charge_rate(
+            None if source_watts is not None else limit_amps,
+            source_watts,
+            connector_id,
+        )
+        voltage = self._line_voltage(connector_id)
+        phases = self._phase_count(connector_id)
+        converted = source_watts is not None or (
+            unit == ChargingRateUnitType.watts.value and limit_amps is not None
+        )
+        return {
+            "unit": unit,
+            "value": value,
+            "amps": (
+                round(float(source_watts) / (voltage * phases), 1)
+                if source_watts is not None
+                else float(limit_amps)
+            ),
+            "stack_level": max(0, int(stack_level)),
+            "target": connector_id,
+            "conversion_voltage": voltage if converted else None,
+            "conversion_phases": phases if converted else None,
+        }
+
+    def build_session_limit_request(
+        self,
+        connector_id: int,
+        transaction_id: int | str,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxProfile bound to the active 1.6 transaction."""
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: int(prepared["stack_level"]),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
+                om.transaction_id: int(transaction_id),
                 om.charging_schedule: {
-                    om.charging_rate_unit: units_value,
+                    om.charging_rate_unit: prepared["unit"],
                     om.charging_schedule_period: [
-                        {om.start_period: 0, om.limit: limit_value}
+                        {om.start_period: 0, om.limit: prepared["value"]}
                     ],
                 },
             },
@@ -1762,6 +1835,11 @@ class ChargePoint(cp):
             self.active_transaction_id = tx_id
             self._set_session_start(connector_id, time.time(), estimated=False)
             self._metrics[(connector_id, cstat.id_tag)].value = id_tag
+            # StartTransaction is not always preceded by Authorize (local
+            # authorization / cache). The HA IdTag sensor is charger-level
+            # (connector 0); only set it on a single-connector charger.
+            if self.settings.num_connectors == 1:
+                self._metrics[0][cstat.id_tag.value].value = id_tag
             self._metrics[(connector_id, cstat.stop_reason)].value = ""
             self._metrics[(connector_id, csess.transaction_id)].value = tx_id
             try:

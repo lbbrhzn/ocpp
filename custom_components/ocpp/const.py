@@ -10,6 +10,7 @@ from ocpp.v16.enums import Measurand, UnitOfMeasure
 
 CONF_AUTH_LIST = "authorization_list"
 CONF_AUTH_STATUS = "authorization_status"
+CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE = "charge_point_max_profile_absolute"
 CONF_CPI = "charge_point_identity"
 CONF_CPID = "cpid"
 CONF_CPIDS = "cpids"
@@ -45,6 +46,7 @@ CONF_WEBSOCKET_PING_TRIES = "websocket_ping_tries"
 CONF_WEBSOCKET_PING_INTERVAL = "websocket_ping_interval"
 CONF_WEBSOCKET_PING_TIMEOUT = "websocket_ping_timeout"
 DATA_UPDATED = "ocpp_data_updated"
+DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE = False
 DEFAULT_CSID = "central"
 DEFAULT_CPID = "charger"
 DEFAULT_ENABLE_HA_NOTIFICATIONS = True
@@ -58,6 +60,12 @@ DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+# Anchor used when the station ceiling (ChargePointMaxProfile / 1.6,
+# ChargingStationMaxProfile / 2.0.1+) is sent as an absolute schedule
+# (charge_point_max_profile_absolute). Any fixed past instant works, since
+# the charger only needs an absolute reference to accept a non-relative
+# profile.
+STATION_MAX_PROFILE_ABSOLUTE_START = "2020-01-01T00:00:00Z"
 OCPP_1_6 = "ocpp1.6"
 OCPP_2_0 = "ocpp2"
 OCPP_VERSION_AUTO = "auto"
@@ -189,6 +197,7 @@ class ChargerSystemSettings:
     enable_ha_notifications: bool = DEFAULT_ENABLE_HA_NOTIFICATIONS
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
+    charge_point_max_profile_absolute: bool = DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE
 
 
 @dataclass
