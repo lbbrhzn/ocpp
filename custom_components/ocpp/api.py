@@ -63,6 +63,15 @@ GCONF_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Optional("ocpp_key"): cv.string,
     }
 )
+
+GCS_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional("devid"): cv.string,
+        vol.Optional("conn_id", default=1): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional("duration", default=3600): cv.positive_int,
+        vol.Optional("charging_rate_unit"): vol.In(("A", "W")),
+    }
+)
 GDIAG_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
@@ -944,3 +953,12 @@ class CentralSystem:
         key = call.data.get("ocpp_key", "")
         value = await cp.get_configuration(key)
         return {"value": value}
+
+    @check_charger_available
+    async def handle_get_composite_schedule(self, call, cp) -> ServiceResponse:
+        """Handle the get composite schedule service call."""
+        return await cp.get_composite_schedule(
+            conn_id=int(call.data.get("conn_id", 1)),
+            duration=int(call.data.get("duration", 3600)),
+            charging_rate_unit=call.data.get("charging_rate_unit"),
+        )
