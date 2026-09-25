@@ -2297,7 +2297,12 @@ async def test_set_availability_timeout_branch(
 
         finally:
             cp_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # A timed-out call now fails the transport so the queued command
+            # replays on reconnect, so this client's receive loop ends with the
+            # closure rather than with the cancellation.
+            with contextlib.suppress(
+                asyncio.CancelledError, websockets.exceptions.ConnectionClosed
+            ):
                 await cp_task
             await ws.close()
 
