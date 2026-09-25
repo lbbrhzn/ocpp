@@ -320,7 +320,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
                 name=cpid,
                 suggested_area="Garage",
-                via_device=(DOMAIN, central_sys.id),
+                via_device_id=central_sys.id,
             )
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
