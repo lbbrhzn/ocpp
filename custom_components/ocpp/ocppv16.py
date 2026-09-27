@@ -1566,6 +1566,14 @@ class ChargePoint(cp):
                     value = None
             self._metrics[ms_key].value = value
 
+        if connector_id == 0 and self._metrics[tx_key].value is None:
+            # Connector 0 is the charge point itself and never runs a
+            # transaction. Its HA fallback is the flattened sensor, which on a
+            # single-connector charger shows connector 1's session: restoring
+            # from it would record that id on two connectors, and the
+            # StopTransaction could then not be attributed.
+            self._metrics[tx_key].value = 0
+
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id, connector_id)
             if value is None:
