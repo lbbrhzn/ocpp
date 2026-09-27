@@ -1532,11 +1532,17 @@ class ChargePoint(cp):
 
         self._ensure_tx_store_loaded()
         transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
-        tx_has_id: bool = transaction_id not in (None, 0)
-        if tx_has_id:
+        if transaction_id:
             # Seeing an id, including on closing values, is enough to keep a
             # later allocation clear of it; it does not make the id live.
             self._note_transaction_id(transaction_id)
+        if connector_id == 0:
+            # Connector 0 is the charge point itself and never runs a
+            # transaction. A charger may still tag its station meter with the
+            # running session's id; adopting it would record that id on two
+            # connectors, and the StopTransaction could then not be attributed.
+            transaction_id = 0
+        tx_has_id: bool = transaction_id not in (None, 0)
         tx_end_context = any(
             sampled_value.get(om.context) == ReadingContext.transaction_end.value
             for bucket in meter_value
@@ -1567,11 +1573,9 @@ class ChargePoint(cp):
             self._metrics[ms_key].value = value
 
         if connector_id == 0 and self._metrics[tx_key].value is None:
-            # Connector 0 is the charge point itself and never runs a
-            # transaction. Its HA fallback is the flattened sensor, which on a
-            # single-connector charger shows connector 1's session: restoring
-            # from it would record that id on two connectors, and the
-            # StopTransaction could then not be attributed.
+            # Nor may connector 0 restore one: its HA fallback is the flattened
+            # sensor, which on a single-connector charger shows connector 1's
+            # session.
             self._metrics[tx_key].value = 0
 
         if self._metrics[tx_key].value is None:

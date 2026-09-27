@@ -1342,3 +1342,30 @@ async def test_station_meter_values_do_not_pick_up_a_later_session(hass, frozen_
 
     assert cp._tx_indeterminate == set()
     assert cp._active_tx == {1: 0, 0: 0}
+
+
+async def test_station_meter_values_ignore_a_session_id(hass, frozen_time):
+    """A charger may tag connector 0's meter with the running session's id.
+
+    OCPP 1.6 allows a transactionId on any MeterValues, but connector 0 runs no
+    transaction: adopting the id would give connector 1's session two owners
+    and leave its StopTransaction unattributed.
+    """
+    cp = _mk_cp(hass, connectors=1)
+    await _settle(hass, cp)
+    tx_id = cp.on_start_transaction(1, "tag-a", 0).transaction_id
+    cp.on_meter_values(**_meter_values(tx_id))
+
+    station = _station_meter_values()
+    station["transaction_id"] = tx_id
+    cp.on_meter_values(**station)
+    await hass.async_block_till_done()
+
+    assert cp._active_tx == {1: tx_id, 0: 0}
+    assert cp._metrics[(0, csess.transaction_id)].value == 0
+
+    cp.on_stop_transaction(meter_stop=5000, timestamp=None, transaction_id=tx_id)
+    await hass.async_block_till_done()
+
+    assert cp._tx_indeterminate == set()
+    assert cp._active_tx == {1: 0, 0: 0}
