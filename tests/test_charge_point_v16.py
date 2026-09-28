@@ -4388,7 +4388,7 @@ async def test_session_energy_mode_not_held_by_the_main_meter(
 
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
-    ("setup_config_entry", "cp_id", "port", "sample_wh", "meter_stop"),
+    ("setup_config_entry", "cp_id", "port", "sample_wh", "meter_stop", "session"),
     [
         # No MeterValues; the stop is far below a lifetime meter_start.
         (
@@ -4397,20 +4397,29 @@ async def test_session_energy_mode_not_held_by_the_main_meter(
             9402,
             None,
             153,
+            0.0,
         ),
-        # A sample at meter_start, then a stop 1 Wh below it.
+        # A sample 1 Wh above meter_start, then a stop 1 Wh below meter_start.
         (
             {"port": 9403, "cp_id": "CP_stop_below_start_b", "cms": "cms_services"},
             "CP_stop_below_start_b",
             9403,
-            356000,
+            356001,
             355999,
+            0.001,
         ),
     ],
     indirect=["setup_config_entry"],
 )
 async def test_stop_below_meter_start_does_not_publish_a_negative(
-    hass, socket_enabled, cp_id, port, setup_config_entry, sample_wh, meter_stop
+    hass,
+    socket_enabled,
+    cp_id,
+    port,
+    setup_config_entry,
+    sample_wh,
+    meter_stop,
+    session,
 ):
     """A meter_stop below meter_start keeps the session value already derived.
 
@@ -4436,7 +4445,7 @@ async def test_stop_below_meter_start_does_not_publish_a_negative(
             if sample_wh is not None:
                 assert await client.call(_eair_sample(1, txid, sample_wh)) is not None
             before = cs.get_metric(cpid, "Energy.Session", connector_id=1)
-            assert before == pytest.approx(0.0, abs=1e-9)
+            assert before == pytest.approx(session, abs=1e-9)
 
             await client.call(
                 call.StopTransaction(
@@ -4449,8 +4458,8 @@ async def test_stop_below_meter_start_does_not_publish_a_negative(
             )
             s = cs.get_metric(cpid, "Energy.Session", connector_id=1)
             assert s >= 0, f"session energy went negative: {s}"
-            assert s == pytest.approx(before, abs=1e-9), (
-                f"session energy was not kept at {before}: {s}"
+            assert s == pytest.approx(session, abs=1e-9), (
+                f"session energy was not kept at {session}: {s}"
             )
 
         finally:
