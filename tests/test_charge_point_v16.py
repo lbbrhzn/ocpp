@@ -4330,12 +4330,11 @@ async def test_session_energy_mode_not_held_by_the_main_meter(
 ):
     """MeterValues for connector 0 must not keep the mode alive.
 
-    Connector 0 is the charger's main meter. A sample for it restores
-    connector 1's transaction id onto connector 0. Because the same id is then
-    on two connectors, the send_stop_transaction below is not applied: it is
-    held as ambiguous. That is a separate, pre-existing behaviour of main and
-    is not what this test is about; tx2's StartTransaction still clears the
-    mode.
+    Connector 0 is the charger's main meter. Before #2170, a sample for it
+    also restored connector 1's transaction id onto connector 0, and the
+    send_stop_transaction below was held as ambiguous instead of applied;
+    since #2170 it is applied. Either way this test is only about the mode:
+    tx2's StartTransaction still clears it.
     """
     cs = setup_config_entry
     async with websockets.connect(
