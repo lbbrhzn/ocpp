@@ -155,6 +155,10 @@ def _allowed_charging_rate_units(units_resp: str | None) -> tuple[bool, bool]:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    # Last ChargeProfileMaxStackLevel the charger reported; kept across
+    # reconnects so a failed read can fall back to it (#2148).
+    _max_stack_level: int | None = None  # class default: exists without __init__
+
     def __init__(
         self,
         id: str,
@@ -908,13 +912,29 @@ class ChargePoint(cp):
             else ChargingRateUnitType.watts.value
         )
 
+        stack_level_resp = None
         try:
             stack_level_resp = await self.get_configuration(
                 ckey.charge_profile_max_stack_level
             )
             stack_level = int(stack_level_resp)
-        except Exception:
-            stack_level = 1
+            self._max_stack_level = stack_level
+        except Exception as ex:
+            # Falling back to level 1 can leave the new profile below one the
+            # charger still holds at a higher level, so reuse the last level
+            # it reported and only use 1 when there is none (#2148).
+            stack_level = (
+                self._max_stack_level if self._max_stack_level is not None else 1
+            )
+            # get_configuration() already warns and notifies when the charger
+            # does not know the key, so only other failures warn here.
+            _LOGGER.log(
+                logging.DEBUG if stack_level_resp == "Unknown" else logging.WARNING,
+                "Could not read %s (%r); using stack level %s",
+                ckey.charge_profile_max_stack_level,
+                ex,
+                stack_level,
+            )
 
         return units_value, limit_value, stack_level
 
