@@ -2,6 +2,7 @@
 
 import asyncio
 from collections import defaultdict
+import contextlib
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -39,6 +40,11 @@ from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
 from ocpp.exceptions import NotImplementedError
 
+from .command_queue import (
+    CommandQueue,
+    QueuedCommand,
+    profile_purpose as queue_profile_purpose,
+)
 from .enums import (
     HAChargerDetails as cdet,
     HAChargerSession as csess,
@@ -328,6 +334,9 @@ class ChargePoint(cp):
         # Counts BootNotifications. A rebooted charger may reuse transaction
         # ids, so anything keyed on an id alone must also carry this number.
         self.charger_generation: int = 0
+        self._command_queue = CommandQueue()
+        self._replaying = False
+        self._closing_tasks: set[asyncio.Task] = set()
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -803,6 +812,143 @@ class ChargePoint(cp):
         self._reconnect_token = None
         await self._stop_session(self._get_session())
 
+    async def _monitor_and_replay(self) -> None:
+        """Monitor the new session and, alongside it, replay what timed out.
+
+        Replay rides the monitor rather than taking a session task of its own:
+        the session task set is all session-lifetime tasks, and a short-lived
+        member would break that invariant for the retirement bookkeeping built
+        on it. Owning the replay here still ends it with the session, and
+        keeps it off the monitor's own backstop and ping schedule.
+        """
+        replay = asyncio.ensure_future(self._replay_queue())
+        try:
+            await self.monitor_connection()
+        finally:
+            replay.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await replay
+
+    async def _replay_queue(self) -> None:
+        """Replay commands queued by timeouts, once the new session is live.
+
+        It must not take the session down with it: every per-command failure
+        is logged and the rest still replay. Cancellation is a BaseException,
+        so it still propagates - that is teardown asking it to stop.
+        """
+        commands = await self._command_queue.dequeue_all()
+        if not commands:
+            return
+        # Yield so the receiver task started alongside this one is listening
+        # before the first replayed call goes out and its response comes back.
+        await asyncio.sleep(0)
+        _LOGGER.debug("%s: replaying %d queued command(s)", self.id, len(commands))
+        # A command that times out again must not drop this session too: that
+        # is a reconnect loop, one drop per replay, for as long as the charger
+        # keeps ignoring it. It goes back on the queue and waits for the next
+        # reconnect to come from somewhere else.
+        self._replaying = True
+        try:
+            for cmd in commands:
+                try:
+                    await cmd.execute()
+                except Exception as ex:
+                    _LOGGER.warning("Replay of %s failed: %s", cmd.call_type, ex)
+        finally:
+            self._replaying = False
+
+    async def _call_with_timeout_handling(
+        self, req, call_type: str, connector_id: int | None = None, **call_kwargs
+    ):
+        """Wrap self.call() to handle timeouts by queuing for reconnect replay.
+
+        On timeout: queues the failed command and fails the connection, so the
+        charger reconnects and the queue is replayed in order.
+        On success: returns the response.
+        On charger rejection: returns the response (no retry needed).
+
+        The exception is still re-raised, so the caller handles the immediate
+        failure exactly as before; the queue only decides what happens next.
+        """
+        try:
+            return await self.call(req, **call_kwargs)
+        except TimeoutError:
+            # Recoverable, and the caller logs the immediate failure too, so
+            # this stays below error level.
+            _LOGGER.warning(
+                "OCPP call %s timed out for charger %s; queuing for replay on reconnect",
+                call_type,
+                self.id,
+            )
+            # Extract profile purpose for SetChargingProfile to prevent coalescing
+            # different profile types. TxProfile and TxDefaultProfile are sent to
+            # the same connector, so purpose is their only discriminator: without
+            # it the live-session TxProfile is dropped for the TxDefaultProfile
+            # queued after it, and the ongoing charge rate never changes.
+            profile_purpose = None
+            if call_type == "SetChargingProfile":
+                profile_purpose = queue_profile_purpose(req)
+
+            cmd = QueuedCommand(
+                call_type=call_type,
+                call_fn=self._call_with_timeout_handling,
+                args=(req,),
+                kwargs={
+                    "call_type": call_type,
+                    "connector_id": connector_id,
+                    **call_kwargs,
+                },
+                connector_id=connector_id,
+                profile_purpose=profile_purpose,
+            )
+            await self._command_queue.enqueue(cmd)
+            self._fail_connection_for_replay()
+
+            raise
+
+    def _fail_connection_for_replay(self) -> None:
+        """Drop the transport so the queued command is replayed on reconnect.
+
+        Queueing alone changes nothing. The ocpp library raises TimeoutError
+        without touching the socket, so a charger that merely ignored one
+        request leaves a healthy connection behind, and reconnect() - the only
+        thing that drains the queue - never runs. Failing the transport is what
+        turns the queue into a retry.
+
+        The close is deliberately not awaited. A charger that has just let a
+        response deadline pass is in no hurry to answer a closing handshake
+        either: measured against a real one, close() took 9.6s of a 10s budget
+        while the charger had already reconnected on a new socket. The caller
+        is a service call or an automation, and holding it open for that buys
+        nothing - the receiver ends either way, and reconnect() does the rest.
+        """
+        if self._replaying:
+            return
+        connection = self._connection
+        if connection is None or connection.state is not State.OPEN:
+            return
+        _LOGGER.debug(
+            "%s: failing the connection so queued commands replay on reconnect",
+            self.id,
+        )
+
+        async def close() -> None:
+            """Close in the background, bounded so it cannot linger forever."""
+            try:
+                await asyncio.wait_for(
+                    connection.close(),
+                    timeout=getattr(self, "_retirement_timeout", 10.0),
+                )
+            except Exception as ex:
+                # An unresponsive or already-broken peer is the expected case
+                # here, not an error: the receiver ends regardless.
+                _LOGGER.debug("%s: closing the connection raised: %s", self.id, ex)
+
+        task = asyncio.create_task(close())
+        # Keep a reference so the task is not garbage collected mid-flight.
+        self._closing_tasks.add(task)
+        task.add_done_callback(self._closing_tasks.discard)
+
     async def reconnect(self, connection: ServerConnection):
         """Retire the previous session before publishing the newest replacement."""
         _LOGGER.debug(f"Reconnect websocket to {self.id}")
@@ -852,7 +998,7 @@ class ChargePoint(cp):
             self._metrics[(0, cstat.reconnects)].value += 1
             installed = True
             # post connect remains handled by boot notification / monitor backstop
-            await self.run([super().start(), self.monitor_connection()])
+            await self.run([super().start(), self._monitor_and_replay()])
         finally:
             if not installed:
                 await self._stop_session(candidate)
