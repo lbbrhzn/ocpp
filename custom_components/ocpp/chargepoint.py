@@ -39,6 +39,7 @@ from ocpp.v201 import call_result as call_resultv201
 from ocpp.messages import CallError
 from ocpp.exceptions import NotImplementedError
 
+from .quirks import apply_vendor_quirks
 from .enums import (
     HAChargerDetails as cdet,
     HAChargerSession as csess,
@@ -909,6 +910,7 @@ class ChargePoint(cp):
     ):
         """Update device info asynchronously."""
 
+        apply_vendor_quirks(self, vendor)
         self._metrics[(0, cdet.model)].value = model
         self._metrics[(0, cdet.vendor)].value = vendor
         self._metrics[(0, cdet.firmware_version)].value = firmware_version
