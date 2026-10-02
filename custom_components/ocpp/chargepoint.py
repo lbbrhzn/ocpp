@@ -1367,6 +1367,17 @@ class ChargePoint(cp):
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
 
+                if (
+                    measurand
+                    in {
+                        "Power.Active.Import",
+                        "Power.Active.Export",
+                        "Power.Offered",
+                    }
+                    and unit is None
+                ):
+                    unit = DEFAULT_POWER_UNIT
+
                 # Normalize units
                 if unit == DEFAULT_ENERGY_UNIT:
                     value = ChargePoint.get_energy_kwh(
