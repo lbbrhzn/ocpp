@@ -892,7 +892,8 @@ class CentralSystem:
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
-        await cp.clear_profile()
+        conn_id = call.data.get("conn_id")
+        await cp.clear_profile(conn_id=conn_id)
 
     @check_charger_available
     async def handle_update_firmware(self, call, cp):
