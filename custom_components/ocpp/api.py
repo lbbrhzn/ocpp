@@ -98,6 +98,7 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
 CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
+        vol.Optional("conn_id"): vol.Coerce(int),
     }
 )
 
