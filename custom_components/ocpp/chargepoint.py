@@ -1225,15 +1225,27 @@ class ChargePoint(cp):
                 if is_current:
                     # Current.* shown per phase -> avg of L1/L2/L3, ignore N
                     if not phase_info.keys().isdisjoint(phases_l123):
-                        metric_value = _avg_l123(phase_info)
+                        l2 = phase_info.get(Phase.l2.value, 0.0)
+                        l3 = phase_info.get(Phase.l3.value, 0.0)
+
+                        if abs(float(l2)) >= 0.1 and abs(float(l3)) >= 0.1:
+                            metric_value = (
+                                phase_info.get(Phase.l1.value, 0.0) + l2 + l3
+                            ) / 3
+                        else:
+                            metric_value = phase_info.get(Phase.l1.value, 0.0)
+
                     elif not phase_info.keys().isdisjoint(line_to_neutral_phases):
                         # Workaround for some chargers that erroneously use line to neutral for current
-                        metric_value = average_of_nonzero(
-                            [
-                                phase_info.get(phase, 0.0)
-                                for phase in line_to_neutral_phases
-                            ]
-                        )
+                        l2 = phase_info.get(Phase.l2_n.value, 0.0)
+                        l3 = phase_info.get(Phase.l3_n.value, 0.0)
+
+                        if abs(float(l2)) >= 0.1 and abs(float(l3)) >= 0.1:
+                            metric_value = (
+                                phase_info.get(Phase.l1_n.value, 0.0) + l2 + l3
+                            ) / 3
+                        else:
+                            metric_value = phase_info.get(Phase.l1_n.value, 0.0)
 
                 # Special-case: Power.Factor must be averaged, never summed
                 elif metric == Measurand.power_factor.value:
