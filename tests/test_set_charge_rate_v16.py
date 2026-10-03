@@ -12,6 +12,7 @@ They avoid any parallel/dummy implementation of ChargePoint.
 from types import SimpleNamespace
 
 import pytest
+from ocpp.v16 import call, call_result
 from ocpp.v16.enums import (
     ChargingProfileKindType,
     ChargingProfilePurposeType,
@@ -236,6 +237,120 @@ async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatc
     ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
     assert ok is True
     assert notices == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reported", "levels"),
+    [
+        pytest.param("10", [10, 10], id="reported_10"),
+        pytest.param("0", [0, 0], id="reported_0"),
+        pytest.param(None, [1, 1], id="never_read"),
+    ],
+)
+@pytest.mark.parametrize(
+    "set_limit",
+    [
+        pytest.param(
+            lambda cp, amps: cp.set_station_charge_rate(amps),
+            id="maximum_current_number",
+        ),
+        pytest.param(
+            lambda cp, amps: cp.set_charge_rate(limit_amps=amps),
+            id="set_charge_rate_action",
+        ),
+    ],
+)
+async def test_failed_stack_level_read_keeps_the_reported_level(
+    cp_v16, monkeypatch, caplog, set_limit, reported, levels
+):
+    """A failed ChargeProfileMaxStackLevel read reuses the level last reported (#2148).
+
+    Falling back to level 1 put the new ChargePointMaxProfile below the one
+    the charger already held at level 10, so the higher limit never applied.
+    Level 0 is a real level too; 1 is only used when no level was ever read.
+    """
+    stack_read_fails = reported is None
+
+    async def fake_get_conf(key: str):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            if stack_read_fails:
+                raise TimeoutError("no answer")
+            return reported
+        pytest.fail(f"Unexpected get_configuration key: {key}")
+
+    station_profiles = []
+
+    async def fake_call(req, **_kwargs):
+        profile = req.cs_charging_profiles
+        if (
+            profile["chargingProfilePurpose"]
+            == ChargingProfilePurposeType.charge_point_max_profile.value
+        ):
+            station_profiles.append(profile)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+
+    assert await set_limit(cp_v16, 8) is True
+    stack_read_fails = True
+    assert await set_limit(cp_v16, 16) is True
+
+    assert [
+        (p["stackLevel"], p["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"])
+        for p in station_profiles
+    ] == [(levels[0], 8.0), (levels[1], 16.0)]
+    # One warning per failed read, naming the error and the level used.
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [
+        "Could not read ChargeProfileMaxStackLevel (TimeoutError('no answer'));"
+        f" using stack level {level}"
+        for level in (levels if reported is None else levels[1:])
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unknown_stack_level_key_warns_once_per_write(
+    cp_v16, monkeypatch, caplog
+):
+    """A charger that does not know the key gets level 1 and one warning per write.
+
+    get_configuration() already warns and notifies about the unknown key, so
+    the fallback to level 1 only logs at debug level (#2148).
+    """
+    stack_levels = []
+
+    async def fake_call(req, **_kwargs):
+        if isinstance(req, call.GetConfiguration):
+            (key,) = req.key
+            if key == ckey.charge_profile_max_stack_level:
+                return call_result.GetConfiguration(unknown_key=[key])
+            return call_result.GetConfiguration(
+                configuration_key=[{"key": key, "readonly": True, "value": "Current"}]
+            )
+        stack_levels.append(req.cs_charging_profiles["stackLevel"])
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    notices = []
+
+    async def fake_notify(msg, title="Ocpp integration"):
+        notices.append(msg)
+        return True
+
+    monkeypatch.setattr(cp_v16, "call", fake_call)
+    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
+
+    for amps in (8, 10, 16):
+        assert await cp_v16.set_station_charge_rate(amps) is True
+
+    assert stack_levels == [1, 1, 1]
+    unknown = "Get Configuration returned unknown key for: ChargeProfileMaxStackLevel"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [unknown] * 3
+    assert len(notices) == 3
 
 
 def test_station_charge_rate_request_relative_by_default(cp_v16):
