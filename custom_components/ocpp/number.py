@@ -13,6 +13,7 @@ from homeassistant.components.number import (
     DOMAIN as NUMBER_DOMAIN,
     NumberEntity,
     NumberEntityDescription,
+    NumberExtraStoredData,
     RestoreNumber,
 )
 from homeassistant.const import UnitOfElectricCurrent
@@ -24,20 +25,23 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util import slugify
 
 from .api import CentralSystem
-from .chargepoint import session_profile_id
+from .chargepoint import session_default_profile_id, session_profile_id
 from .const import (
     CONF_NUM_CONNECTORS,
     CONF_CPID,
     CONF_CPIDS,
     CONF_MAX_CURRENT,
+    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     DATA_UPDATED,
     DEFAULT_MAX_CURRENT,
+    DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
     DOMAIN,
     ICON,
 )
 from .enums import Profiles
 
 MAX_SESSION_CONNECTORS = 10
+_TX_DEFAULT_PROFILE = "TxDefaultProfile"
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
@@ -166,9 +170,17 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 cpid,
                 MAX_SESSION_CONNECTORS,
             )
+        session_cls = (
+            SessionDefaultLimitNumber
+            if cp_id_settings.get(
+                CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+                DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
+            )
+            else SessionCurrentLimitNumber
+        )
         for connector_id in range(1, min(connector_count, MAX_SESSION_CONNECTORS) + 1):
             entities.append(
-                SessionCurrentLimitNumber(
+                session_cls(
                     hass,
                     central_system,
                     cpid,
@@ -521,28 +533,17 @@ class SessionCurrentLimitNumber(NumberEntity):
         were asked for.
         """
         async with self._operation_lock:
-            key = self._current_key()
-            if key is None:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="set_charge_rate_error",
-                    translation_placeholders={
-                        "message": (
-                            f"connector {self.connector_id} has no active "
-                            "transaction to limit"
-                        )
-                    },
-                )
+            self._begin_set()
             target = float(value)
-            if key != self._display_key:
-                self._display_key = key
-                self._confirmed_value = None
             self._attr_native_value = target
             self.async_write_ha_state()
             try:
-                ok = await self.central_system.set_session_charge_rate_amps(
-                    self.cpid, self.connector_id, target
-                )
+                ok = await self._send(target)
+            except asyncio.CancelledError:
+                # Not an Exception: without this the in-flight value would
+                # stay on display as if the charger had accepted it.
+                self._revert_to_confirmed()
+                raise
             except HomeAssistantError:
                 self._revert_to_confirmed()
                 raise
@@ -566,8 +567,101 @@ class SessionCurrentLimitNumber(NumberEntity):
             self._attr_native_value = target
             self.async_write_ha_state()
 
+    def _begin_set(self) -> None:
+        """Bind the display to the transaction the request is for."""
+        key = self._current_key()
+        if key is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": (
+                        f"connector {self.connector_id} has no active "
+                        "transaction to limit"
+                    )
+                },
+            )
+        if key != self._display_key:
+            self._display_key = key
+            self._confirmed_value = None
+
+    async def _send(self, target: float) -> bool:
+        return await self.central_system.set_session_charge_rate_amps(
+            self.cpid, self.connector_id, target
+        )
+
     def _revert_to_confirmed(self) -> None:
         if self._attr_native_value == self._confirmed_value:
             return
         self._attr_native_value = self._confirmed_value
         self.async_write_ha_state()
+
+
+class SessionDefaultLimitNumber(SessionCurrentLimitNumber, RestoreNumber):
+    """Session Current Limit sent as a connector TxDefaultProfile.
+
+    Selected per charger by session_limit_default_profile, for chargers
+    that refuse both the station ceiling and a TxProfile but accept a
+    connector default and apply it to the running transaction (#2158). The
+    profile is not bound to a transaction, so the slider is available
+    whenever the charger is up with SmartCharging, and its value is the last
+    limit the charger accepted for the connector. That value is restored
+    across restarts, because the charger keeps the profile; a value left by
+    the transaction-bound slider is not, because that profile has ended.
+    """
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last accepted default, if this mode left one."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if (
+            last_state is None
+            or last_state.attributes.get("profile_purpose") != _TX_DEFAULT_PROFILE
+        ):
+            return
+        restored = await self.async_get_last_number_data()
+        if restored is not None and restored.native_value is not None:
+            self._attr_native_value = restored.native_value
+            self._confirmed_value = restored.native_value
+
+    @property
+    def extra_restore_state_data(self) -> NumberExtraStoredData:
+        """Save what the charger accepted, never a request still in flight."""
+        return NumberExtraStoredData(
+            self.native_max_value,
+            self.native_min_value,
+            self.native_step,
+            self.native_unit_of_measurement,
+            self._confirmed_value,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Charger up with SmartCharging; no transaction needed."""
+        return bool(
+            self.central_system.session_default_limit_available(
+                self.cpid, self.connector_id
+            )
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """The last limit the charger accepted for this connector."""
+        return self._attr_native_value
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose what the request writes."""
+        return {
+            "profile_purpose": _TX_DEFAULT_PROFILE,
+            "profile_id": session_default_profile_id(self.connector_id),
+            "confirmed_current": self._confirmed_value,
+        }
+
+    def _begin_set(self) -> None:
+        """Send without a transaction: a default profile needs none."""
+
+    async def _send(self, target: float) -> bool:
+        return await self.central_system.set_session_default_charge_rate_amps(
+            self.cpid, self.connector_id, target
+        )

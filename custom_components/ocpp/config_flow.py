@@ -28,6 +28,7 @@ from .const import (
     CONF_NUM_CONNECTORS,
     CONF_OCPP_VERSION,
     CONF_PORT,
+    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
     CONF_SSL_CERTFILE_PATH,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_NUM_CONNECTORS,
     DEFAULT_OCPP_VERSION,
     DEFAULT_PORT,
+    DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
@@ -111,6 +113,10 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
             default=DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
         ): bool,
         vol.Required(
+            CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+            default=DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
+        ): bool,
+        vol.Required(
             CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
     }
@@ -122,6 +128,22 @@ STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
         for m in MEASURANDS
     }
 )
+
+
+def _store_session_default_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
+    """Drop session_limit_default_profile from a charger record unless it is on.
+
+    Releases before it expand the record into ChargerSystemSettings and fail
+    on a key they do not know. Leaving it out while it is off keeps a
+    rollback safe for every charger that never enabled it.
+    """
+    if settings.get(CONF_SESSION_LIMIT_DEFAULT_PROFILE):
+        return settings
+    return {
+        key: value
+        for key, value in settings.items()
+        if key != CONF_SESSION_LIMIT_DEFAULT_PROFILE
+    }
 
 
 class ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -263,10 +285,12 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "duplicate_cpid"
 
             if not errors:
-                cp_data = {
-                    **user_input,
-                    CONF_NUM_CONNECTORS: self._detected_num_connectors,
-                }
+                cp_data = _store_session_default_only_when_on(
+                    {
+                        **user_input,
+                        CONF_NUM_CONNECTORS: self._detected_num_connectors,
+                    }
+                )
                 cpids_list = self._data.get(CONF_CPIDS, []).copy()
                 cpids_list.append({self._cp_id: cp_data})
                 self._data = {**self._data, CONF_CPIDS: cpids_list}
@@ -371,7 +395,9 @@ class OCPPOptionsFlow(OptionsFlow):
         cpids = [
             {
                 cp_id: (
-                    {**stored, **self._settings} if cp_id == self._cp_id else stored
+                    _store_session_default_only_when_on({**stored, **self._settings})
+                    if cp_id == self._cp_id
+                    else stored
                 )
                 for cp_id, stored in item.items()
             }
@@ -466,6 +492,13 @@ class OCPPOptionsFlow(OptionsFlow):
                     default=current.get(
                         CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
                         DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+                    default=current.get(
+                        CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+                        DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
                     ),
                 ): bool,
                 vol.Required(
