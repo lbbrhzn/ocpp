@@ -22,6 +22,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.util import slugify
 
 from .api import CentralSystem
+from .devices import connector_device_info
 from .const import (
     CONF_CPID,
     CONF_CPIDS,
@@ -229,10 +230,8 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         )
         self._attr_name = self.entity_description.name
         if self.connector_id is not None:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
-                via_device=(DOMAIN, cpid),
+            self._attr_device_info = connector_device_info(
+                self.central_system, cpid, self.connector_id
             )
         else:
             self._attr_device_info = DeviceInfo(

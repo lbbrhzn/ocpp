@@ -239,13 +239,12 @@ async def test_update_returns_early_when_root_device_missing(
                     dev = self.async_get_device(identifiers)
                     return [dev] if dev is not None else []
 
-                @property
-                def devices(self):
-                    """Fake devices."""
-                    return {}
-
             class FakeER:
                 """Fake ER: only ever passed to the patched entries_for_device."""
+
+            def fake_entries_for_config_entry(_dr, _entry_id):
+                """Fake devices."""
+                return []
 
             def fake_entries_for_device(_er, _dev_id):
                 # No entities to update; the loop is exercised anyway.
@@ -258,6 +257,7 @@ async def test_update_returns_early_when_root_device_missing(
             # task that resolves a registry inside this await sees the fakes.
             originals = (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,
@@ -265,6 +265,12 @@ async def test_update_returns_early_when_root_device_missing(
             with monkeypatch.context() as mp:
                 mp.setattr(
                     mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+                )
+                mp.setattr(
+                    mod.device_registry,
+                    "async_entries_for_config_entry",
+                    fake_entries_for_config_entry,
+                    raising=True,
                 )
                 mp.setattr(
                     mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
@@ -290,6 +296,7 @@ async def test_update_returns_early_when_root_device_missing(
             # helpers being restored right here is the actual contract.
             assert originals == (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,
@@ -327,7 +334,7 @@ async def test_update_traverses_children_and_skips_visited(
             srv = cs.charge_points[cp_id]
 
             # Build a tiny fake device graph:
-            # root -> child (twice in the values() list to create a duplicate push)
+            # root -> child (twice in the entry list to create a duplicate push)
             import custom_components.ocpp.chargepoint as mod
 
             class Dev:
@@ -388,6 +395,11 @@ async def test_update_traverses_children_and_skips_visited(
             entity_lookup_device_ids = []
             dispatched = []
 
+            def fake_entries_for_config_entry(_dr, _entry_id):
+                # Duplicate the child to force the same ID to be appended
+                # twice -> will hit continue (L612)
+                return [root, child, child]
+
             def fake_entries_for_device(_er, _dev_id):
                 entity_lookup_device_ids.append(_dev_id)
                 return ents_by_dev.get(_dev_id, [])
@@ -398,6 +410,7 @@ async def test_update_traverses_children_and_skips_visited(
             # task that resolves a registry inside this await sees the fakes.
             originals = (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,
@@ -405,6 +418,12 @@ async def test_update_traverses_children_and_skips_visited(
             with monkeypatch.context() as mp:
                 mp.setattr(
                     mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+                )
+                mp.setattr(
+                    mod.device_registry,
+                    "async_entries_for_config_entry",
+                    fake_entries_for_config_entry,
+                    raising=True,
                 )
                 mp.setattr(
                     mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
@@ -429,6 +448,7 @@ async def test_update_traverses_children_and_skips_visited(
             # helpers being restored right here is the actual contract.
             assert originals == (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,

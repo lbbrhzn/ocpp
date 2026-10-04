@@ -691,3 +691,50 @@ async def test_remove_config_entry_device_refuses_unknown_device(
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
     assert_no_swallowed_lifecycle_errors(caplog)
+
+
+async def test_charger_device_linked_to_central_system_without_deprecation(
+    hass: AsyncGenerator[HomeAssistant, None], bypass_get_data: None, caplog
+):
+    """Charger devices hang off the central system device by device id.
+
+    Home Assistant deprecated the ``via_device`` identifier tuple on
+    ``async_get_or_create`` (removed in 2027.8); the link must be made with
+    ``via_device_id`` and still resolve to the central system device.
+    """
+    data = deepcopy(MOCK_CONFIG_DATA_1)
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        entry_id="test_via_device_id",
+        title="test_via_device_id",
+        version=2,
+        minor_version=0,
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    dr = device_registry.async_get(hass)
+    central = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, data[CONF_CSID])},
+                config_entry_id=config_entry.entry_id,
+            )
+        )
+    )
+    cp_id, cp_settings = next(iter(data[CONF_CPIDS][0].items()))
+    charger = next(
+        iter(
+            dr.async_get_devices(
+                identifiers={(DOMAIN, cp_id), (DOMAIN, cp_settings[CONF_CPID])},
+                config_entry_id=config_entry.entry_id,
+            )
+        )
+    )
+    assert charger.via_device_id == central.id
+    assert "deprecated `via_device` parameter" not in caplog.text
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()

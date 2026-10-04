@@ -26,6 +26,7 @@ from homeassistant.util import slugify
 
 from .api import CentralSystem
 from .chargepoint import session_default_profile_id, session_profile_id
+from .devices import connector_device_info
 from .const import (
     CONF_NUM_CONNECTORS,
     CONF_CPID,
@@ -226,10 +227,8 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
         if self.connector_id:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
-                via_device=(DOMAIN, cpid),
+            self._attr_device_info = connector_device_info(
+                self.central_system, cpid, self.connector_id
             )
         else:
             self._attr_device_info = DeviceInfo(
@@ -441,10 +440,8 @@ class SessionCurrentLimitNumber(NumberEntity):
             )
             object_id = f"{cpid}_connector_{connector_id}_session_current_limit"
             self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{connector_id}")},
-                name=f"{cpid} Connector {connector_id}",
-                via_device=(DOMAIN, cpid),
+            self._attr_device_info = connector_device_info(
+                self.central_system, cpid, connector_id
             )
         # The value on display belongs to one transaction of one charger
         # generation: the id the connector shows plus the charger's boot
