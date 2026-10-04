@@ -192,7 +192,7 @@ Model is discontinued by the manufacturer.
 
 Tested on 4 October 2026 with reported vendor `SIGEN`, model `EVDC 25 7.5S2`,
 firmware `V100R001C21SPC117`, one connector, and integration release `v0.12.0`
-(tag commit `848407c`). This is an import-metering and session-telemetry report,
+(tag commit `848407c`). This is a charging and discharge telemetry report,
 not a claim that all charger functions work. The negotiated OCPP version was
 not independently verified during this test.
 
@@ -224,6 +224,31 @@ integration, not a claim about the original wire units.
 remained at 25 kW throughout this window. It is not included in the changing
 measurands above, and does not establish that a charging limit can be controlled.
 
+### Vehicle discharge (V2G) observations
+
+In a subsequent vehicle discharge session on 4 October 2026, the tester reported
+the following behaviour on the same setup:
+
+| Measurand or session field | Observed behaviour during discharge |
+| --- | --- |
+| `Power.Active.Import` | Negative power, matching the Sigenergy discharge-power reading within about 1% |
+| `Current.Import` | Remained at 0 A rather than reporting negative current |
+| `Energy.Active.Import.Register` | Remained flat during discharge |
+| Connector status and transaction ID | Connector remained `Charging` with the same transaction ID |
+| Export measurands | No export measurands appeared during the observed discharge session |
+
+The approximately 1% agreement is a comparison reported for this session, not a
+calibrated accuracy specification. These observations show discharge through
+signed `Power.Active.Import`; `Charging` status and the transaction ID alone
+did not distinguish charging from discharge. Zero `Current.Import` did not
+mean that no energy was flowing.
+
+The flat import register did not account for exported energy, and no usable
+export-energy register was demonstrated. Integrating negative power over time
+would be a separate energy estimate, not a charger-reported export register.
+This telemetry observation does not establish OCPP control of V2G or verified
+bidirectional energy accounting.
+
 ### Measurand auto-detection limitation
 
 Automatic detection did not identify the supported measurands in this test.
@@ -244,9 +269,10 @@ Sigenergy models or firmware versions.
   observed charging window. Import and export interval-energy entities also
   remained `unknown`. Enabling an entity does not establish that the charger
   supplies its measurand.
-- Zero-valued export power/current alone did not establish working export
-  metering. Discharge metering and bidirectional session accounting still need
-  a separate V2G test.
+- The discharge observations above establish negative import-power reporting,
+  not export-energy register support. Zero-valued current and absent export
+  measurands must not be treated as proof that no discharge occurred.
+  Bidirectional energy accounting remains unverified.
 - Features reported `CORE`, and current-limit controls were unavailable at the
   inspected snapshot. Smart charging, charging-profile enforcement and V2G
   control were not verified.
