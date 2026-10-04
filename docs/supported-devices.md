@@ -188,6 +188,44 @@ but certain features (eg. scheduling) may not work.
 ## [Schneider Electric EVlink Wallbox Plus](https://www.se.com/nl/en/product/EVH3S22P0CK/evlink-wallbox-plus-t2-attached-cable-3-phase-32a-22kw/)
 Model is discontinued by the manufacturer.
 
+## Sigenergy Sigen EV DC charger (tested: SIGEN EVDC 25 7.5S2)
+
+Tested on 4 October 2026 with reported vendor `SIGEN`, model `EVDC 25 7.5S2`,
+firmware `V100R001C21SPC117`, one connector, and integration release `v0.12.0`
+(tag commit `848407c`). This is an import-metering and session-telemetry report,
+not a claim that all charger functions work. The negotiated OCPP version was
+not independently verified during this test.
+
+### Confirmed observations
+
+- Connector status, transaction ID, session duration, meter start, session
+  energy and stop reason were exposed. Connector history included `Preparing`,
+  `Charging` and `Finishing`.
+- Use `sensor.<cpid>_status_connector` for connector state. The charger-level
+  status was `unknown` while the connector correctly reported `Charging`.
+- After enabling the corresponding integration entities,
+  `Energy.Active.Import.Register` supplied cumulative kWh readings with
+  `Sample.Periodic` context at approximately 60-second intervals during charging.
+- Import power, import current, voltage, state of charge and offered power
+  supplied numeric readings. Offered power is telemetry, not evidence that a
+  charging limit can be controlled.
+
+### Limits of this test
+
+- `Energy.Active.Export.Register` was enabled but remained `unknown` in the
+  observed charging window. Import and export interval-energy entities also
+  remained `unknown`. Enabling an entity does not establish that the charger
+  supplies its measurand.
+- Zero-valued export power/current alone did not establish working export
+  metering. Discharge metering and bidirectional session accounting still need
+  a separate V2G test.
+- Features reported `CORE`, and current-limit controls were unavailable at the
+  inspected snapshot. Smart charging, charging-profile enforcement and V2G
+  control were not verified.
+
+See the [test record](https://github.com/purcell-lab/ha-bsv-settlement/issues/61)
+for the dated sensor observations and their limitations.
+
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
