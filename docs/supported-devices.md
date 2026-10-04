@@ -210,6 +210,20 @@ not independently verified during this test.
   supplied numeric readings. Offered power is telemetry, not evidence that a
   charging limit can be controlled.
 
+### Measurand auto-detection limitation
+
+Automatic detection did not identify the supported measurands in this test.
+Do not rely on auto-detection to establish which readings this firmware can
+supply. If using this setup, configure the required measurands manually and
+enable the corresponding Home Assistant entities, then check for live readings
+during a charging session.
+
+Measurand configuration and entity enablement are separate steps: enabling an
+entity alone does not make the charger report that measurement. The numeric
+readings listed above were observed; export and interval-energy reporting were
+not established. This limitation is reported for the tested firmware, not all
+Sigenergy models or firmware versions.
+
 ### Limits of this test
 
 - `Energy.Active.Export.Register` was enabled but remained `unknown` in the
