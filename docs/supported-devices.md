@@ -206,9 +206,23 @@ not independently verified during this test.
 - After enabling the corresponding integration entities,
   `Energy.Active.Import.Register` supplied cumulative kWh readings with
   `Sample.Periodic` context at approximately 60-second intervals during charging.
-- Import power, import current, voltage, state of charge and offered power
-  supplied numeric readings. Offered power is telemetry, not evidence that a
-  charging limit can be controlled.
+
+The following measurands had changing numeric readings in Home Assistant
+history during the 12:08 to 12:18 AEST charging window on 4 October 2026. Each
+carried `Sample.Periodic` context; units below are those displayed by the
+integration, not a claim about the original wire units.
+
+| Measurand | Displayed unit | Observed behaviour |
+| --- | --- | --- |
+| `Energy.Active.Import.Register` | kWh | Cumulative imported energy increased during charging |
+| `Power.Active.Import` | kW | Charging power varied |
+| `Current.Import` | A | Charging current varied |
+| `Voltage` | V | Voltage varied |
+| `SoC` | % | Reported state of charge increased |
+
+`Power.Offered` also had a numeric reading with `Sample.Periodic` context, but
+remained at 25 kW throughout this window. It is not included in the changing
+measurands above, and does not establish that a charging limit can be controlled.
 
 ### Measurand auto-detection limitation
 
