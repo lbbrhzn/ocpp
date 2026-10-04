@@ -51,6 +51,9 @@ class HAChargerDetails(StrEnum):
     data_response = "Timestamp.Data.Response"
     data_transfer = "Timestamp.Data.Transfer"
     config_response = "Timestamp.Config.Response"
+    ocpp_version = "Version.OCPP"
+    config_keys = "Configuration.Keys"
+    boot_notification = "Boot.Notification"
 
 
 class HAChargerSession(StrEnum):

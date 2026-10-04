@@ -1252,6 +1252,16 @@ class ChargePoint(cp):
         self.hass.async_create_task(
             self.async_update_device_info_v201(charging_station)
         )
+        # chargingStation fields flatten to model, vendor_name, serial_number,
+        # firmware_version, modem_iccid, modem_imsi; reason and any custom
+        # data sit alongside.
+        self._record_boot_notification(
+            {
+                **(charging_station if isinstance(charging_station, dict) else {}),
+                "reason": reason,
+                **kwargs,
+            }
+        )
         self._inventory = None
         # An initial boot is followed by post_connect's inventory request. A
         # later boot on an already configured connection is not, so waiting in

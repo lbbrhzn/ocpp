@@ -2,11 +2,14 @@
 
 import asyncio
 from collections import defaultdict
+import contextlib
 from collections.abc import MutableMapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 import logging
 from math import sqrt
+import re
 import secrets
 import string
 import time
@@ -78,6 +81,10 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 # never send a boot notification. Module-level so tests can shrink it
 # without monkeypatching asyncio.sleep globally.
 MONITOR_BACKSTOP_DELAY = 10
+# Seconds post_connect waits for the configuration snapshot reply. Without
+# a bound, a charger that disconnects first leaves post_connect waiting for
+# the library's full call timeout.
+CONFIG_SNAPSHOT_TIMEOUT = 3
 _DEFAULT_LINE_VOLTAGE = 230.0
 _DEFAULT_PHASES = 1
 _PHASE_KEY_GROUPS = (
@@ -88,6 +95,56 @@ _PHASE_KEY_GROUPS = (
 
 
 SESSION_PROFILE_BASE_ID = 3000
+
+# Configuration snapshot (Configuration.Keys sensor) limits. Entity
+# attributes end up in the state machine and the recorder, so a charger
+# returning hundreds of keys or kilobyte-long values must not bloat them.
+CONFIG_SNAPSHOT_MAX_KEYS = 200
+CONFIG_SNAPSHOT_MAX_VALUE_LEN = 255
+CONFIG_SNAPSHOT_REDACTED = "redacted"
+# Key names whose values are credentials or key material. Matched anywhere in
+# the name, case-insensitively, so vendor keys such as "WifiPassword" or
+# "BackendAuthToken" are covered as well as the standard AuthorizationKey.
+_CONFIG_SNAPSHOT_REDACT_RE = re.compile(
+    r"(?i)(authorizationkey|password|secret|token|passphrase|certificate|privatekey)"
+)
+
+
+def _offered_subprotocols(connection) -> list[str]:
+    """Return the websocket subprotocols the charger offered in its handshake.
+
+    CentralSystem.select_subprotocol stashes the offer on the connection; fall
+    back to the raw Sec-WebSocket-Protocol request header for connections that
+    did not pass through it.
+    """
+    offered = getattr(connection, "ocpp_offered_subprotocols", None)
+    if isinstance(offered, list | tuple):
+        return [str(p) for p in offered]
+    try:
+        values = connection.request.headers.get_all("Sec-WebSocket-Protocol")
+        return [
+            p.strip() for value in values for p in str(value).split(",") if p.strip()
+        ]
+    except Exception:
+        return []
+
+
+def _flatten_attrs(fields: dict, prefix: str = "") -> dict[str, str]:
+    """Flatten a (possibly nested) OCPP payload into string attributes.
+
+    Nested objects such as the 2.x chargingStation.modem become
+    ``modem_iccid``; absent (None) fields are skipped.
+    """
+    attrs: dict[str, str] = {}
+    for key, value in (fields or {}).items():
+        if value is None:
+            continue
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            attrs.update(_flatten_attrs(value, f"{name}_"))
+        else:
+            attrs[name] = str(value)
+    return attrs
 
 
 def session_profile_id(connector_id: int) -> int:
@@ -327,6 +384,14 @@ class ChargePoint(cp):
         # Init standard metrics for connector 0
         self._metrics[(0, cdet.identifier)].value = id
         self._metrics[(0, cstat.reconnects)].value = 0
+        # Configuration keys the integration asked for that the charger
+        # reported unknown, across every GetConfiguration it issued. Kept for
+        # the life of the charge point so reconnects do not lose the evidence.
+        self._unknown_config_keys: set[str] = set()
+        # Whether the charger accepted the integration's measurand selection;
+        # None until known (protocol specific, see get_supported_measurands).
+        self._measurands_configurable: bool | None = None
+        self._record_connection_metadata(connection)
 
         self._attr_supported_features = prof.NONE
         alphabet = string.ascii_uppercase + string.digits
@@ -379,6 +444,100 @@ class ChargePoint(cp):
         _LOGGER.debug(
             "Feature profiles returned: %s", self._attr_supported_features.labels()
         )
+
+    def _record_connection_metadata(self, connection) -> None:
+        """Expose the negotiated protocol and transport of this connection."""
+        subprotocol = getattr(connection, "subprotocol", None)
+        metric = self._metrics[(0, cdet.ocpp_version)]
+        metric.value = getattr(self, "_ocpp_version", None)
+        metric.extra_attr = {
+            # None when the charger offered no subprotocol (defaulted to 1.6).
+            "subprotocol": str(subprotocol) if isinstance(subprotocol, str) else None,
+            "offered_subprotocols": _offered_subprotocols(connection),
+            "transport": "wss" if getattr(self.cs_settings, "ssl", False) else "ws",
+        }
+
+    def _record_boot_notification(self, fields: dict) -> None:
+        """Keep every field of the last BootNotification as sensor attributes.
+
+        Diagnostic only: a failure here must never turn the charger's
+        BootNotification into an error reply.
+        """
+        try:
+            metric = self._metrics[(0, cdet.boot_notification)]
+            metric.value = datetime.now(tz=UTC)
+            metric.extra_attr = _flatten_attrs(fields)
+            self._async_refresh_metric_entities([cdet.boot_notification])
+        except Exception as ex:
+            _LOGGER.debug("'%s' could not record boot notification: %s", self.id, ex)
+
+    def _record_unknown_config_keys(self, unknown_keys) -> None:
+        """Accumulate configuration keys the charger reported as unknown."""
+        if not unknown_keys:
+            return
+        if isinstance(unknown_keys, str):
+            unknown_keys = [unknown_keys]
+        new = {str(k) for k in unknown_keys} - self._unknown_config_keys
+        if not new:
+            return
+        self._unknown_config_keys |= new
+        # Keep an existing snapshot current, e.g. after a later
+        # ocpp.get_configuration service call for an unsupported key.
+        metric = self._metrics[(0, cdet.config_keys)]
+        if metric.extra_attr:
+            metric.extra_attr = {
+                **metric.extra_attr,
+                "unknown_keys": sorted(self._unknown_config_keys),
+            }
+            with contextlib.suppress(Exception):
+                self._async_refresh_metric_entities(
+                    [cdet.config_keys], fallback_to_full_update=False
+                )
+
+    def _record_configuration_snapshot(self, entries) -> None:
+        """Store a full configuration listing as the Configuration.Keys sensor.
+
+        ``entries`` are the charger's KeyValue records (``key``, ``readonly``,
+        optional ``value``). Secrets are redacted by key name and the result
+        is bounded in key count and value length; truncation is recorded so
+        the snapshot never silently claims to be complete.
+        """
+        entries = [e for e in (entries or []) if isinstance(e, dict) and e.get("key")]
+        attrs: dict = {}
+        readonly: list[str] = []
+        redacted: list[str] = []
+        truncated_values: list[str] = []
+        for entry in entries[:CONFIG_SNAPSHOT_MAX_KEYS]:
+            key = str(entry["key"])
+            value = entry.get(om.value.value)
+            value = "" if value is None else str(value)
+            if _CONFIG_SNAPSHOT_REDACT_RE.search(key):
+                value = CONFIG_SNAPSHOT_REDACTED
+                redacted.append(key)
+            elif len(value) > CONFIG_SNAPSHOT_MAX_VALUE_LEN:
+                value = value[:CONFIG_SNAPSHOT_MAX_VALUE_LEN]
+                truncated_values.append(key)
+            attrs[key] = value
+            if entry.get(om.readonly.value):
+                readonly.append(key)
+        # Summary attributes are written last: OCPP keys are CamelCase, so a
+        # clash is not expected, but the summary must win if one occurs.
+        attrs["readonly_keys"] = sorted(readonly)
+        attrs["unknown_keys"] = sorted(self._unknown_config_keys)
+        attrs["redacted_keys"] = sorted(redacted)
+        attrs["keys_truncated"] = len(entries) > CONFIG_SNAPSHOT_MAX_KEYS
+        attrs["truncated_values"] = sorted(truncated_values)
+        if self._measurands_configurable is not None:
+            attrs["measurands_configurable"] = self._measurands_configurable
+        metric = self._metrics[(0, cdet.config_keys)]
+        # The state counts every key the charger returned, including any
+        # beyond the attribute bound.
+        metric.value = len(entries)
+        metric.extra_attr = attrs
+        self._async_refresh_metric_entities([cdet.config_keys])
+
+    async def fetch_configuration_snapshot(self):
+        """Record the charger's complete configuration (protocol specific)."""
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -437,6 +596,21 @@ class ChargePoint(cp):
 
             # Ensure HA states are correct immediately after connection
             self.hass.async_create_task(self.update(self.settings.cpid))
+
+            # Evidence only: a full configuration listing. Last and bounded,
+            # so a slow or failing reply can neither delay nor break anything
+            # the integration needs.
+            try:
+                await asyncio.wait_for(
+                    self.fetch_configuration_snapshot(),
+                    timeout=CONFIG_SNAPSHOT_TIMEOUT,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                _LOGGER.debug(
+                    "post_connect: configuration snapshot ignored error: %s", ex
+                )
 
         except asyncio.CancelledError:
             # The connection dropped mid-setup, so the task was cancelled rather
@@ -919,6 +1093,9 @@ class ChargePoint(cp):
             self.status = STATE_OK
             self._connection = connection
             self._metrics[(0, cstat.reconnects)].value += 1
+            self._record_connection_metadata(connection)
+            with contextlib.suppress(Exception):
+                self._async_refresh_metric_entities([cdet.ocpp_version])
             installed = True
             # post connect remains handled by boot notification / monitor backstop
             await self.run([super().start(), self.monitor_connection()])

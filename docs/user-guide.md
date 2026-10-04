@@ -70,6 +70,19 @@ If your integration shows extra attributes on the connector status sensor like a
 * **Charge Control switch**<br>
   Turning off ends the ongoing charging session (remote stop). The connector typically transitions to `Finishing` and then back to its normal idle state once the cable is unplugged. Turning the switch on again resets the session metrics; the charger returns to its previous state (this does not force a new session to start).
 
+## Charger metadata (diagnostics)
+
+Three diagnostic sensors on the charger device record how the charger is connected and what it reported about itself, so this information does not have to be read from debug logs:
+
+* **Version OCPP** (`sensor.<cpid>_version_ocpp`)<br>
+  The negotiated OCPP version (`1.6`, `2.0.1` or `2.1`). Attributes: `subprotocol` (the negotiated websocket subprotocol; not set if the charger offered none and defaulted to 1.6), `offered_subprotocols` (everything the charger offered) and `transport` (`ws`, or `wss` when the central system uses SSL). Updated on every connect and reconnect.
+
+* **Configuration Keys** (`sensor.<cpid>_configuration_keys`, OCPP 1.6 only)<br>
+  After connection setup the integration requests the charger's complete configuration once (GetConfiguration without keys). The state is the number of keys returned; each key is an attribute holding its value. Further attributes: `readonly_keys`, `unknown_keys` (keys the integration asked for, at setup or through `ocpp.get_configuration` / `ocpp.configure`, that the charger reported as unknown), `redacted_keys`, `keys_truncated`, `truncated_values` and, when known, `measurands_configurable` (whether the charger accepted the integration's measurand selection). Values of keys whose name contains `AuthorizationKey`, `Password`, `Secret`, `Token`, `Passphrase`, `Certificate` or `PrivateKey` (any case) are shown as `redacted`. At most 200 keys are listed and values are cut to 255 characters. Home Assistant's recorder does not store attributes larger than 16 KB, so a very large configuration may be visible in the UI but not in history. The sensor stays unknown on OCPP 2.x.
+
+* **Boot Notification** (`sensor.<cpid>_boot_notification`)<br>
+  The time of the last BootNotification. Every field the charger sent is an attribute, including optional ones the integration otherwise ignores, e.g. `charge_box_serial_number`, `meter_type`, `meter_serial_number`, `iccid` and `imsi` on OCPP 1.6. On OCPP 2.x the `chargingStation` fields are listed (the modem's as `modem_iccid` / `modem_imsi`) together with `reason`.
+
 
 
 ## Useful Entities for Wallbox Pulsar Plus
