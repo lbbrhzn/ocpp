@@ -999,6 +999,37 @@ class ChargePoint(cp):
             },
         )
 
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxDefaultProfile for one connector.
+
+        The id and the stack level one below the reported maximum (at least
+        1) are the ones the set_charge_rate action uses for its
+        TxDefaultProfile leg, so the two address one profile. It is the shape
+        0.11.4 sent after a refused station ceiling, which chargers in #2158
+        apply. A reported maximum of 0 is still honoured.
+        """
+        maximum = int(prepared["stack_level"])
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: min(maximum, max(1, maximum - 1)),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
+                om.charging_schedule: {
+                    om.charging_rate_unit: prepared["unit"],
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: prepared["value"]}
+                    ],
+                },
+            },
+        )
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set only a station ceiling; transaction defaults cannot replace one."""
         try:

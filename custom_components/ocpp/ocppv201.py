@@ -910,6 +910,40 @@ class ChargePoint(cp):
         }
         return call.SetChargingProfile(int(prepared["evse_id"]), profile)
 
+    def session_default_target_known(self, connector_id: int) -> bool:
+        """Only a reported mapping; _global_to_pair would guess EVSE n."""
+        return (
+            self._ensure_connector_map() and int(connector_id) in self._global_to_evse
+        )
+
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative 2.0.1 TxDefaultProfile on the connector's EVSE.
+
+        The same shape as 1.6: one stack level below the reported maximum,
+        at least 1, without exceeding a reported maximum of 0.
+        """
+        maximum = int(prepared["stack_level"])
+        schedule = {
+            "id": 1,
+            "charging_rate_unit": prepared["unit"],
+            "charging_schedule_period": [
+                {"start_period": 0, "limit": prepared["value"]}
+            ],
+        }
+        profile = {
+            "id": int(profile_id),
+            "stack_level": min(maximum, max(1, maximum - 1)),
+            "charging_profile_purpose": ChargingProfilePurposeEnumType.tx_default_profile.value,
+            "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
+            "charging_schedule": [schedule],
+        }
+        return call.SetChargingProfile(int(prepared["evse_id"]), profile)
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Use the managed station limit for the Maximum Current entity."""
         return await self.set_charge_rate(limit_amps=limit_amps, conn_id=0)
