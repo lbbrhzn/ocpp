@@ -78,6 +78,12 @@ clear_profile:
       required: false
       advanced: true
       example: charger
+    conn_id:
+      name: Connector ID
+      description: OCPP connector to clear profiles from
+      required: false
+      advanced: true
+      example: 1
 
 update_firmware:
   name: Update charger firmware
