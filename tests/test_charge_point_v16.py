@@ -10,6 +10,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from pytest_homeassistant_custom_component.common import async_capture_events
 from homeassistant.const import STATE_ON, UnitOfTime
 from homeassistant.exceptions import HomeAssistantError
 import websockets
@@ -1661,6 +1662,7 @@ async def test_get_authorization_status_with_auth_list(
         CONF_AUTH_LIST,
         CONF_ID_TAG,
         CONF_AUTH_STATUS,
+        EVENT_AUTHORIZATION,
     )
 
     # Start a minimal client so the server-side CP is registered.
@@ -1691,6 +1693,8 @@ async def test_get_authorization_status_with_auth_list(
         {CONF_ID_TAG: "TAG_NO_STATUS"},  # should fall back to default
     ]
 
+    events = async_capture_events(hass, EVENT_AUTHORIZATION)
+
     # 1) Early return path: remote id tag
     srv_cp._remote_id_tag = "REMOTE123"
     assert (
@@ -1714,6 +1718,22 @@ async def test_get_authorization_status_with_auth_list(
     assert (
         srv_cp.get_authorization_status("UNKNOWN") == AuthorizationStatus.blocked.value
     )
+
+    # Every decision is fired as an event, including the remote id tag
+    await hass.async_block_till_done()
+    assert [e.data for e in events] == [
+        {
+            "charge_point_id": cp_id,
+            "id_tag": id_tag,
+            "authorization_status": status,
+        }
+        for id_tag, status in (
+            ("REMOTE123", AuthorizationStatus.accepted.value),
+            ("TAG_PRESENT", AuthorizationStatus.expired.value),
+            ("TAG_NO_STATUS", AuthorizationStatus.blocked.value),
+            ("UNKNOWN", AuthorizationStatus.blocked.value),
+        )
+    ]
 
 
 @pytest.mark.timeout(20)

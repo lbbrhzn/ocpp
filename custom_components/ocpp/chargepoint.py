@@ -65,6 +65,7 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
     DOMAIN,
+    EVENT_AUTHORIZATION,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
@@ -1091,7 +1092,22 @@ class ChargePoint(cp):
         async_dispatcher_send(self.hass, DATA_UPDATED, active_entities)
 
     def get_authorization_status(self, id_tag):
-        """Get the authorization status for an id_tag."""
+        """Get the authorization status for an id_tag and fire it as an event."""
+        auth_status = self._lookup_authorization_status(id_tag)
+        # Tags the charger accepts locally skip Authorize and only arrive
+        # with StartTransaction, so the event cannot live in on_authorize.
+        self.hass.bus.async_fire(
+            EVENT_AUTHORIZATION,
+            {
+                "charge_point_id": self.id,
+                "id_tag": id_tag,
+                "authorization_status": auth_status,
+            },
+        )
+        return auth_status
+
+    def _lookup_authorization_status(self, id_tag):
+        """Look up the authorization status for an id_tag."""
         # authorize if its the tag of this charger used for remote start_transaction
         if id_tag == self._remote_id_tag:
             return AuthorizationStatus.accepted.value
