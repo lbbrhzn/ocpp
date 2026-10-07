@@ -1580,6 +1580,8 @@ class ChargePoint(cp):
             or (token_type == IdTokenEnumType.central)
         ):
             status = self.get_authorization_status(token)
+        else:
+            self.fire_authorization_event(token, status)
         return call_result.Authorize(id_token_info={"status": status})
 
     def _set_meter_values(
