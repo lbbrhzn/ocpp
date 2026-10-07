@@ -1861,7 +1861,7 @@ class ChargePoint(cp):
         """Handle a Start Transaction request."""
 
         self._ensure_tx_store_loaded()
-        auth_status = self.get_authorization_status(id_tag)
+        auth_status = self.get_authorization_status(id_tag, connector_id)
         if auth_status == AuthorizationStatus.accepted.value:
             tx_id = self._allocate_transaction_id()
             self._ended_tx.pop(connector_id, None)

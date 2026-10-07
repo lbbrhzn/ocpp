@@ -1167,7 +1167,10 @@ async def test_start_transaction_meter_start_cast_exception(
 
             # Ensure authorization passes so the handler proceeds normally
             monkeypatch.setattr(
-                srv, "get_authorization_status", lambda id_tag: "Accepted", raising=True
+                srv,
+                "get_authorization_status",
+                lambda id_tag, connector_id=None: "Accepted",
+                raising=True,
             )
 
             # Call the handler directly with a non-numeric meter_start
@@ -1211,7 +1214,7 @@ async def test_start_transaction_auth_denied_returns_tx0(
             monkeypatch.setattr(
                 srv,
                 "get_authorization_status",
-                lambda id_tag: "Invalid",
+                lambda id_tag, connector_id=None: "Invalid",
                 raising=True,
             )
             # Call handler directly to inspect response

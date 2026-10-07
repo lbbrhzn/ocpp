@@ -1719,19 +1719,27 @@ async def test_get_authorization_status_with_auth_list(
         srv_cp.get_authorization_status("UNKNOWN") == AuthorizationStatus.blocked.value
     )
 
+    # 5) StartTransaction passes its connector
+    assert (
+        srv_cp.get_authorization_status("TAG_PRESENT", 2)
+        == AuthorizationStatus.expired.value
+    )
+
     # Every decision is fired as an event, including the remote id tag
     await hass.async_block_till_done()
     assert [e.data for e in events] == [
         {
             "charge_point_id": cp_id,
+            "connector_id": connector_id,
             "id_tag": id_tag,
             "authorization_status": status,
         }
-        for id_tag, status in (
-            ("REMOTE123", AuthorizationStatus.accepted.value),
-            ("TAG_PRESENT", AuthorizationStatus.expired.value),
-            ("TAG_NO_STATUS", AuthorizationStatus.blocked.value),
-            ("UNKNOWN", AuthorizationStatus.blocked.value),
+        for id_tag, status, connector_id in (
+            ("REMOTE123", AuthorizationStatus.accepted.value, None),
+            ("TAG_PRESENT", AuthorizationStatus.expired.value, None),
+            ("TAG_NO_STATUS", AuthorizationStatus.blocked.value, None),
+            ("UNKNOWN", AuthorizationStatus.blocked.value, None),
+            ("TAG_PRESENT", AuthorizationStatus.expired.value, 2),
         )
     ]
 
