@@ -208,6 +208,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     """Individual sensor for charge point metrics."""
 
     _attr_has_entity_name = False
+    # SIM identifiers from the BootNotification stay visible on the Boot
+    # Notification sensor but are not written to the recorder history.
+    _unrecorded_attributes = frozenset({"iccid", "imsi", "modem_iccid", "modem_imsi"})
     entity_description: OcppSensorDescription
 
     def __init__(
