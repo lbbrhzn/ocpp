@@ -66,6 +66,7 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
     DOMAIN,
+    EVENT_AUTHORIZATION,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
@@ -99,6 +100,19 @@ def session_profile_id(connector_id: int) -> int:
     set.
     """
     return SESSION_PROFILE_BASE_ID + int(connector_id)
+
+
+SESSION_DEFAULT_PROFILE_BASE_ID = 2000
+
+
+def session_default_profile_id(connector_id: int) -> int:
+    """Return the profile id a connector's default session limit uses on both protocols.
+
+    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
+    TxDefaultProfile leg, so on 1.6 the slider and the action write one
+    profile.
+    """
+    return SESSION_DEFAULT_PROFILE_BASE_ID + int(connector_id)
 
 
 class Metric:
@@ -509,6 +523,62 @@ class ChargePoint(cp):
     ):
         """Build the protocol's SetChargingProfile for a transaction-bound limit."""
         raise NotImplementedError
+
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build the protocol's SetChargingProfile for a connector default limit."""
+        raise NotImplementedError
+
+    def session_default_target_known(self, connector_id: int) -> bool:
+        """Return whether the charger has said where the connector's profile goes.
+
+        A default profile outlives the request, so it must not be sent to a
+        guessed target. 1.6 addresses the connector itself; 2.0.1 overrides.
+        """
+        return True
+
+    async def set_session_default_limit(
+        self, connector_id: int, limit_amps: float
+    ) -> bool:
+        """Set a TxDefaultProfile on the connector, with or without a transaction.
+
+        For chargers that refuse both the station ceiling and a TxProfile but
+        accept a connector default, which they also apply to the running
+        transaction. Returns True only for an Accepted reply; anything else
+        raises a HomeAssistantError, as set_session_limit does. The profile
+        stays on the charger until it is replaced; nothing is cleared.
+        """
+        conn = int(connector_id)
+        prepared = await self.prepare_session_limit(conn, float(limit_amps))
+        # Preparation waits for the charger's inventory, which is what
+        # settles the target on 2.0.1, so it is checked after it.
+        if not self.session_default_target_known(conn):
+            raise HomeAssistantError(
+                f"the charger has not reported which EVSE connector {conn} is on"
+            )
+        request = self.build_session_default_request(
+            conn, session_default_profile_id(conn), prepared
+        )
+        try:
+            resp = await self.call(request)
+        except TimeoutError as ex:
+            raise HomeAssistantError(
+                f"the charger did not answer the default limit for connector {conn}"
+            ) from ex
+        except Exception as ex:
+            raise HomeAssistantError(
+                f"default limit for connector {conn} failed: {ex}"
+            ) from ex
+        status = getattr(resp, "status", None)
+        if status == ChargingProfileStatus.accepted:
+            return True
+        raise HomeAssistantError(
+            f"charger rejected the default limit for connector {conn} ({status})"
+        )
 
     async def set_session_limit(self, connector_id: int, limit_amps: float) -> bool:
         """Bind a TxProfile to the connector's displayed transaction.
@@ -1041,8 +1111,28 @@ class ChargePoint(cp):
 
         async_dispatcher_send(self.hass, DATA_UPDATED, active_entities)
 
-    def get_authorization_status(self, id_tag):
-        """Get the authorization status for an id_tag."""
+    def get_authorization_status(self, id_tag, connector_id=None):
+        """Get the authorization status for an id_tag and fire it as an event."""
+        auth_status = self._lookup_authorization_status(id_tag)
+        # Tags the charger accepts locally skip Authorize and only arrive
+        # with StartTransaction, so the event cannot live in on_authorize.
+        self.fire_authorization_event(id_tag, auth_status, connector_id)
+        return auth_status
+
+    def fire_authorization_event(self, id_tag, auth_status, connector_id=None):
+        """Fire an ocpp_authorization event for an authorization decision."""
+        self.hass.bus.async_fire(
+            EVENT_AUTHORIZATION,
+            {
+                "charge_point_id": self.id,
+                "connector_id": connector_id,
+                "id_tag": id_tag,
+                "authorization_status": auth_status,
+            },
+        )
+
+    def _lookup_authorization_status(self, id_tag):
+        """Look up the authorization status for an id_tag."""
         # authorize if its the tag of this charger used for remote start_transaction
         if id_tag == self._remote_id_tag:
             return AuthorizationStatus.accepted.value

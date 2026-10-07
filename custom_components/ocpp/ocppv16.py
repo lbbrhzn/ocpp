@@ -999,6 +999,37 @@ class ChargePoint(cp):
             },
         )
 
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxDefaultProfile for one connector.
+
+        The id and the stack level one below the reported maximum (at least
+        1) are the ones the set_charge_rate action uses for its
+        TxDefaultProfile leg, so the two address one profile. It is the shape
+        0.11.4 sent after a refused station ceiling, which chargers in #2158
+        apply. A reported maximum of 0 is still honoured.
+        """
+        maximum = int(prepared["stack_level"])
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: min(maximum, max(1, maximum - 1)),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
+                om.charging_schedule: {
+                    om.charging_rate_unit: prepared["unit"],
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: prepared["value"]}
+                    ],
+                },
+            },
+        )
+
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
         """Set only a station ceiling; transaction defaults cannot replace one."""
         try:
@@ -1532,11 +1563,17 @@ class ChargePoint(cp):
 
         self._ensure_tx_store_loaded()
         transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
-        tx_has_id: bool = transaction_id not in (None, 0)
-        if tx_has_id:
+        if transaction_id:
             # Seeing an id, including on closing values, is enough to keep a
             # later allocation clear of it; it does not make the id live.
             self._note_transaction_id(transaction_id)
+        if connector_id == 0:
+            # Connector 0 is the charge point itself and never runs a
+            # transaction. A charger may still tag its station meter with the
+            # running session's id; adopting it would record that id on two
+            # connectors, and the StopTransaction could then not be attributed.
+            transaction_id = 0
+        tx_has_id: bool = transaction_id not in (None, 0)
         tx_end_context = any(
             sampled_value.get(om.context) == ReadingContext.transaction_end.value
             for bucket in meter_value
@@ -1565,6 +1602,12 @@ class ChargePoint(cp):
                 except (ValueError, TypeError):
                     value = None
             self._metrics[ms_key].value = value
+
+        if connector_id == 0 and self._metrics[tx_key].value is None:
+            # Nor may connector 0 restore one: its HA fallback is the flattened
+            # sensor, which on a single-connector charger shows connector 1's
+            # session.
+            self._metrics[tx_key].value = 0
 
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id, connector_id)
@@ -1818,7 +1861,7 @@ class ChargePoint(cp):
         """Handle a Start Transaction request."""
 
         self._ensure_tx_store_loaded()
-        auth_status = self.get_authorization_status(id_tag)
+        auth_status = self.get_authorization_status(id_tag, connector_id)
         if auth_status == AuthorizationStatus.accepted.value:
             tx_id = self._allocate_transaction_id()
             self._ended_tx.pop(connector_id, None)

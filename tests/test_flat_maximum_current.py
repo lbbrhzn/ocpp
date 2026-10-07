@@ -819,3 +819,216 @@ async def test_session_entity_forgets_a_confirmation_after_a_boot(
 
     await entity.async_set_native_value(7)
     assert entity.native_value == 7
+
+
+def _restore_session(hass, value, attributes):
+    entity_id = "number.test_cpid_session_current_limit"
+    data = NumberExtraStoredData(48, 0, 1, UnitOfElectricCurrent.AMPERE, value)
+    mock_restore_cache_with_extra_data(
+        hass, [(State(entity_id, str(value), attributes), data.as_dict())]
+    )
+
+
+async def test_default_profile_session_entity_needs_no_transaction(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """With the option on, the slider writes a connector TxDefaultProfile."""
+    from ocpp.v16.enums import ChargingProfileStatus
+
+    from custom_components.ocpp.number import SessionDefaultLimitNumber
+
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    assert isinstance(entity, SessionDefaultLimitNumber)
+    assert not entity.available
+    assert entity.native_value is None
+
+    cp = _attach_protocol(hass, flat_entry, central)
+    assert entity.available  # no transaction, connector status unknown
+    assert entity.extra_state_attributes == {
+        "profile_purpose": "TxDefaultProfile",
+        "profile_id": 2001,
+        "confirmed_current": None,
+    }
+
+    sent = []
+
+    async def configuration(key):
+        if key == ConfigurationKey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ConfigurationKey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", accept)
+
+    await entity.async_set_native_value(10)
+    assert entity.native_value == 10
+    assert sent[-1].connector_id == 1
+    profile = sent[-1].cs_charging_profiles
+    assert profile["chargingProfileId"] == 2001
+    assert profile["stackLevel"] == 4
+    assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
+    assert "transactionId" not in profile
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
+    assert hass.states.get(entity.entity_id).attributes["profile_purpose"] == (
+        "TxDefaultProfile"
+    )
+
+    # The profile outlives transactions, so the value does too.
+    _charging(cp, 1, 55)
+    assert entity.native_value == 10
+    _charging(cp, 1, None)
+    assert entity.native_value == 10
+    assert entity.available
+
+    async def not_supported(request):
+        sent.append(request)
+        return SimpleNamespace(status="NotSupported")
+
+    monkeypatch.setattr(cp, "call", not_supported)
+    with pytest.raises(HomeAssistantError, match="NotSupported"):
+        await entity.async_set_native_value(6)
+    assert entity.native_value == 10  # back to the last accepted value
+    assert entity.extra_state_attributes["confirmed_current"] == 10
+
+    cp._attr_supported_features = 0
+    assert not entity.available
+
+
+async def test_default_profile_session_entity_works_on_201(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """On 2.0.1 the slider is available without a transaction and sets the EVSE default."""
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
+    cp._inventory = InventoryReport(
+        evse_count=1,
+        connector_count=[1],
+        charging_rate_units=frozenset({"A"}),
+        profile_stack_level=3,
+    )
+    cp._build_connector_map()
+    assert entity.available
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    monkeypatch.setattr(cp, "call", accept)
+    await entity.async_set_native_value(12)
+    assert entity.native_value == 12
+    assert sent[-1].evse_id == 1
+    profile = sent[-1].charging_profile
+    assert (profile["id"], profile["stack_level"]) == (2001, 2)
+    assert profile["charging_profile_purpose"] == "TxDefaultProfile"
+
+
+async def test_default_profile_session_entity_waits_for_the_evse_mapping_on_201(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """No persistent profile goes to a guessed EVSE before the charger names it."""
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
+    cp.post_connect_success = True
+    cp.num_connectors = 1
+    # Capabilities without connector topology: no mapping can be built yet.
+    cp._inventory = InventoryReport(
+        charging_rate_units=frozenset({"A"}), profile_stack_level=3
+    )
+    cp._inventory_mapping_pending = False
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    monkeypatch.setattr(cp, "call", accept)
+    assert not entity.available
+    with pytest.raises(HomeAssistantError, match="which EVSE connector 1 is on"):
+        await entity.async_set_native_value(6)
+    assert sent == []
+    assert entity.native_value is None
+
+    # The first reported pair becomes logical connector 1.
+    cp.on_status_notification("2026-10-04T00:00:00Z", "Available", 2, 1)
+    assert entity.available
+    await entity.async_set_native_value(6)
+    assert sent[-1].evse_id == 2
+    assert entity.native_value == 6
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        ({"profile_purpose": "TxDefaultProfile"}, 12),
+        ({"transaction_id": "55", "profile_id": 3001}, None),
+        ({}, None),
+    ],
+)
+async def test_default_profile_session_entity_restores_only_its_own_value(
+    hass, flat_entry, setup_flat, attributes, expected
+):
+    """The charger keeps a default profile; a transaction-bound value has ended."""
+    _restore_session(hass, 12, attributes)
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    await setup_flat()
+    entity = _session_number(hass)
+    assert entity.native_value == expected
+    assert entity.extra_state_attributes["confirmed_current"] == expected
+
+
+async def test_default_profile_session_entity_ignores_an_unknown_restored_value(
+    hass, flat_entry, setup_flat
+):
+    """A restored state with no number stays unknown."""
+    _restore_session(hass, None, {"profile_purpose": "TxDefaultProfile"})
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    await setup_flat()
+    assert _session_number(hass).native_value is None
+
+
+async def test_default_profile_session_entity_saves_only_what_was_accepted(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A request in flight is never saved as a limit, and a cancel reverts it."""
+    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    _attach_protocol(hass, flat_entry, central)
+
+    async def accepted(_id, _connector, _value):
+        return True
+
+    monkeypatch.setattr(central, "set_session_default_charge_rate_amps", accepted)
+    await entity.async_set_native_value(32)
+
+    started = asyncio.Event()
+
+    async def stalled(_id, _connector, _value):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(central, "set_session_default_charge_rate_amps", stalled)
+    task = asyncio.create_task(entity.async_set_native_value(6))
+    await started.wait()
+    assert entity.native_value == 6  # optimistic display
+    assert entity.extra_restore_state_data.native_value == 32
+    assert entity.extra_state_attributes["confirmed_current"] == 32
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert entity.native_value == 32
+    assert hass.states.get(entity.entity_id).state == "32.0"
