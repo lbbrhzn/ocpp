@@ -269,6 +269,26 @@ async def test_measurands_configurable_is_exposed_when_known(hass):
     assert _attrs(cp2, cdet.config_keys)["measurands_configurable"] is False
 
 
+async def test_measurands_not_configurable_when_the_change_fails(hass):
+    """A ChangeConfiguration that raises marks measurands as not configurable."""
+    cp = _mk_cp16(hass)
+    cp.settings.monitored_variables = "Energy.Active.Import.Register"
+    config = {
+        **SIGEN_CONFIG,
+        "MeterValuesSampledData": "Energy.Active.Import.Register",
+    }
+    scripted = _scripted_call(config, SIGEN_READONLY)
+
+    async def failing_change(req, *args, **kwargs):
+        if isinstance(req, call.ChangeConfiguration):
+            raise TimeoutError("no reply")
+        return await scripted(req, *args, **kwargs)
+
+    cp.call = failing_change
+    await cp.post_connect()
+    assert _attrs(cp, cdet.config_keys)["measurands_configurable"] is False
+
+
 async def test_later_unknown_keys_update_an_existing_snapshot(hass):
     """An unknown key found after the snapshot is added to it."""
     cp = _mk_cp16(hass)
@@ -276,6 +296,19 @@ async def test_later_unknown_keys_update_an_existing_snapshot(hass):
     await cp.post_connect()
     assert await cp.get_configuration("WebSocketPingInterval") == "Unknown"
     assert "WebSocketPingInterval" in _attrs(cp, cdet.config_keys)["unknown_keys"]
+
+
+async def test_unknown_keys_accept_a_string_and_ignore_repeats(hass):
+    """A lone key string is accepted and a repeated key changes nothing."""
+    cp = _mk_cp16(hass)
+    cp.call = _scripted_call(SIGEN_CONFIG, SIGEN_READONLY)
+    await cp.post_connect()
+    cp._record_unknown_config_keys("WebSocketPingInterval")
+    attrs = _attrs(cp, cdet.config_keys)
+    assert "WebSocketPingInterval" in attrs["unknown_keys"]
+
+    cp._record_unknown_config_keys(["WebSocketPingInterval"])
+    assert _attrs(cp, cdet.config_keys) is attrs
 
 
 async def test_secrets_are_redacted_by_key_name(hass):
@@ -413,6 +446,20 @@ async def test_v16_boot_notification_keeps_every_field(hass):
     assert metric.extra_attr == fields
 
 
+async def test_failing_boot_record_is_only_logged(hass, caplog):
+    """A failure while recording the boot never escapes the boot handler."""
+    cp = _mk_cp16(hass)
+    cp.post_connect_success = True
+    caplog.set_level("DEBUG", logger="custom_components.ocpp")
+
+    def broken_refresh(metrics):
+        raise RuntimeError("refresh failed")
+
+    cp._async_refresh_metric_entities = broken_refresh
+    cp._record_boot_notification({"charge_point_vendor": "Sigenergy"})
+    assert "could not record boot notification: refresh failed" in caplog.text
+
+
 async def test_v201_boot_notification_flattens_charging_station(hass):
     """2.x chargingStation fields (modem nested) and reason are kept."""
     cp = _mk_cp201(hass)
@@ -423,6 +470,7 @@ async def test_v201_boot_notification_flattens_charging_station(hass):
             "vendor_name": "V",
             "serial_number": "SN",
             "firmware_version": "2.0",
+            "custom_data": None,
             "modem": {"iccid": "ICC", "imsi": "IMS"},
         },
         reason="PowerUp",
@@ -543,6 +591,8 @@ async def test_sensors_end_to_end(hass, socket_enabled):
                         charge_point_serial_number="CPSN1",
                         meter_type="DC-Meter",
                         meter_serial_number="MSN1",
+                        iccid="8961000000000000000",
+                        imsi="505010000000000",
                     )
                 )
                 assert await _wait_for(
@@ -575,6 +625,12 @@ async def test_sensors_end_to_end(hass, socket_enabled):
                 assert boot.attributes["meter_type"] == "DC-Meter"
                 assert boot.attributes["meter_serial_number"] == "MSN1"
                 assert boot.attributes["charge_point_vendor"] == "Sigenergy"
+                # SIM identifiers are shown but kept out of recorder history.
+                assert boot.attributes["iccid"] == "8961000000000000000"
+                assert boot.attributes["imsi"] == "505010000000000"
+                assert {"iccid", "imsi", "modem_iccid", "modem_imsi"} <= (
+                    boot.state_info["unrecorded_attributes"]
+                )
             finally:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
