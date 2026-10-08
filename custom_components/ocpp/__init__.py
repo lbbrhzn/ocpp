@@ -304,7 +304,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     dr = device_registry.async_get(hass)
 
     # Create Central System device
-    dr.async_get_or_create(
+    central_device = dr.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, central_sys.id)},
         name=central_sys.id,
@@ -315,13 +315,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     for cp_data in entry.data[CONF_CPIDS]:
         for cp_id, cp_settings in cp_data.items():
             cpid = cp_settings[CONF_CPID]
-            dr.async_get_or_create(
+            charger_kwargs: dict = dict(
                 config_entry_id=entry.entry_id,
                 identifiers={(DOMAIN, cp_id), (DOMAIN, cpid)},
                 name=cpid,
                 suggested_area="Garage",
-                via_device_id=central_sys.id,
             )
+            if cp_id != central_sys.id and cpid != central_sys.id:
+                charger_kwargs["via_device_id"] = central_device.id
+            dr.async_get_or_create(**charger_kwargs)
 
     hass.data[DOMAIN][entry.entry_id] = central_sys
 

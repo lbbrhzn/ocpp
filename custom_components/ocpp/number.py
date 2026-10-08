@@ -18,7 +18,7 @@ from homeassistant.components.number import (
 from homeassistant.const import UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util import slugify
@@ -73,6 +73,11 @@ async def async_setup_entry(hass, entry, async_add_devices):
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
+
+        charger_device_id = dr.async_get_device_id_by_identifier(
+            hass, (DOMAIN, cpid), config_entry_id=entry.entry_id
+        )
+
         try:
             connector_count = max(1, int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1)))
         except (TypeError, ValueError):
@@ -156,6 +161,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                     connector_id=None,
                     op_connector_id=0,
                     fresh=fresh,
+                    charger_device_id=charger_device_id,
                 )
             )
 
@@ -175,6 +181,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                     connector_id,
                     connector_count,
                     max_cur,
+                    charger_device_id=charger_device_id,
                 )
             )
 
@@ -196,6 +203,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         connector_id: int | None = None,
         op_connector_id: int | None = None,
         fresh: bool = False,
+        charger_device_id: str | None = None,
     ):
         """Initialize a Number instance."""
         self.cpid = cpid
@@ -214,11 +222,15 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         self._attr_unique_id = ".".join(parts)
         self._attr_name = self.entity_description.name
         if self.connector_id:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
-                via_device=(DOMAIN, cpid),
-            )
+            device_info: DeviceInfo = {
+                "identifiers": {(DOMAIN, f"{cpid}-conn{self.connector_id}")},
+                "name": f"{cpid} Connector {self.connector_id}",
+            }
+            if charger_device_id is not None:
+                device_info["via_device_id"] = charger_device_id
+            else:
+                device_info["via_device"] = (DOMAIN, cpid)
+            self._attr_device_info = DeviceInfo(**device_info)
         else:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, cpid)},
@@ -398,6 +410,7 @@ class SessionCurrentLimitNumber(NumberEntity):
         connector_id: int,
         connector_count: int,
         max_current: float,
+        charger_device_id: str | None = None,
     ) -> None:
         """Initialize a connector-scoped session number."""
         self._hass = hass
@@ -429,11 +442,15 @@ class SessionCurrentLimitNumber(NumberEntity):
             )
             object_id = f"{cpid}_connector_{connector_id}_session_current_limit"
             self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{connector_id}")},
-                name=f"{cpid} Connector {connector_id}",
-                via_device=(DOMAIN, cpid),
-            )
+            device_info: DeviceInfo = {
+                "identifiers": {(DOMAIN, f"{cpid}-conn{connector_id}")},
+                "name": f"{cpid} Connector {connector_id}",
+            }
+            if charger_device_id is not None:
+                device_info["via_device_id"] = charger_device_id
+            else:
+                device_info["via_device"] = (DOMAIN, cpid)
+            self._attr_device_info = DeviceInfo(**device_info)
         # The value on display belongs to one transaction of one charger
         # generation: the id the connector shows plus the charger's boot
         # count, because a rebooted charger may reuse an id. When the key no
