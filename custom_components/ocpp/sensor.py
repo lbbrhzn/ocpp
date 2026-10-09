@@ -96,6 +96,9 @@ async def async_setup_entry(hass, entry, async_add_devices):
             HAChargerDetails.config_response,
             HAChargerDetails.data_response,
             HAChargerDetails.data_transfer,
+            HAChargerDetails.ocpp_version,
+            HAChargerDetails.config_keys,
+            HAChargerDetails.boot_notification,
         ]
 
         CONNECTOR_ONLY = measurands + [
@@ -205,6 +208,9 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
     """Individual sensor for charge point metrics."""
 
     _attr_has_entity_name = False
+    # SIM identifiers from the BootNotification stay visible on the Boot
+    # Notification sensor but are not written to the recorder history.
+    _unrecorded_attributes = frozenset({"iccid", "imsi", "modem_iccid", "modem_imsi"})
     entity_description: OcppSensorDescription
 
     def __init__(
@@ -317,6 +323,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         elif self.metric.lower().startswith("timestamp") or self.metric in [
             HAChargerDetails.config_response,
             HAChargerDetails.data_response,
+            HAChargerDetails.boot_notification,
             HAChargerStatuses.heartbeat,
         ]:
             device_class = SensorDeviceClass.TIMESTAMP
