@@ -8,6 +8,7 @@ import logging
 import re
 import time
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 from pytest_homeassistant_custom_component.common import async_capture_events
@@ -3352,6 +3353,72 @@ async def test_post_connect_defaults_to_core_after_feature_profile_timeout(
                 expected_features |= prof.SMART
             assert srv_cp._attr_supported_features == expected_features
             assert srv_cp.num_connectors > 0
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9130, "cp_id": "CP_features_recheck", "cms": "cms_features_recheck"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_features_recheck"])
+@pytest.mark.parametrize("port", [9130])
+async def test_assumed_feature_profiles_are_rechecked(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Profiles assumed after a timeout are queried again once the charger answers."""
+    cs: CentralSystem = setup_config_entry
+    original_call = ServerCP.call
+    silent = True
+
+    async def timeout_feature_profiles(self, req):
+        if (
+            silent
+            and isinstance(req, call.GetConfiguration)
+            and req.key == [ckey.supported_feature_profiles]
+        ):
+            raise TimeoutError("no SupportedFeatureProfiles response")
+        return await original_call(self, req)
+
+    monkeypatch.setattr(ServerCP, "call", timeout_feature_profiles, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            await srv_cp.post_connect()
+            assert srv_cp._features_assumed is True
+            notify = mock.AsyncMock()
+            monkeypatch.setattr(srv_cp, "notify_ha", notify)
+
+            # Still silent: the recheck fails quietly and keeps Core
+            srv_cp._schedule_features_recheck()
+            await srv_cp._features_recheck_task
+            assert srv_cp._features_assumed is True
+            assert prof.REM not in srv_cp._attr_supported_features
+            notify.assert_not_awaited()
+
+            # The charger answers now: the real profiles replace the assumption
+            silent = False
+            srv_cp._schedule_features_recheck()
+            await srv_cp._features_recheck_task
+            assert srv_cp._features_assumed is False
+            assert prof.REM in srv_cp._attr_supported_features
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
