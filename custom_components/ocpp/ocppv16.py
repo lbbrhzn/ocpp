@@ -921,6 +921,11 @@ class ChargePoint(cp):
             stack_level = int(stack_level_resp)
         except Exception:
             stack_level = 1
+        # The 1.6 spec reads as both a maximum value and a count; some
+        # chargers (Timxon A0, Morek MEV11, ABB Terra AC) take it as a count.
+        if self.settings.stack_level_below_max:
+            stack_level -= 1
+        stack_level = max(0, stack_level)
 
         return units_value, limit_value, stack_level
 
@@ -974,7 +979,7 @@ class ChargePoint(cp):
                 if source_watts is not None
                 else float(limit_amps)
             ),
-            "stack_level": max(0, int(stack_level)),
+            "stack_level": int(stack_level),
             "target": connector_id,
             "conversion_voltage": voltage if converted else None,
             "conversion_phases": phases if converted else None,
@@ -1013,18 +1018,16 @@ class ChargePoint(cp):
     ):
         """Build a Relative TxDefaultProfile for one connector.
 
-        The id and the stack level one below the reported maximum (at least
-        1) are the ones the set_charge_rate action uses for its
-        TxDefaultProfile leg, so the two address one profile. It is the shape
-        0.11.4 sent after a refused station ceiling, which chargers in #2158
-        apply. A reported maximum of 0 is still honoured.
+        The id and the stack level are the ones the set_charge_rate action
+        uses for its TxDefaultProfile leg, so the two address one profile. It
+        is the shape 0.11.4 sent after a refused station ceiling, which
+        chargers in #2158 apply.
         """
-        maximum = int(prepared["stack_level"])
         return call.SetChargingProfile(
             connector_id=int(connector_id),
             cs_charging_profiles={
                 om.charging_profile_id: int(profile_id),
-                om.stack_level: min(maximum, max(1, maximum - 1)),
+                om.stack_level: int(prepared["stack_level"]),
                 om.charging_profile_kind: ChargingProfileKindType.relative.value,
                 om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
                 om.charging_schedule: {
@@ -1063,8 +1066,10 @@ class ChargePoint(cp):
                 translation_key="set_variables_error",
                 translation_placeholders={
                     "message": f"ChargePointMaxProfile: {status}"
+                    f"{self._stack_level_hint(stack_level, status)}"
                 },
             )
+        self._note_accepted_stack_level(stack_level)
         return True
 
     async def set_charge_rate(
@@ -1126,10 +1131,12 @@ class ChargePoint(cp):
             )
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
+                self._note_accepted_stack_level(stack_level)
                 return True
             _LOGGER.debug(
-                "ChargePointMaxProfile not accepted (%s); will continue.",
+                "ChargePointMaxProfile not accepted (%s)%s; will continue.",
                 resp.status,
+                self._stack_level_hint(stack_level, resp.status),
             )
         except Exception as ex:
             _LOGGER.debug("ChargePointMaxProfile call raised: %s", ex)
@@ -1153,14 +1160,13 @@ class ChargePoint(cp):
         # If an active transaction exists on this connector, try TxProfile first (affects ongoing charging)
         if active_tx_id > 0:
             try:
-                txp_stack = max(1, stack_level)  # keep same or higher than defaults
                 req = call.SetChargingProfile(
                     connector_id=target_cid,
                     cs_charging_profiles={
                         om.charging_profile_id: _profile_id(
                             ChargingProfilePurposeType.tx_profile.value, target_cid
                         ),
-                        om.stack_level: txp_stack,
+                        om.stack_level: stack_level,
                         om.charging_profile_kind: ChargingProfileKindType.relative.value,
                         om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
                         om.charging_schedule: _mk_schedule(units_value, limit_value),
@@ -1171,6 +1177,7 @@ class ChargePoint(cp):
                 resp = await self.call(req)
                 if resp.status == ChargingProfileStatus.accepted:
                     txp_ok = True
+                    self._note_accepted_stack_level(stack_level)
                 else:
                     _LOGGER.debug("TxProfile not accepted (%s).", resp.status)
             except Exception as ex:
@@ -1178,16 +1185,13 @@ class ChargePoint(cp):
 
         # Always attempt TxDefaultProfile as well (for future sessions)
         try:
-            tx_stack = max(
-                1, stack_level - 1
-            )  # slightly lower to avoid overriding TxProfile
             req = call.SetChargingProfile(
                 connector_id=target_cid,
                 cs_charging_profiles={
                     om.charging_profile_id: _profile_id(
                         ChargingProfilePurposeType.tx_default_profile.value, target_cid
                     ),
-                    om.stack_level: tx_stack,
+                    om.stack_level: stack_level,
                     om.charging_profile_kind: ChargingProfileKindType.relative.value,
                     om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
                     om.charging_schedule: _mk_schedule(units_value, limit_value),
@@ -1196,6 +1200,7 @@ class ChargePoint(cp):
             resp = await self.call(req)
             if resp.status == ChargingProfileStatus.accepted:
                 txd_ok = True
+                self._note_accepted_stack_level(stack_level)
             else:
                 _LOGGER.debug("Set TxDefaultProfile rejected: %s", resp.status)
                 if txp_ok:

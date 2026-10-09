@@ -34,7 +34,11 @@
                     "force_smart_charging": "Force Smart Charging feature profile",
                     "charge_point_max_profile_absolute": "Send the station charging limit as an absolute schedule",
                     "session_limit_default_profile": "Send Session Current Limit as a default profile, settable at any time",
+                    "stack_level_below_max": "Charger accepts only stack levels below its reported maximum (OCPP 1.6)",
                     "enable_ha_notifications": "Enable Home Assistant notifications"
+                },
+                "data_description": {
+                    "stack_level_below_max": "Send charging profiles one level below the ChargeProfileMaxStackLevel the charger reports. Enable it if the charger rejects profiles at the level it reports, as Timxon A0, Morek MEV11 and ABB Terra AC do."
                 }
             },
             "measurands": {
@@ -148,7 +152,11 @@
                     "force_smart_charging": "Force Smart Charging feature profile",
                     "charge_point_max_profile_absolute": "Send the station charging limit as an absolute schedule",
                     "session_limit_default_profile": "Send Session Current Limit as a default profile, settable at any time",
+                    "stack_level_below_max": "Charger accepts only stack levels below its reported maximum (OCPP 1.6)",
                     "enable_ha_notifications": "Enable Home Assistant notifications"
+                },
+                "data_description": {
+                    "stack_level_below_max": "Send charging profiles one level below the ChargeProfileMaxStackLevel the charger reports. Enable it if the charger rejects profiles at the level it reports, as Timxon A0, Morek MEV11 and ABB Terra AC do."
                 }
             },
             "measurands": {

@@ -308,6 +308,10 @@ class ChargePoint(cp):
         # Indicates if the charger requires a reboot to apply new
         # configuration.
         self._requires_reboot = False
+        # Stack levels at which the charger has accepted a profile since
+        # Home Assistant started. A charger that accepted one at a level does
+        # not refuse that level, so a later refusal there has another cause.
+        self._accepted_stack_levels: set[int] = set()
         self.preparing = asyncio.Event()
         self.active_transaction_id: int = 0
         self.triggered_boot_notification = False
@@ -561,9 +565,11 @@ class ChargePoint(cp):
             ) from ex
         status = getattr(resp, "status", None)
         if status == ChargingProfileStatus.accepted:
+            self._note_accepted_stack_level(int(prepared["stack_level"]))
             return True
         raise HomeAssistantError(
             f"charger rejected the default limit for connector {conn} ({status})"
+            + self._stack_level_hint(int(prepared["stack_level"]), status)
         )
 
     async def set_session_limit(self, connector_id: int, limit_amps: float) -> bool:
@@ -610,9 +616,11 @@ class ChargePoint(cp):
         status = getattr(resp, "status", None)
         # Both protocols answer with the same word, so the 1.6 enum serves both.
         if status == ChargingProfileStatus.accepted:
+            self._note_accepted_stack_level(int(prepared["stack_level"]))
             return True
         raise HomeAssistantError(
             f"charger rejected the session limit for connector {conn} ({status})"
+            + self._stack_level_hint(int(prepared["stack_level"]), status)
         )
 
     async def set_charge_rate(
@@ -1167,6 +1175,36 @@ class ChargePoint(cp):
             if metric is not None and getattr(metric, "value", None) is not None:
                 return metric
         return None
+
+    def _note_accepted_stack_level(self, stack_level: int) -> None:
+        """Remember that the charger takes profiles at this level."""
+        self._accepted_stack_levels.add(int(stack_level))
+
+    def _stack_level_hint(self, stack_level: int, status=None) -> str:
+        """Name the level of a refused profile and, on 1.6, maybe the option.
+
+        The option is for chargers that read the 1.6 ChargeProfileMaxStackLevel
+        as a count, so it is suggested only on 1.6, while it is off, and above
+        level 0. Only for a Rejected or NotSupported reply: ABB Terra AC
+        answers Rejected at its reported maximum, Timxon A0 and Morek MEV11
+        answer NotSupported. And not once the charger has accepted a profile at
+        this level, which proves the level is not the cause.
+        """
+        hint = f" at stackLevel {stack_level}"
+        if (
+            self._ocpp_version == "1.6"
+            and stack_level > 0
+            and not self.settings.stack_level_below_max
+            and status
+            in (ChargingProfileStatus.rejected, ChargingProfileStatus.not_supported)
+            and stack_level not in self._accepted_stack_levels
+        ):
+            hint += (
+                ". Some chargers accept only levels below the maximum they"
+                " report; if this one does, enable 'Charger accepts only stack"
+                " levels below its reported maximum' in the charger options"
+            )
+        return hint
 
     def _line_voltage(self, conn_id: int) -> float:
         """Return a plausible line-to-neutral voltage, or the 230 V default."""

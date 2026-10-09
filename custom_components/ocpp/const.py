@@ -37,6 +37,7 @@ CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
 CONF_SSL_CERTFILE_PATH = "ssl_certfile_path"
 CONF_SSL_KEYFILE_PATH = "ssl_keyfile_path"
+CONF_STACK_LEVEL_BELOW_MAX = "stack_level_below_max"
 CONF_STEP = input_number.CONF_STEP
 CONF_SUBPROTOCOL = "subprotocol"
 CONF_UNIT_OF_MEASUREMENT = ha.CONF_UNIT_OF_MEASUREMENT
@@ -60,6 +61,7 @@ DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE = False
 DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
+DEFAULT_STACK_LEVEL_BELOW_MAX = False
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
 # Anchor used when the station ceiling (ChargePointMaxProfile / 1.6,
 # ChargingStationMaxProfile / 2.0.1+) is sent as an absolute schedule
@@ -201,6 +203,9 @@ class ChargerSystemSettings:
     num_connectors: int = DEFAULT_NUM_CONNECTORS
     charge_point_max_profile_absolute: bool = DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE
     session_limit_default_profile: bool = DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE
+    # OCPP 1.6: send managed profiles one level below the reported
+    # ChargeProfileMaxStackLevel, for chargers that read it as a count.
+    stack_level_below_max: bool = DEFAULT_STACK_LEVEL_BELOW_MAX
 
 
 @dataclass

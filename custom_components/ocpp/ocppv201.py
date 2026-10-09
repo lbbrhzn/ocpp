@@ -928,10 +928,8 @@ class ChargePoint(cp):
     ):
         """Build a Relative 2.0.1 TxDefaultProfile on the connector's EVSE.
 
-        The same shape as 1.6: one stack level below the reported maximum,
-        at least 1, without exceeding a reported maximum of 0.
+        The same shape as 1.6: the stack level of the session TxProfile.
         """
-        maximum = int(prepared["stack_level"])
         schedule = {
             "id": 1,
             "charging_rate_unit": prepared["unit"],
@@ -941,7 +939,7 @@ class ChargePoint(cp):
         }
         profile = {
             "id": int(profile_id),
-            "stack_level": min(maximum, max(1, maximum - 1)),
+            "stack_level": int(prepared["stack_level"]),
             "charging_profile_purpose": ChargingProfilePurposeEnumType.tx_default_profile.value,
             "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
             "charging_schedule": [schedule],

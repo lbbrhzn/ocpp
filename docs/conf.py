@@ -16,6 +16,8 @@ extensions = [
     "myst_parser",
 ]
 source_suffix = [".rst", ".md"]
+# Anchors for headings up to level 3, so links like page.md#heading resolve.
+myst_heading_anchors = 3
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),

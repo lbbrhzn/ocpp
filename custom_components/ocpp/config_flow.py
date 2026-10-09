@@ -32,6 +32,7 @@ from .const import (
     CONF_SSL,
     CONF_SSL_CERTFILE_PATH,
     CONF_SSL_KEYFILE_PATH,
+    CONF_STACK_LEVEL_BELOW_MAX,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
     DEFAULT_SSL_KEYFILE_PATH,
+    DEFAULT_STACK_LEVEL_BELOW_MAX,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
@@ -116,6 +118,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
             default=DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
         ): bool,
         vol.Required(
+            CONF_STACK_LEVEL_BELOW_MAX, default=DEFAULT_STACK_LEVEL_BELOW_MAX
+        ): bool,
+        vol.Required(
             CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
     }
@@ -129,19 +134,21 @@ STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
 )
 
 
-def _store_session_default_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
-    """Drop session_limit_default_profile from a charger record unless it is on.
+# Options added after 0.12.0, stored only while they are on.
+_STORED_ONLY_WHEN_ON = (CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX)
 
-    Releases before it expand the record into ChargerSystemSettings and fail
-    on a key they do not know. Leaving it out while it is off keeps a
-    rollback safe for every charger that never enabled it.
+
+def _store_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
+    """Drop the _STORED_ONLY_WHEN_ON options from a charger record while off.
+
+    Releases up to 0.12.0 expand the record into ChargerSystemSettings and
+    fail on a key they do not know. Leaving the options out while they are
+    off keeps a rollback safe for every charger that never enabled them.
     """
-    if settings.get(CONF_SESSION_LIMIT_DEFAULT_PROFILE):
-        return settings
     return {
         key: value
         for key, value in settings.items()
-        if key != CONF_SESSION_LIMIT_DEFAULT_PROFILE
+        if key not in _STORED_ONLY_WHEN_ON or value
     }
 
 
@@ -283,7 +290,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "duplicate_cpid"
 
             if not errors:
-                cp_data = _store_session_default_only_when_on(
+                cp_data = _store_only_when_on(
                     {
                         **user_input,
                         CONF_NUM_CONNECTORS: self._detected_num_connectors,
@@ -393,7 +400,7 @@ class OCPPOptionsFlow(OptionsFlow):
         cpids = [
             {
                 cp_id: (
-                    _store_session_default_only_when_on({**stored, **self._settings})
+                    _store_only_when_on({**stored, **self._settings})
                     if cp_id == self._cp_id
                     else stored
                 )
@@ -497,6 +504,12 @@ class OCPPOptionsFlow(OptionsFlow):
                     default=current.get(
                         CONF_SESSION_LIMIT_DEFAULT_PROFILE,
                         DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_STACK_LEVEL_BELOW_MAX,
+                    default=current.get(
+                        CONF_STACK_LEVEL_BELOW_MAX, DEFAULT_STACK_LEVEL_BELOW_MAX
                     ),
                 ): bool,
                 vol.Required(
