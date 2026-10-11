@@ -72,6 +72,14 @@ OCPP 1.6 describes `ChargeProfileMaxStackLevel` both as the highest level and as
 
 When the charger refuses a profile, the error names the stack level that was sent. On 1.6, while the option is off, a `Rejected` or `NotSupported` reply also mentions the option, unless the charger has already accepted a profile at that level since Home Assistant started.
 
+On 1.6 the integration reads `ChargeProfileMaxStackLevel` and `ChargingScheduleAllowedChargingRateUnit` when it first sets a managed limit, then keeps them:
+
+* They are read again only after Home Assistant restarts or the integration reloads. Reload it after a firmware update that changes them.
+* A read that fails, or a stack level answer without a value, fails that limit. The next limit reads again.
+* A charger that answers that it does not know `ChargeProfileMaxStackLevel` is sent level 1, as earlier releases did, or 0 with the stack level option. OCPP 1.6 requires the key for smart charging, so a warning is logged.
+* Any other stack level that is not a number fails every managed limit, instead of a guessed level: a profile below one the charger already holds would be accepted without effect.
+* A charger that does not report the rate unit is sent amps.
+
 Upgrade notes:
 
 * Earlier releases sent the 1.6 `TxDefaultProfile`, and the default-profile session limit below, one level below the reported maximum. That happened to work around the chargers above. Now every managed profile uses the same level, so on those chargers enable the option.
