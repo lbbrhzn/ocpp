@@ -416,33 +416,40 @@ async def test_station_without_smart_charging_sends_nothing(slider16):
 
 
 @pytest.mark.parametrize("connector", [None, 0, 2])
-async def test_service_keeps_connector_fallbacks(slider16, connector):
-    """Omitted, zero and explicit action connectors still use the full legacy chain."""
+async def test_service_fails_when_the_station_ceiling_is_refused(slider16, connector):
+    """The action sends only the station ceiling, and a refusal fails it."""
     _, cp, central = slider16
-    cp.call.side_effect = [
-        SimpleNamespace(status=s) for s in ("Rejected", "Accepted", "Accepted")
-    ]
+    cp.call.side_effect = [SimpleNamespace(status="Rejected")]
     data = {"devid": "test_cpid", "limit_amps": 16}
     if connector is not None:
         data["conn_id"] = connector
-    await central.handle_set_charge_rate(SimpleNamespace(data=data))
-    target = connector or 1
+    with pytest.raises(HomeAssistantError, match="ChargePointMaxProfile: Rejected"):
+        await central.handle_set_charge_rate(SimpleNamespace(data=data))
     requests = [c.args[0] for c in cp.call.call_args_list]
     assert [
         (r.connector_id, r.cs_charging_profiles["chargingProfilePurpose"])
         for r in requests
-    ] == [
-        (0, "ChargePointMaxProfile"),
-        (target, "TxProfile"),
-        (target, "TxDefaultProfile"),
-    ]
-    assert requests[1].cs_charging_profiles["transactionId"] == cp._active_tx[target]
-    assert "transactionId" not in requests[2].cs_charging_profiles
-    assert [r.cs_charging_profiles["chargingProfileId"] for r in requests] == [
-        1000,
-        3000 + target,
-        2000 + target,
-    ]
+    ] == [(0, "ChargePointMaxProfile")]
+
+
+async def test_service_fails_on_a_refused_custom_profile(slider16):
+    """A custom profile the charger rejects fails the action too."""
+    _, cp, central = slider16
+    cp.call.side_effect = [SimpleNamespace(status="Rejected")]
+    profile = {
+        "chargingProfileId": 9001,
+        "stackLevel": 1,
+        "chargingProfilePurpose": "TxDefaultProfile",
+        "chargingProfileKind": "Relative",
+        "chargingSchedule": {
+            "chargingRateUnit": "A",
+            "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 10}],
+        },
+    }
+    data = {"devid": "test_cpid", "conn_id": 1, "custom_profile": profile}
+    with pytest.raises(HomeAssistantError) as err:
+        await central.handle_set_charge_rate(SimpleNamespace(data=data))
+    assert err.value.translation_placeholders["message"] == "custom profile: Rejected"
 
 
 @pytest.mark.parametrize(

@@ -2602,7 +2602,7 @@ async def test_set_charge_rate_units_none_fallback_to_amps_and_accept_first(
                 srv_cp, "get_configuration", fake_get_conf, raising=True
             )
 
-            async def fake_call(req):
+            async def fake_call(req, **_kwargs):
                 if isinstance(req, call.ClearChargingProfile):
                     return SimpleNamespace(status="Accepted")
                 if isinstance(req, call.SetChargingProfile):
@@ -4666,7 +4666,11 @@ async def test_stop_below_meter_start_does_not_publish_a_negative(
 async def test_set_charge_rate_with_active_transaction(
     hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
 ):
-    """Ensure set_charge_rate uses TxProfile for ongoing session and also attempts TxDefaultProfile."""
+    """A refused ceiling fails set_charge_rate even with a session running.
+
+    The TxProfile and TxDefaultProfile belong to Session and Default Current
+    Limit, so the action does not fall back to them.
+    """
     cs = setup_config_entry
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
@@ -4693,28 +4697,21 @@ async def test_set_charge_rate_with_active_transaction(
 
             calls = []
 
-            async def fake_call(req):
+            async def fake_call(req, **_kwargs):
                 calls.append(req)
-                # Reject CP-max (connector_id == 0) so code proceeds to TxProfile + TxDefault
-                if getattr(req, "connector_id", None) == 0:
-                    return SimpleNamespace(status=ChargingProfileStatus.rejected)
-                # Accept TxProfile and TxDefaultProfile
-                return SimpleNamespace(status=ChargingProfileStatus.accepted)
+                return SimpleNamespace(status=ChargingProfileStatus.rejected)
 
             monkeypatch.setattr(srv, "get_configuration", fake_get_configuration)
 
             # Intercept outgoing SetChargingProfile calls
             monkeypatch.setattr(srv, "call", fake_call)
 
-            ok = await srv.set_charge_rate(limit_amps=16, conn_id=1)
-            assert ok is True
+            with pytest.raises(HomeAssistantError):
+                await srv.set_charge_rate(limit_amps=16, conn_id=1)
 
-            # We expect 3 calls: CP-max (rejected), TxProfile (accepted), TxDefault (accepted)
-            assert len(calls) == 3
+            # Only the ceiling, on connector 0.
+            assert len(calls) == 1
             assert getattr(calls[0], "connector_id", None) == 0
-            # The rest should target connector 1
-            assert getattr(calls[1], "connector_id", None) == 1
-            assert getattr(calls[2], "connector_id", None) == 1
 
         finally:
             task.cancel()
@@ -4734,7 +4731,7 @@ async def test_set_charge_rate_with_active_transaction(
 async def test_set_charge_rate_exception_paths(
     hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
 ):
-    """Drive the exception handlers in set_charge_rate: CP-max, TxProfile, TxDefault, and custom-profile branch."""
+    """Drive the exception handlers in set_charge_rate: the ceiling and the custom profile."""
     cs = setup_config_entry
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
@@ -4749,20 +4746,13 @@ async def test_set_charge_rate_exception_paths(
             # Make sure there is an active transaction on connector 1
             await client.send_start_transaction(0)
 
-            # Case A: CP-max raises, TxProfile raises, TxDefault succeeds → overall True
+            # Case A: the ceiling raises → the call fails, nothing else is sent
             call_count = 0
 
-            async def fake_call_case_a(req):
+            async def fake_call_case_a(req, **_kwargs):
                 nonlocal call_count
                 call_count += 1
-                # 1st call (CP-max) → raise
-                if call_count == 1:
-                    raise RuntimeError("cp-max boom")
-                # 2nd call (TxProfile) → raise
-                if call_count == 2:
-                    raise RuntimeError("tx-profile boom")
-                # 3rd call (TxDefault) → accept
-                return SimpleNamespace(status=ChargingProfileStatus.accepted)
+                raise RuntimeError("cp-max boom")
 
             # Ensure smart charging available
             srv._attr_supported_features = {prof.SMART}
@@ -4777,43 +4767,33 @@ async def test_set_charge_rate_exception_paths(
             monkeypatch.setattr(srv, "get_configuration", fake_get_configuration)
 
             monkeypatch.setattr(srv, "call", fake_call_case_a)
-            ok_a = await srv.set_charge_rate(limit_amps=10, conn_id=1)
-            assert ok_a is True
-            assert call_count == 3  # hit all branches
+            with pytest.raises(HomeAssistantError, match="cp-max boom"):
+                await srv.set_charge_rate(limit_amps=10, conn_id=1)
+            assert call_count == 1
 
-            # Case B: CP-max raises, TxProfile raises, TxDefault raises → overall False
-            call_count_b = 0
-
-            async def fake_call_case_b(req):
-                nonlocal call_count_b
-                call_count_b += 1
-                raise RuntimeError(f"boom-{call_count_b}")
-
-            monkeypatch.setattr(srv, "call", fake_call_case_b)
-            ok_b = await srv.set_charge_rate(limit_amps=12, conn_id=1)
-            assert ok_b is False
-            assert call_count_b >= 2  # at least CP-max + TxProfile tried
-
-            # Case C: Custom profile branch raises → returns False
+            # Case B: Custom profile branch raises → the call fails with the cause
             async def fake_call_custom(req):
                 raise RuntimeError("custom-profile boom")
 
             monkeypatch.setattr(srv, "call", fake_call_custom)
-            ok_c = await srv.set_charge_rate(
-                conn_id=1,
-                profile={
-                    # Minimal shape; actual content irrelevant since we stub .call
-                    "chargingProfileId": 4242,
-                    "stackLevel": 2,
-                    "chargingProfileKind": "Relative",
-                    "chargingProfilePurpose": "TxDefaultProfile",
-                    "chargingSchedule": {
-                        "chargingRateUnit": "A",
-                        "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 10}],
+            with pytest.raises(HomeAssistantError) as err:
+                await srv.set_charge_rate(
+                    conn_id=1,
+                    profile={
+                        # Minimal shape; actual content irrelevant since we stub .call
+                        "chargingProfileId": 4242,
+                        "stackLevel": 2,
+                        "chargingProfileKind": "Relative",
+                        "chargingProfilePurpose": "TxDefaultProfile",
+                        "chargingSchedule": {
+                            "chargingRateUnit": "A",
+                            "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 10}],
+                        },
                     },
-                },
+                )
+            assert "custom-profile boom" in str(
+                err.value.translation_placeholders["message"]
             )
-            assert ok_c is False
 
         finally:
             task.cancel()

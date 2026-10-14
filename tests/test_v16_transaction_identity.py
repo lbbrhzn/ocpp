@@ -42,7 +42,6 @@ from custom_components.ocpp.const import (
 from custom_components.ocpp.enums import (
     ConfigurationKey as ckey,
     HAChargerSession as csess,
-    OcppMisc as om,
     Profiles as prof,
 )
 from custom_components.ocpp.ocppv16 import ChargePoint, tx_store_key
@@ -616,32 +615,28 @@ async def test_global_remote_stop_skips_a_held_connector(
 async def test_no_tx_profile_is_bound_to_a_held_connector(
     hass, frozen_time, monkeypatch
 ):
-    """The 1.6 fallback must not bind a profile to an uncertain transaction."""
+    """The session limit must not bind a profile to an uncertain transaction."""
+    from homeassistant.exceptions import HomeAssistantError
+
     cp = _mk_cp(hass)
     await _settle(hass, cp)
     await _two_held(hass, cp)
     cp._attr_supported_features = prof.SMART
-    purposes = []
 
     async def configuration(key):
         if key == ckey.charging_schedule_allowed_charging_rate_unit:
             return "Current"
         return "5"
 
-    async def reject_station_profile(req):
-        purpose = req.cs_charging_profiles[om.charging_profile_purpose]
-        purposes.append(purpose)
-        accepted = purpose != "ChargePointMaxProfile"
-        return SimpleNamespace(status="Accepted" if accepted else "Rejected")
+    async def no_call(req, **_kwargs):
+        pytest.fail("no profile may be sent for a held connector")
 
     monkeypatch.setattr(cp, "get_configuration", configuration)
-    monkeypatch.setattr(cp, "call", reject_station_profile)
+    monkeypatch.setattr(cp, "call", no_call)
 
-    await cp.set_charge_rate(limit_amps=10, conn_id=1)
-    await hass.async_block_till_done()
-
-    assert "TxProfile" not in purposes
-    assert "TxDefaultProfile" in purposes
+    for connector in (1, 2):
+        with pytest.raises(HomeAssistantError):
+            await cp.set_session_limit(connector, 10)
 
 
 async def test_pending_stop_is_applied_to_the_connector_that_ended(hass, frozen_time):

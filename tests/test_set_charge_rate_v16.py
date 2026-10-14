@@ -69,10 +69,10 @@ def cp_v16():
 
 
 @pytest.mark.asyncio
-async def test_custom_profile_path_exception_triggers_notify_and_returns_false(
-    cp_v16, monkeypatch
-):
-    """1) When a custom profile is provided and the CP call raises, return False and notify HA."""
+async def test_custom_profile_path_exception_raises_without_notify(cp_v16, monkeypatch):
+    """A custom profile whose call raises fails the action once, without a notification."""
+    from homeassistant.exceptions import HomeAssistantError
+
     # notify capture
     notices = []
 
@@ -102,17 +102,19 @@ async def test_custom_profile_path_exception_triggers_notify_and_returns_false(
         },
     }
 
-    ok = await cp_v16.set_charge_rate(profile=profile, conn_id=2)
-    assert ok is False
-    assert len(notices) == 1
-    assert "Set charging profile failed" in notices[0]
+    with pytest.raises(HomeAssistantError) as err:
+        await cp_v16.set_charge_rate(profile=profile, conn_id=2)
+    assert err.value.translation_placeholders["message"] == "custom profile: boom"
+    assert notices == []
 
 
 @pytest.mark.asyncio
-async def test_custom_profile_rejected_status_returns_false_without_notify(
-    cp_v16, monkeypatch, caplog
+async def test_custom_profile_rejected_status_raises_with_the_status(
+    cp_v16, monkeypatch
 ):
-    """A custom profile the charger answers Rejected returns False and logs, without a notification."""
+    """A custom profile the charger answers Rejected fails naming the status."""
+    from homeassistant.exceptions import HomeAssistantError
+
     notices = []
 
     async def fake_notify(msg, title="Ocpp integration"):
@@ -140,111 +142,65 @@ async def test_custom_profile_rejected_status_returns_false_without_notify(
         },
     }
 
-    assert await cp_v16.set_charge_rate(profile=profile, conn_id=2) is False
+    with pytest.raises(HomeAssistantError) as err:
+        await cp_v16.set_charge_rate(profile=profile, conn_id=2)
+    assert err.value.translation_placeholders["message"] == "custom profile: Rejected"
     assert notices == []
-    assert "Custom SetChargingProfile rejected: Rejected" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_smart_charging_not_supported_returns_false_no_notify(
-    cp_v16, monkeypatch
-):
-    """2) If the charger doesn't advertise SMART profile, return False without notifications."""
+async def test_smart_charging_not_supported_fails_without_requests(cp_v16, monkeypatch):
+    """Without the SmartCharging profile the action fails before asking anything."""
+    from homeassistant.exceptions import HomeAssistantError
+
     cp_v16._attr_supported_features = prof.NONE
 
-    notices = []
-
-    async def fake_notify(msg, title="Ocpp integration"):
-        notices.append(msg)
-        return True
-
-    # get_configuration and call should not be called
     async def fake_get_conf(_key):
         pytest.fail("get_configuration should not be called when SMART not supported")
 
-    async def fake_call(_req):
+    async def fake_call(_req, **_kwargs):
         pytest.fail("call should not be called when SMART not supported")
 
-    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
     monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
     monkeypatch.setattr(cp_v16, "call", fake_call)
 
-    ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
-    assert ok is False
-    assert notices == []
+    with pytest.raises(HomeAssistantError) as err:
+        await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
+    assert "not supported" in err.value.translation_placeholders["message"]
+
+
+def _station_only_config(key: str):
+    if key == ckey.charging_schedule_allowed_charging_rate_unit:
+        return "Current"
+    if key == ckey.charge_profile_max_stack_level:
+        return "3"
+    pytest.fail(f"Unexpected get_configuration key: {key}")
 
 
 @pytest.mark.asyncio
-async def test_cpmax_exception_falls_back_to_txdefault_accepted_returns_true(
-    cp_v16, monkeypatch
-):
-    """3) CPMax path raises -> fallback to TxDefault which is accepted -> return True."""
+@pytest.mark.parametrize("failure", ["rejected", "error"])
+async def test_a_refused_station_ceiling_fails_the_action(cp_v16, monkeypatch, failure):
+    """No TxProfile or TxDefaultProfile fallback: the sliders own those profiles."""
+    from homeassistant.exceptions import HomeAssistantError
 
-    # Allow both A and stack level
+    cp_v16._active_tx = {2: 55}
+    sent = []
+
     async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit:
-            return "Current"  # supports Amps
-        if key == ckey.charge_profile_max_stack_level:
-            return "2"
-        pytest.fail(f"Unexpected get_configuration key: {key}")
+        return _station_only_config(key)
 
-    # First SetChargingProfile (CPMax connectorId=0) raises, second (TxDefault connectorId=2) accepted
-    async def fake_call(req):
-        purpose = req.cs_charging_profiles["chargingProfilePurpose"]
-        if purpose == ChargingProfilePurposeType.charge_point_max_profile.value:
+    async def fake_call(req, **_kwargs):
+        sent.append(req.cs_charging_profiles["chargingProfilePurpose"])
+        if failure == "error":
             raise RuntimeError("transport error")
-        if purpose == ChargingProfilePurposeType.tx_default_profile.value:
-            return SimpleNamespace(status=ChargingProfileStatus.accepted)
         return SimpleNamespace(status=ChargingProfileStatus.rejected)
-
-    notices = []
-
-    async def fake_notify(msg, title="Ocpp integration"):
-        notices.append(msg)
-        return True
 
     monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
     monkeypatch.setattr(cp_v16, "call", fake_call)
-    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
 
-    ok = await cp_v16.set_charge_rate(limit_amps=16, conn_id=2)
-    assert ok is True
-    # No user-facing warning necessary when fallback succeeds
-    assert notices == []
-
-
-@pytest.mark.asyncio
-async def test_cpmax_rejected_txdefault_accepted_returns_true(cp_v16, monkeypatch):
-    """4) CPMax rejected -> TxDefault accepted -> return True."""
-
-    async def fake_get_conf(key: str):
-        if key == ckey.charging_schedule_allowed_charging_rate_unit:
-            return "Current"
-        if key == ckey.charge_profile_max_stack_level:
-            return "3"
-        pytest.fail(f"Unexpected get_configuration key: {key}")
-
-    async def fake_call(req):
-        purpose = req.cs_charging_profiles["chargingProfilePurpose"]
-        if purpose == ChargingProfilePurposeType.charge_point_max_profile.value:
-            return SimpleNamespace(status=ChargingProfileStatus.rejected)
-        if purpose == ChargingProfilePurposeType.tx_default_profile.value:
-            return SimpleNamespace(status=ChargingProfileStatus.accepted)
-        return SimpleNamespace(status=ChargingProfileStatus.rejected)
-
-    notices = []
-
-    async def fake_notify(msg, title="Ocpp integration"):
-        notices.append(msg)
-        return True
-
-    monkeypatch.setattr(cp_v16, "get_configuration", fake_get_conf)
-    monkeypatch.setattr(cp_v16, "call", fake_call)
-    monkeypatch.setattr(cp_v16, "notify_ha", fake_notify)
-
-    ok = await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
-    assert ok is True
-    assert notices == []
+    with pytest.raises(HomeAssistantError):
+        await cp_v16.set_charge_rate(limit_amps=10, conn_id=2)
+    assert sent == [ChargingProfilePurposeType.charge_point_max_profile.value]
 
 
 def test_station_charge_rate_request_relative_by_default(cp_v16):
@@ -801,11 +757,9 @@ async def test_set_session_default_limit_v16_needs_no_transaction(cp_v16, monkey
 
 
 async def _levels_sent(cp, monkeypatch, reported):
-    """Run set_charge_rate with an active transaction; return levels per purpose.
+    """Set the station, session and default limits; return levels per purpose.
 
-    The station ceiling is refused so the TxProfile and TxDefaultProfile legs
-    are sent too. reported is what ChargeProfileMaxStackLevel answers or an
-    exception to raise.
+    reported is what ChargeProfileMaxStackLevel answers.
     """
     sent = {}
 
@@ -813,22 +767,20 @@ async def _levels_sent(cp, monkeypatch, reported):
         if key == ckey.charging_schedule_allowed_charging_rate_unit:
             return "Current"
         if key == ckey.charge_profile_max_stack_level:
-            if isinstance(reported, Exception):
-                raise reported
             return reported
         pytest.fail(f"Unexpected get_configuration key: {key}")
 
-    async def record(req):
+    async def record(req, **_kwargs):
         profile = req.cs_charging_profiles
         sent[profile["chargingProfilePurpose"]] = profile["stackLevel"]
-        if profile["chargingProfilePurpose"] == "ChargePointMaxProfile":
-            return SimpleNamespace(status=ChargingProfileStatus.rejected)
         return SimpleNamespace(status=ChargingProfileStatus.accepted)
 
     monkeypatch.setattr(cp, "get_configuration", configuration)
     monkeypatch.setattr(cp, "call", record)
-    cp._active_tx = {1: 55}
-    assert await cp.set_charge_rate(limit_amps=10, conn_id=1) is True
+    _show_transaction(cp, 1, 55)
+    assert await cp.set_station_charge_rate(10)
+    assert await cp.set_session_limit(1, 10)
+    assert await cp.set_session_default_limit(1, 10)
     return sent
 
 

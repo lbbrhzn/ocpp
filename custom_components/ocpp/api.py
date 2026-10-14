@@ -989,11 +989,22 @@ class CentralSystem:
         custom_profile = call.data.get("custom_profile", None)
         if custom_profile is not None:
             profile = _parse_custom_profile(custom_profile, cp.id)
-            await cp.set_charge_rate(profile=profile, conn_id=conn_id)
+            ok = await cp.set_charge_rate(profile=profile, conn_id=conn_id)
         elif watts is not None:
-            await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)
+            ok = await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)
         elif amps is not None:
-            await cp.set_charge_rate(limit_amps=amps, conn_id=conn_id)
+            ok = await cp.set_charge_rate(limit_amps=amps, conn_id=conn_id)
+        else:
+            return
+        # A refusal must reach the automation that asked, not only the log.
+        if ok is False:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": "the charger did not accept the request"
+                },
+            )
 
     @check_charger_available
     async def handle_configure(self, call, cp) -> ServiceResponse:
