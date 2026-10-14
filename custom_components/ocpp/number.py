@@ -339,7 +339,7 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
         try:
             ok = await self.central_system.set_max_charge_rate_amps(self.cpid, target)
         except HomeAssistantError:
-            # set_charge_rate raises this for a rejected profile, and its
+            # set_station_charge_rate raises this for a rejected profile, and its
             # message carries the charger's own status_info - the only
             # explanation of why. Surface it rather than restating it.
             self._revert_to_confirmed()

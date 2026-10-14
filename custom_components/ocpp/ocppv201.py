@@ -948,9 +948,19 @@ class ChargePoint(cp):
         }
         return call.SetChargingProfile(int(prepared["evse_id"]), profile)
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
-        """Use the managed station limit for the Maximum Current entity."""
-        return await self.set_charge_rate(limit_amps=limit_amps, conn_id=0)
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
+        """Use the managed station limit for the Maximum Current entity.
+
+        The station profile is always on evse_id 0, so conn_id is unused.
+        """
+        return await self.set_charge_rate(
+            limit_amps=limit_amps, limit_watts=limit_watts, conn_id=0
+        )
 
     async def set_charge_rate(
         self,
@@ -991,7 +1001,7 @@ class ChargePoint(cp):
             if resp.status != ChargingProfileStatusEnumType.accepted:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
-                    translation_key="set_variables_error",
+                    translation_key="set_charge_rate_error",
                     translation_placeholders={
                         "message": f"{str(resp.status)}: {str(resp.status_info)}"
                     },
@@ -1079,7 +1089,7 @@ class ChargePoint(cp):
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={
                     "message": f"{str(resp.status)}: {str(resp.status_info)}"
                 },
