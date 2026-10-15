@@ -10,6 +10,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from pytest_homeassistant_custom_component.common import async_capture_events
 from homeassistant.const import STATE_ON, UnitOfTime
 from homeassistant.exceptions import HomeAssistantError
 import websockets
@@ -1661,6 +1662,7 @@ async def test_get_authorization_status_with_auth_list(
         CONF_AUTH_LIST,
         CONF_ID_TAG,
         CONF_AUTH_STATUS,
+        EVENT_AUTHORIZATION,
     )
 
     # Start a minimal client so the server-side CP is registered.
@@ -1691,6 +1693,8 @@ async def test_get_authorization_status_with_auth_list(
         {CONF_ID_TAG: "TAG_NO_STATUS"},  # should fall back to default
     ]
 
+    events = async_capture_events(hass, EVENT_AUTHORIZATION)
+
     # 1) Early return path: remote id tag
     srv_cp._remote_id_tag = "REMOTE123"
     assert (
@@ -1714,6 +1718,30 @@ async def test_get_authorization_status_with_auth_list(
     assert (
         srv_cp.get_authorization_status("UNKNOWN") == AuthorizationStatus.blocked.value
     )
+
+    # 5) StartTransaction passes its connector
+    assert (
+        srv_cp.get_authorization_status("TAG_PRESENT", 2)
+        == AuthorizationStatus.expired.value
+    )
+
+    # Every decision is fired as an event, including the remote id tag
+    await hass.async_block_till_done()
+    assert [e.data for e in events] == [
+        {
+            "charge_point_id": cp_id,
+            "connector_id": connector_id,
+            "id_tag": id_tag,
+            "authorization_status": status,
+        }
+        for id_tag, status, connector_id in (
+            ("REMOTE123", AuthorizationStatus.accepted.value, None),
+            ("TAG_PRESENT", AuthorizationStatus.expired.value, None),
+            ("TAG_NO_STATUS", AuthorizationStatus.blocked.value, None),
+            ("UNKNOWN", AuthorizationStatus.blocked.value, None),
+            ("TAG_PRESENT", AuthorizationStatus.expired.value, 2),
+        )
+    ]
 
 
 @pytest.mark.timeout(20)
@@ -3271,6 +3299,59 @@ async def test_post_connect_fetch_supported_features_raises(
             await srv_cp.post_connect()
 
             assert getattr(srv_cp, "post_connect_success", False) is not True
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9122, "cp_id": "CP_postconn_timeout", "cms": "cms_postconn_timeout"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_postconn_timeout"])
+@pytest.mark.parametrize("port", [9122])
+async def test_post_connect_defaults_to_core_after_feature_profile_timeout(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """A stalled optional feature query must not abort charger setup."""
+    cs: CentralSystem = setup_config_entry
+    original_call = ServerCP.call
+
+    async def timeout_feature_profiles(self, req):
+        if isinstance(req, call.GetConfiguration) and req.key == [
+            ckey.supported_feature_profiles
+        ]:
+            raise TimeoutError("no SupportedFeatureProfiles response")
+        return await original_call(self, req)
+
+    monkeypatch.setattr(ServerCP, "call", timeout_feature_profiles, raising=True)
+
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        from tests.test_charge_point_v16 import ChargePoint
+
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            for _ in range(100):
+                if cp_id in cs.charge_points:
+                    break
+                await asyncio.sleep(0.02)
+            srv_cp = cs.charge_points[cp_id]
+
+            await srv_cp.post_connect()
+
+            assert srv_cp.post_connect_success is True
+            expected_features = prof.CORE
+            if srv_cp.settings.force_smart_charging:
+                expected_features |= prof.SMART
+            assert srv_cp._attr_supported_features == expected_features
+            assert srv_cp.num_connectors > 0
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

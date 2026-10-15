@@ -34,10 +34,14 @@ from custom_components.ocpp.const import (
     DEFAULT_METER_INTERVAL,
     DOMAIN as OCPP_DOMAIN,
     CONF_PORT,
+    EVENT_AUTHORIZATION,
     MEASURANDS,
 )
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_capture_events,
+)
 
 import ocpp
 from ocpp.routing import on
@@ -416,6 +420,25 @@ class ChargePoint(cpclass):
 async def _test_transaction(hass: HomeAssistant, cs: CentralSystem, cp: ChargePoint):
     cp_id = cp.id[:-7]
     cpid = cs.charge_points[cp_id].settings.cpid
+
+    # Token types the integration does not look up still fire an event
+    events = async_capture_events(hass, EVENT_AUTHORIZATION)
+    authorize_resp = await cp.call(
+        call.Authorize({"id_token": "EMAID1", "type": IdTokenEnumType.e_maid.value})
+    )
+    assert (
+        authorize_resp.id_token_info["status"]
+        == AuthorizationStatusEnumType.unknown.value
+    )
+    await hass.async_block_till_done()
+    assert [e.data for e in events] == [
+        {
+            "charge_point_id": cp_id,
+            "connector_id": None,
+            "id_tag": "EMAID1",
+            "authorization_status": AuthorizationStatusEnumType.unknown.value,
+        }
+    ]
 
     await set_switch(hass, cpid, "charge_control", True)
     assert len(cp.remote_starts) == 1

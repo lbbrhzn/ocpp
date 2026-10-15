@@ -29,6 +29,7 @@ from .const import (
     OCPP_2_0,
     OCPP_VERSION_AUTO,
     ChargerSystemSettings,
+    settings_from_config,
 )
 from .enums import (
     HAChargerServices as csvcs,
@@ -179,7 +180,7 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self.hass = hass
         self.entry = entry
-        self.settings = CentralSystemSettings(**entry.data)
+        self.settings = settings_from_config(CentralSystemSettings, entry.data)
         self.subprotocols = self._resolve_subprotocols(self.settings)
         self._server = None
         self.id = self.settings.csid
@@ -338,7 +339,9 @@ class CentralSystem:
                 for cfg in self.settings.cpids:
                     if cfg.get(cp_id):
                         config_flow = True
-                        cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
+                        cp_settings = settings_from_config(
+                            ChargerSystemSettings, list(cfg.values())[0]
+                        )
                         _LOGGER.info(
                             f"Charger match found for {cp_settings.cpid}:{cp_id}"
                         )
@@ -799,6 +802,38 @@ class CentralSystem:
                 translation_placeholders={"message": id},
             )
         return await cp.set_session_limit(int(connector_id), float(value))
+
+    def session_default_limit_available(self, id: str, connector_id: int) -> bool:
+        """Whether a connector's default session limit can be set right now.
+
+        The charger must be up with SmartCharging and have said where the
+        connector's profile goes. A TxDefaultProfile needs no transaction, so
+        the connector's status does not matter. The charge point checks the
+        target again before sending.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
+        if cp is None or cp.status != STATE_OK:
+            return False
+        if not bool(cp.supported_features & prof.SMART):
+            return False
+        return bool(cp.session_default_target_known(self._norm_conn(connector_id)))
+
+    async def set_session_default_charge_rate_amps(
+        self,
+        id: str,
+        connector_id: int,
+        value: float,
+    ) -> bool:
+        """Set a connector's default session limit."""
+        cp_id = self.cpids.get(id, id)
+        cp = self.charge_points.get(cp_id)
+        if cp is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unavailable",
+                translation_placeholders={"message": id},
+            )
+        return await cp.set_session_default_limit(int(connector_id), float(value))
 
     async def set_max_charge_rate_amps(
         self, id: str, value: float, connector_id: int = 0

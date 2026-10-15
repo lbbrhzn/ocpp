@@ -1262,3 +1262,110 @@ async def test_a_failing_hook_cannot_break_transaction_handling(
     await hass.async_block_till_done()
     assert cp._active_tx[1] == 0
     assert caplog.text.count("session hook failed") == 2
+
+
+# --------------------------------------------------------------------------
+# Connector 0 never carries a transaction
+# --------------------------------------------------------------------------
+
+
+def _station_meter_values(context: str = "Trigger") -> dict:
+    """MeterValues for connector 0, the charge point's own meter: no transaction."""
+    values = _meter_values(0, context=context)
+    values["connector_id"] = 0
+    values.pop("transaction_id")
+    return values
+
+
+async def test_station_meter_values_do_not_restore_a_transaction(hass, frozen_time):
+    """Connector 0's HA fallback is the flattened sensor of connector 1's session.
+
+    On a single-connector charger `sensor.<cpid>_transaction_id` shows the
+    running session, so restoring connector 0 from it would record that id on
+    two connectors.
+    """
+    running = 1_790_509_373
+    hass.states.async_set("sensor.test_cpid_transaction_id", str(running))
+    cp = _mk_cp(hass, connectors=1)
+    await _settle(hass, cp)
+
+    cp.on_meter_values(**_meter_values(running))
+    cp.on_meter_values(**_station_meter_values())
+    await hass.async_block_till_done()
+
+    assert cp._active_tx == {1: running, 0: 0}
+    assert cp._metrics[(0, csess.transaction_id)].value == 0
+
+
+async def test_stop_after_a_restart_mid_session_is_attributed(hass, frozen_time):
+    """Restart while charging, then a remote stop, in the order a Wallbox sends it.
+
+    The charger reports Finishing before its StopTransaction and then nothing
+    until the car is unplugged, so a stop left unattributed here is never
+    settled and Charge Control stays unavailable.
+    """
+    from .test_api_paths import _available_central_system
+
+    running = 1_790_509_373
+    hass.states.async_set("sensor.test_cpid_transaction_id", str(running))
+    cp = _mk_cp(hass, connectors=1)
+    await _settle(hass, cp)
+    cs, _ = _available_central_system(hass)
+    cs.charge_points["CP_OK"] = cp
+
+    cp.on_status_notification(1, "NoError", ChargePointStatus.charging.value)
+    cp.on_meter_values(**_meter_values(running))
+    cp.on_status_notification(1, "NoError", ChargePointStatus.finishing.value)
+    cp.on_meter_values(**_station_meter_values())
+    cp.on_stop_transaction(
+        meter_stop=571042, timestamp=None, transaction_id=running, reason="Remote"
+    )
+    await hass.async_block_till_done()
+
+    assert cp._tx_indeterminate == set()
+    assert cp._active_tx[1] == 0
+    assert cs.is_transaction_indeterminate("ok", 1) is False
+
+
+async def test_station_meter_values_do_not_pick_up_a_later_session(hass, frozen_time):
+    """With no HA state at start-up, connector 0 must not follow a later session."""
+    cp = _mk_cp(hass, connectors=1)
+    await _settle(hass, cp)
+    cp.on_meter_values(**_station_meter_values())
+    await hass.async_block_till_done()
+
+    tx_id = cp.on_start_transaction(1, "tag-a", 0).transaction_id
+    hass.states.async_set("sensor.test_cpid_transaction_id", str(tx_id))
+    cp.on_meter_values(**_station_meter_values())
+    cp.on_stop_transaction(meter_stop=5000, timestamp=None, transaction_id=tx_id)
+    await hass.async_block_till_done()
+
+    assert cp._tx_indeterminate == set()
+    assert cp._active_tx == {1: 0, 0: 0}
+
+
+async def test_station_meter_values_ignore_a_session_id(hass, frozen_time):
+    """A charger may tag connector 0's meter with the running session's id.
+
+    OCPP 1.6 allows a transactionId on any MeterValues, but connector 0 runs no
+    transaction: adopting the id would give connector 1's session two owners
+    and leave its StopTransaction unattributed.
+    """
+    cp = _mk_cp(hass, connectors=1)
+    await _settle(hass, cp)
+    tx_id = cp.on_start_transaction(1, "tag-a", 0).transaction_id
+    cp.on_meter_values(**_meter_values(tx_id))
+
+    station = _station_meter_values()
+    station["transaction_id"] = tx_id
+    cp.on_meter_values(**station)
+    await hass.async_block_till_done()
+
+    assert cp._active_tx == {1: tx_id, 0: 0}
+    assert cp._metrics[(0, csess.transaction_id)].value == 0
+
+    cp.on_stop_transaction(meter_stop=5000, timestamp=None, transaction_id=tx_id)
+    await hass.async_block_till_done()
+
+    assert cp._tx_indeterminate == set()
+    assert cp._active_tx == {1: 0, 0: 0}

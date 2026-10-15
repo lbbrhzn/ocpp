@@ -188,6 +188,98 @@ but certain features (eg. scheduling) may not work.
 ## [Schneider Electric EVlink Wallbox Plus](https://www.se.com/nl/en/product/EVH3S22P0CK/evlink-wallbox-plus-t2-attached-cable-3-phase-32a-22kw/)
 Model is discontinued by the manufacturer.
 
+## Sigenergy Sigen EV DC charger (tested: SIGEN EVDC 25 7.5S2)
+
+Tested on 4 October 2026 with reported vendor `SIGEN`, model `EVDC 25 7.5S2`,
+firmware `V100R001C21SPC117`, one connector, and integration release `v0.12.0`
+(tag commit `848407c`). This is a charging and discharge telemetry report,
+not a claim that all charger functions work. The negotiated OCPP version was
+not independently verified during this test.
+
+### Confirmed observations
+
+- Connector status, transaction ID, session duration, meter start, session
+  energy and stop reason were exposed. Connector history included `Preparing`,
+  `Charging` and `Finishing`.
+- Use `sensor.<cpid>_status_connector` for connector state. The charger-level
+  status was `unknown` while the connector correctly reported `Charging`.
+- After enabling the corresponding integration entities,
+  `Energy.Active.Import.Register` supplied cumulative kWh readings with
+  `Sample.Periodic` context at approximately 60-second intervals during charging.
+
+The following measurands had changing numeric readings in Home Assistant
+history during the 12:08 to 12:18 AEST charging window on 4 October 2026. Each
+carried `Sample.Periodic` context; units below are those displayed by the
+integration, not a claim about the original wire units.
+
+| Measurand | Displayed unit | Observed behaviour |
+| --- | --- | --- |
+| `Energy.Active.Import.Register` | kWh | Cumulative imported energy increased during charging |
+| `Power.Active.Import` | kW | Charging power varied |
+| `Current.Import` | A | Charging current varied |
+| `Voltage` | V | Voltage varied |
+| `SoC` | % | Reported state of charge increased |
+
+`Power.Offered` also had a numeric reading with `Sample.Periodic` context, but
+remained at 25 kW throughout this window. It is not included in the changing
+measurands above, and does not establish that a charging limit can be controlled.
+
+### Vehicle discharge (V2G) observations
+
+In a subsequent vehicle discharge session on 4 October 2026, the tester reported
+the following behaviour on the same setup:
+
+| Measurand or session field | Observed behaviour during discharge |
+| --- | --- |
+| `Power.Active.Import` | Negative power, matching the Sigenergy discharge-power reading within about 1% |
+| `Current.Import` | Remained at 0 A rather than reporting negative current |
+| `Energy.Active.Import.Register` | Remained flat during discharge |
+| Connector status and transaction ID | Connector remained `Charging` with the same transaction ID |
+| Export measurands | No export measurands appeared during the observed discharge session |
+
+The approximately 1% agreement is a comparison reported for this session, not a
+calibrated accuracy specification. These observations show discharge through
+signed `Power.Active.Import`; `Charging` status and the transaction ID alone
+did not distinguish charging from discharge. Zero `Current.Import` did not
+mean that no energy was flowing.
+
+The flat import register did not account for exported energy, and no usable
+export-energy register was demonstrated. Integrating negative power over time
+would be a separate energy estimate, not a charger-reported export register.
+This telemetry observation does not establish OCPP control of V2G or verified
+bidirectional energy accounting.
+
+### Measurand auto-detection limitation
+
+Automatic detection did not identify the supported measurands in this test.
+Do not rely on auto-detection to establish which readings this firmware can
+supply. If using this setup, configure the required measurands manually and
+enable the corresponding Home Assistant entities, then check for live readings
+during a charging session.
+
+Measurand configuration and entity enablement are separate steps: enabling an
+entity alone does not make the charger report that measurement. The numeric
+readings listed above were observed; export and interval-energy reporting were
+not established. This limitation is reported for the tested firmware, not all
+Sigenergy models or firmware versions.
+
+### Limits of this test
+
+- `Energy.Active.Export.Register` was enabled but remained `unknown` in the
+  observed charging window. Import and export interval-energy entities also
+  remained `unknown`. Enabling an entity does not establish that the charger
+  supplies its measurand.
+- The discharge observations above establish negative import-power reporting,
+  not export-energy register support. Zero-valued current and absent export
+  measurands must not be treated as proof that no discharge occurred.
+  Bidirectional energy accounting remains unverified.
+- Features reported `CORE`, and current-limit controls were unavailable at the
+  inspected snapshot. Smart charging, charging-profile enforcement and V2G
+  control were not verified.
+
+See the [test record](https://github.com/purcell-lab/ha-bsv-settlement/issues/61)
+for the dated sensor observations and their limitations.
+
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 

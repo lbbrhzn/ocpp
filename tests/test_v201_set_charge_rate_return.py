@@ -663,3 +663,48 @@ async def test_set_session_limit_v201_aborts_when_the_transaction_changes(hass):
     with pytest.raises(HomeAssistantError, match="changed while"):
         await cp.set_session_limit(1, 10)
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_session_default_limit_targets_the_connectors_evse(hass):
+    """A Relative TxDefaultProfile on the EVSE, no transaction, below the maximum."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=2,
+        connector_count=[1, 1],
+        charging_rate_units=frozenset({"A"}),
+        profile_stack_level=5,
+    )
+    cp._build_connector_map()
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = accept
+    assert await cp.set_session_default_limit(2, 10) is True
+    assert sent[-1].evse_id == 2
+    profile = sent[-1].charging_profile
+    assert profile["id"] == 2002
+    assert profile["stack_level"] == 4
+    assert profile["charging_profile_purpose"] == "TxDefaultProfile"
+    assert profile["charging_profile_kind"] == "Relative"
+    assert "transaction_id" not in profile
+    assert profile["charging_schedule"][0]["charging_rate_unit"] == "A"
+    assert profile["charging_schedule"][0]["charging_schedule_period"] == [
+        {"start_period": 0, "limit": 10.0}
+    ]
+
+    for reported, expected in ((0, 0), (1, 1), (2, 1)):
+        request = cp.build_session_default_request(
+            1, 2001, {"unit": "A", "value": 6.0, "stack_level": reported, "evse_id": 1}
+        )
+        assert request.charging_profile["stack_level"] == expected
+
+    async def reject(_request):
+        return SimpleNamespace(status="Rejected")
+
+    cp.call = reject
+    with pytest.raises(HomeAssistantError, match=r"rejected .*\(Rejected\)"):
+        await cp.set_session_default_limit(1, 10)

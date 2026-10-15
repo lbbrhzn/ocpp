@@ -666,3 +666,76 @@ async def test_set_session_limit_v16_aborts_when_the_transaction_changes(
     with pytest.raises(HomeAssistantError, match="changed while"):
         await cp_v16.set_session_limit(1, 10)
     assert sent == []
+
+
+def test_session_default_request_builder_v16(cp_v16):
+    """The default profile is the action's TxDefaultProfile leg, with no transaction."""
+    request = cp_v16.build_session_default_request(
+        2, 2002, {"unit": "A", "value": 12.0, "stack_level": 5}
+    )
+    assert request.connector_id == 2
+    profile = request.cs_charging_profiles
+    assert profile["chargingProfileId"] == 2002
+    assert profile["stackLevel"] == 4
+    assert "transactionId" not in profile
+    assert profile["chargingProfileKind"] == "Relative"
+    assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"] == [
+        {"startPeriod": 0, "limit": 12.0}
+    ]
+    for reported, expected in ((0, 0), (1, 1), (2, 1)):
+        request = cp_v16.build_session_default_request(
+            1, 2001, {"unit": "A", "value": 6.0, "stack_level": reported}
+        )
+        assert request.cs_charging_profiles["stackLevel"] == expected
+        assert expected <= reported
+
+
+@pytest.mark.asyncio
+async def test_set_session_default_limit_v16_needs_no_transaction(cp_v16, monkeypatch):
+    """Only an Accepted reply confirms; everything else raises a clear error."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp_v16, "call", accept)
+    cp_v16._tx_indeterminate = {1}  # a held connector does not matter here
+    assert await cp_v16.set_session_default_limit(1, 10) is True
+    assert sent[-1].connector_id == 1
+    profile = sent[-1].cs_charging_profiles
+    assert (profile["chargingProfileId"], profile["stackLevel"]) == (2001, 4)
+    assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
+
+    async def not_supported(_request):
+        return SimpleNamespace(status="NotSupported")
+
+    monkeypatch.setattr(cp_v16, "call", not_supported)
+    with pytest.raises(HomeAssistantError, match=r"rejected .*\(NotSupported\)"):
+        await cp_v16.set_session_default_limit(1, 10)
+
+    async def timeout(_request):
+        raise TimeoutError()
+
+    monkeypatch.setattr(cp_v16, "call", timeout)
+    with pytest.raises(HomeAssistantError, match="did not answer"):
+        await cp_v16.set_session_default_limit(1, 10)
+
+    async def broken(_request):
+        raise RuntimeError("closed")
+
+    monkeypatch.setattr(cp_v16, "call", broken)
+    with pytest.raises(HomeAssistantError, match="failed: closed"):
+        await cp_v16.set_session_default_limit(1, 10)

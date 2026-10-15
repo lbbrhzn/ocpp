@@ -1396,3 +1396,95 @@ async def test_set_session_charge_rate_amps_reaches_the_charge_point(hass):
     assert calls == [(1, 16.0), (2, 32.0)]
     with pytest.raises(HomeAssistantError):
         await cs.set_session_charge_rate_amps("missing", 1, 16)
+
+
+@pytest.mark.asyncio
+async def test_session_default_limit_availability_rule(hass):
+    """Charger up with SMART; no transaction or connector status needed."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA)
+    entry.add_to_hass(hass)
+    cs = CentralSystem(hass, entry)
+    targets = {1}
+    cp, metrics = _session_cp(
+        session_default_target_known=lambda connector: connector in targets
+    )
+    cs.charge_points["CP_1"] = cp
+    cs.cpids["cpid_1"] = "CP_1"
+
+    assert cs.session_default_limit_available("cpid_1", 1)
+    assert not cs.session_default_limit_available("cpid_1", 2)  # target unknown
+    metrics[(1, cstat.status_connector)].value = "Available"
+    metrics[(1, csess.transaction_id)].value = None
+    cp.transaction_is_unsafe = lambda _c: True
+    assert cs.session_default_limit_available("cpid_1", 1)
+    assert not cs.session_default_limit_available("missing", 1)
+
+    cp.supported_features = 0
+    assert not cs.session_default_limit_available("cpid_1", 1)
+    cp.supported_features = prof.SMART
+    cp.status = STATE_UNAVAILABLE
+    assert not cs.session_default_limit_available("cpid_1", 1)
+
+
+@pytest.mark.asyncio
+async def test_set_session_default_charge_rate_amps_reaches_the_charge_point(hass):
+    """The value goes to the connector's default limit, by cpid or cp_id."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA)
+    entry.add_to_hass(hass)
+    cs = CentralSystem(hass, entry)
+    calls = []
+
+    async def set_default(connector_id, amps):
+        calls.append((connector_id, amps))
+        return True
+
+    cp, _metrics = _session_cp(set_session_default_limit=set_default)
+    cs.charge_points["CP_1"] = cp
+    cs.cpids["cpid_1"] = "CP_1"
+
+    assert await cs.set_session_default_charge_rate_amps("cpid_1", 1, 16) is True
+    assert await cs.set_session_default_charge_rate_amps("CP_1", 2, 32) is True
+    assert calls == [(1, 16.0), (2, 32.0)]
+    with pytest.raises(HomeAssistantError):
+        await cs.set_session_default_charge_rate_amps("missing", 1, 16)
+
+
+@pytest.mark.asyncio
+async def test_settings_ignore_keys_from_a_later_release(hass, monkeypatch):
+    """A rollback must not fail a charger on a setting this release does not know."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.ocpp.const import CONF_CPIDS
+
+    from tests.const import MOCK_CONFIG_CP_APPEND
+
+    stored = {**MOCK_CONFIG_CP_APPEND, "setting_from_the_future": True}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **MOCK_CONFIG_DATA,
+            "setting_from_the_future": True,
+            CONF_CPIDS: [{"CP_future": stored}],
+        },
+    )
+    entry.add_to_hass(hass)
+    cs = CentralSystem(hass, entry)
+    assert cs.settings.csid == MOCK_CONFIG_DATA["csid"]
+
+    cp = SimpleNamespace(start=AsyncMock())
+    built = []
+
+    def build(_cp_id, _websocket, settings):
+        built.append(settings)
+        return cp
+
+    monkeypatch.setattr(cs, "_build_charge_point", build)
+    websocket = SimpleNamespace(
+        subprotocol="ocpp1.6", request=SimpleNamespace(path="/CP_future")
+    )
+    await cs.on_connect(websocket)
+
+    assert [settings.cpid for settings in built] == [stored["cpid"]]
+    assert not hasattr(built[0], "setting_from_the_future")
+    assert cs.charge_points["CP_future"] is cp
+    cp.start.assert_awaited_once()

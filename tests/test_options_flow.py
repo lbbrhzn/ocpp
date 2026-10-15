@@ -23,6 +23,7 @@ from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_ENABLE_HA_NOTIFICATIONS,
+    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_FORCE_SMART_CHARGING,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -169,6 +170,43 @@ async def test_editing_absolute_charge_point_max_profile(hass):
     )
 
     assert _stored(entry, "CP_1")[CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE] is True
+
+
+async def test_editing_session_limit_default_profile(hass):
+    """The default-profile session limit toggle round-trips through the options flow."""
+    entry = _entry(hass, [{"CP_1": _cp_settings()}])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 32,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+            CONF_SESSION_LIMIT_DEFAULT_PROFILE: True,
+        },
+    )
+
+    assert _stored(entry, "CP_1")[CONF_SESSION_LIMIT_DEFAULT_PROFILE] is True
+
+    # Off again: the key leaves the record, so a rollback can still load it.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 32,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+            CONF_SESSION_LIMIT_DEFAULT_PROFILE: False,
+        },
+    )
+    assert CONF_SESSION_LIMIT_DEFAULT_PROFILE not in _stored(entry, "CP_1")
 
 
 async def test_the_entry_is_updated_exactly_once(hass):
