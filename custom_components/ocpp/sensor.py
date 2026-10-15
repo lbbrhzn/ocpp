@@ -16,7 +16,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import CONF_MONITORED_VARIABLES, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.util import slugify
@@ -56,6 +56,10 @@ async def async_setup_entry(hass, entry, async_add_devices):
     for charger in entry.data[CONF_CPIDS]:
         cp_id_settings = list(charger.values())[0]
         cpid = cp_id_settings[CONF_CPID]
+
+        charger_device_id = dr.async_get_device_id_by_identifier(
+            hass, (DOMAIN, cpid), config_entry_id=entry.entry_id
+        )
 
         num_connectors = 1
         for item in entry.data.get(CONF_CPIDS, []):
@@ -157,6 +161,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                     cpid,
                     _mk_desc(metric, cat_diag=True),
                     connector_id=None,
+                    charger_device_id=charger_device_id,
                 )
             )
 
@@ -177,6 +182,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                                 ],
                             ),
                             connector_id=conn_id,
+                            charger_device_id=charger_device_id,
                         )
                     )
         else:
@@ -195,6 +201,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                             ],
                         ),
                         connector_id=None,
+                        charger_device_id=charger_device_id,
                     )
                 )
 
@@ -214,6 +221,7 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         cpid: str,
         description: OcppSensorDescription,
         connector_id: int | None = None,
+        charger_device_id: str | None = None,
     ):
         """Instantiate instance of a ChargePointMetrics."""
         self.central_system = central_system
@@ -229,11 +237,15 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         )
         self._attr_name = self.entity_description.name
         if self.connector_id is not None:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"{cpid}-conn{self.connector_id}")},
-                name=f"{cpid} Connector {self.connector_id}",
-                via_device=(DOMAIN, cpid),
-            )
+            device_info: DeviceInfo = {
+                "identifiers": {(DOMAIN, f"{cpid}-conn{self.connector_id}")},
+                "name": f"{cpid} Connector {self.connector_id}",
+            }
+            if charger_device_id is not None:
+                device_info["via_device_id"] = charger_device_id
+            else:
+                device_info["via_device"] = (DOMAIN, cpid)
+            self._attr_device_info = DeviceInfo(**device_info)
         else:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, cpid)},

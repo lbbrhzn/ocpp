@@ -356,6 +356,9 @@ async def test_update_traverses_children_and_skips_visited(
                 def devices(self):
                     # Duplicate the child to force the same ID to be appended twice -> will hit continue (L612)
                     class Container:
+                        def __iter__(self_inner):
+                            return iter([root, child, child])
+
                         def values(self_inner):
                             return [root, child, child]
 
