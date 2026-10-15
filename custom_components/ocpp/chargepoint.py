@@ -79,6 +79,7 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 # never send a boot notification. Module-level so tests can shrink it
 # without monkeypatching asyncio.sleep globally.
 MONITOR_BACKSTOP_DELAY = 10
+FEATURES_RECHECK_INTERVAL = 300
 _DEFAULT_LINE_VOLTAGE = 230.0
 _DEFAULT_PHASES = 1
 _PHASE_KEY_GROUPS = (
@@ -312,6 +313,11 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        # True while the feature profiles are only assumed, because the
+        # charger did not answer the query during setup.
+        self._features_assumed = False
+        self._features_recheck_at = 0.0
+        self._features_recheck_task: asyncio.Task | None = None
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
         self._targeted_refresh_ready = False
@@ -380,6 +386,28 @@ class ChargePoint(cp):
         _LOGGER.debug(
             "Feature profiles returned: %s", self._attr_supported_features.labels()
         )
+
+    def _schedule_features_recheck(self):
+        """Ask again for feature profiles that were only assumed."""
+        if not self._features_assumed or (
+            self._features_recheck_task is not None
+            and not self._features_recheck_task.done()
+        ):
+            return
+        self._features_recheck_at = time.monotonic() + FEATURES_RECHECK_INTERVAL
+        self._features_recheck_task = self.hass.async_create_task(
+            self._recheck_features()
+        )
+
+    async def _recheck_features(self):
+        """Query the feature profiles again and refresh entities on success."""
+        try:
+            await self.fetch_supported_features()
+        except Exception as ex:
+            _LOGGER.debug("'%s' feature profile recheck failed: %s", self.id, ex)
+            return
+        if not self._features_assumed:
+            self.hass.async_create_task(self.update(self.settings.cpid))
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
@@ -695,6 +723,11 @@ class ChargePoint(cp):
         while connection.state is State.OPEN:
             try:
                 await asyncio.sleep(self.cs_settings.websocket_ping_interval)
+                if (
+                    self._features_assumed
+                    and time.monotonic() >= self._features_recheck_at
+                ):
+                    self._schedule_features_recheck()
                 time0 = time.perf_counter()
                 latency_ping = self.cs_settings.websocket_ping_timeout * 1000
                 latency_pong = self.cs_settings.websocket_ping_timeout * 1000
@@ -1001,6 +1034,8 @@ class ChargePoint(cp):
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:
                 self.hass.async_create_task(self.post_connect())
+            else:
+                self._schedule_features_recheck()
 
     def _async_refresh_metric_entities(
         self, metrics: list[str], *, fallback_to_full_update: bool = True
