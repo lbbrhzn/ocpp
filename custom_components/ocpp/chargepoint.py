@@ -463,8 +463,13 @@ class ChargePoint(cp):
         """Trigger message request with a custom message."""
         pass
 
-    async def clear_profile(self):
-        """Clear all charging profiles."""
+    async def clear_profile(self, conn_id: int | None = None):
+        """Clear all charging profiles.
+
+        conn_id is accepted for protocol-agnostic callers (e.g. the HA
+        clear_profile service) but is only meaningful for OCPP 1.6; OCPP 2.0.1
+        clears station-wide profiles regardless of connector.
+        """
         pass
 
     async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
