@@ -262,6 +262,11 @@ class CentralSystem:
         """Override default subprotocol selection."""
 
         _LOGGER.debug("Charger offered subprotocols: %s", list(subprotocols or []))
+        # Remember the offer on the connection so the charge point can expose
+        # it (Version.OCPP sensor). Purely informational: it must never
+        # affect the selection below.
+        with contextlib.suppress(Exception):
+            connection.ocpp_offered_subprotocols = list(subprotocols or [])
 
         # Returning None here (rather than raising, as the websockets default
         # does) is a deliberate deviation that lets a charger offering no
