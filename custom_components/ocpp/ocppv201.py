@@ -815,8 +815,12 @@ class ChargePoint(cp):
                 )
                 await self.call(req)
 
-    async def clear_profile(self) -> bool:
+    async def clear_profile(self, conn_id: int | None = None) -> bool:
         """Clear all charging profiles.
+
+        conn_id is accepted for protocol-agnostic callers but is ignored here:
+        OCPP 2.0.1 clears station-wide profiles and does not filter by
+        connector.
 
         Returns True when the charger accepted, or reported it had nothing to
         clear - Unknown means the end state we wanted already holds. Mirrors

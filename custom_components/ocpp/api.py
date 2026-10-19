@@ -96,9 +96,41 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("requested_message"): cv.string,
     }
 )
+
+
+def _connector_id(value) -> int:
+    """Validate an integral, positive connector ID.
+
+    ``vol.Coerce(int)`` would silently truncate fractional values
+    (``1.9`` -> ``1``), changing the meaning of the request. Reject
+    those instead.
+    """
+    if isinstance(value, bool):
+        raise vol.Invalid("conn_id must be an integer")
+    if isinstance(value, int):
+        as_int = value
+    elif isinstance(value, float):
+        # float() rounding must not turn a fraction into a valid id, and
+        # inf/nan must not reach int()
+        if not value.is_integer():
+            raise vol.Invalid("conn_id must be an integer, not a fraction")
+        as_int = int(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+            raise vol.Invalid("conn_id must be an integer")
+        as_int = int(text)
+    else:
+        raise vol.Invalid("conn_id must be an integer")
+    if as_int < 1:
+        raise vol.Invalid("conn_id must be a positive integer")
+    return as_int
+
+
 CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
+        vol.Optional("conn_id"): _connector_id,
     }
 )
 
@@ -927,7 +959,8 @@ class CentralSystem:
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
-        await cp.clear_profile()
+        conn_id = call.data.get("conn_id")
+        await cp.clear_profile(conn_id=conn_id)
 
     @check_charger_available
     async def handle_update_firmware(self, call, cp):

@@ -77,7 +77,12 @@ clear_profile:
       description: Either HA charger id or Ocpp id
       required: false
       advanced: true
-      example: charger
+    conn_id:
+      name: Connector id
+      description: Limit the clear to a single connector. Only effective on OCPP 1.6; on OCPP 2.0.1 the clear always applies station-wide
+      required: false
+      advanced: true
+      example: 1
 
 update_firmware:
   name: Update charger firmware
