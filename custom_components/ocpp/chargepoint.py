@@ -1054,13 +1054,16 @@ class ChargePoint(cp):
         er = entity_registry.async_get(self.hass)
         dr = device_registry.async_get(self.hass)
 
-        identifiers = {(DOMAIN, cpid), (DOMAIN, self.id)}
-        # `DeviceRegistry.async_get_devices()` does not exist; use the singular
-        # lookup, which matches any of the given identifiers, and keep the
-        # original config entry filter.
-        root_dev = dr.async_get_device(identifiers=identifiers)
-        if root_dev is not None and self.entry.entry_id not in root_dev.config_entries:
-            root_dev = None
+        # `DeviceRegistry.async_get_devices()` does not exist, and the singular
+        # `async_get_device()` returns a single device even when several
+        # identifiers match. Resolve each identifier on its own, in a fixed
+        # order, and keep the first device owned by this config entry.
+        root_dev = None
+        for ident in dict.fromkeys([(DOMAIN, cpid), (DOMAIN, self.id)]):
+            dev = dr.async_get_device(identifiers={ident})
+            if dev is not None and self.entry.entry_id in dev.config_entries:
+                root_dev = dev
+                break
         if root_dev is None:
             return
 

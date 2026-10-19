@@ -11,7 +11,7 @@ from websockets.protocol import State
 
 from custom_components.ocpp.chargepoint import ChargePoint as BaseCP, MeasurandValue
 from custom_components.ocpp.ocppv16 import ChargePoint as CPv16
-from custom_components.ocpp.const import DEFAULT_MEASURAND
+from custom_components.ocpp.const import DEFAULT_MEASURAND, DOMAIN
 from unittest.mock import MagicMock, AsyncMock
 from ocpp.v16.enums import Measurand, Phase
 
@@ -336,6 +336,8 @@ async def test_update_traverses_children_and_skips_visited(
                 def __init__(self, id, via=None):
                     self.id = id
                     self.via_device_id = via
+                    # update() only keeps devices owned by its config entry.
+                    self.config_entries = {srv.entry.entry_id}
 
             root = Dev("root", via=None)
             child = Dev("child", via="root")
@@ -454,6 +456,124 @@ async def test_update_traverses_children_and_skips_visited(
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await ws.close()
+
+
+def _run_update_with_fake_registry(monkeypatch, devices_by_ident):
+    """Run ChargePoint.update() against a fake registry keyed by identifier.
+
+    Returns (looked_up, traversed, dispatched): the identifier sets passed to
+    async_get_device, the device ids whose entities were collected, and the
+    payloads dispatched. The fake mimics the real singular lookup: it returns
+    ONE device even when several of the given identifiers match (the first
+    match in sorted order stands in for the registry's arbitrary set order).
+    """
+    import custom_components.ocpp.chargepoint as mod
+
+    entry = SimpleNamespace(entry_id="this_entry")
+    fake_hass = SimpleNamespace(states=SimpleNamespace(get=lambda _eid: object()))
+    srv = BaseCP(
+        "cp_b",
+        SimpleNamespace(state=State.CLOSED),
+        SimpleNamespace(value="1.6"),
+        fake_hass,
+        entry,
+        SimpleNamespace(
+            websocket_ping_interval=0,
+            websocket_ping_timeout=0,
+            websocket_ping_tries=0,
+        ),
+        SimpleNamespace(cpid="cp_a"),
+    )
+
+    looked_up = []
+    traversed = []
+    dispatched = []
+
+    class FakeDR:
+        """Fake DR: singular lookup only (async_get_devices does not exist)."""
+
+        devices = []
+
+        def async_get_device(self, identifiers):
+            looked_up.append(set(identifiers))
+            for ident in sorted(identifiers):
+                if devices_by_ident.get(ident) is not None:
+                    return devices_by_ident[ident]
+            return None
+
+    def entries_for_device(_er, dev_id):
+        traversed.append(dev_id)
+        return [SimpleNamespace(entity_id=f"sensor.{dev_id}", disabled_by=None)]
+
+    with monkeypatch.context() as mp:
+        mp.setattr(mod.device_registry, "async_get", lambda _: FakeDR())
+        mp.setattr(mod.entity_registry, "async_get", lambda _: object())
+        mp.setattr(mod.entity_registry, "async_entries_for_device", entries_for_device)
+        mp.setattr(
+            mod,
+            "async_dispatcher_send",
+            lambda _h, _s, payload: dispatched.append(payload),
+        )
+        asyncio.run(srv.update("cp_a"))
+    return looked_up, traversed, dispatched
+
+
+def _dev(dev_id, *entry_ids):
+    return SimpleNamespace(id=dev_id, via_device_id=None, config_entries=set(entry_ids))
+
+
+CPID_IDENT = (DOMAIN, "cp_a")
+ID_IDENT = (DOMAIN, "cp_b")
+
+
+def test_update_skips_foreign_device_and_uses_second_identifier(monkeypatch):
+    """The cpid identifier resolves to another config entry's device: fall back to self.id's."""
+    looked_up, traversed, dispatched = _run_update_with_fake_registry(
+        monkeypatch,
+        {
+            CPID_IDENT: _dev("foreign", "other_entry"),
+            ID_IDENT: _dev("mine", "this_entry"),
+        },
+    )
+    assert traversed == ["mine"]
+    assert dispatched == [{"sensor.mine"}]
+    assert looked_up == [{CPID_IDENT}, {ID_IDENT}]
+
+
+def test_update_prefers_cpid_identifier_when_both_belong_to_entry(monkeypatch):
+    """Both identifiers resolve to this entry: cpid wins, deterministically."""
+    looked_up, traversed, _ = _run_update_with_fake_registry(
+        monkeypatch,
+        {
+            CPID_IDENT: _dev("by_cpid", "this_entry"),
+            ID_IDENT: _dev("by_id", "this_entry"),
+        },
+    )
+    assert traversed == ["by_cpid"]
+    assert looked_up == [{CPID_IDENT}]
+
+
+def test_update_returns_when_no_device_belongs_to_entry(monkeypatch):
+    """Every candidate belongs to another entry: nothing is traversed or sent."""
+    looked_up, traversed, dispatched = _run_update_with_fake_registry(
+        monkeypatch,
+        {
+            CPID_IDENT: _dev("foreign_a", "other_entry"),
+            ID_IDENT: _dev("foreign_b", "other_entry"),
+        },
+    )
+    assert traversed == []
+    assert dispatched == []
+    assert looked_up == [{CPID_IDENT}, {ID_IDENT}]
+
+
+def test_update_uses_second_identifier_when_first_resolves_nothing(monkeypatch):
+    """The cpid identifier resolves to no device (None): the self.id one is used."""
+    looked_up, traversed, _ = _run_update_with_fake_registry(
+        monkeypatch, {ID_IDENT: _dev("by_id", "this_entry")}
+    )
+    assert traversed == ["by_id"]
+    assert looked_up == [{CPID_IDENT}, {ID_IDENT}]
 
 
 @pytest.mark.timeout(5)
