@@ -27,6 +27,11 @@ def test_valid_connector_ids(value, expected):
         None,
         1.5,
         "1.5",
+        "1.0000000000000001",  # float() would round this to 1.0
+        "inf",
+        "nan",
+        float("inf"),
+        float("nan"),
         0,
         -1,
         True,

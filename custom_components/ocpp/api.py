@@ -107,13 +107,21 @@ def _connector_id(value) -> int:
     """
     if isinstance(value, bool):
         raise vol.Invalid("conn_id must be an integer")
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as err:
-        raise vol.Invalid("conn_id must be an integer") from err
-    if number != int(number):
-        raise vol.Invalid("conn_id must be an integer, not a fraction")
-    as_int = int(number)
+    if isinstance(value, int):
+        as_int = value
+    elif isinstance(value, float):
+        # float() rounding must not turn a fraction into a valid id, and
+        # inf/nan must not reach int()
+        if not value.is_integer():
+            raise vol.Invalid("conn_id must be an integer, not a fraction")
+        as_int = int(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+            raise vol.Invalid("conn_id must be an integer")
+        as_int = int(text)
+    else:
+        raise vol.Invalid("conn_id must be an integer")
     if as_int < 1:
         raise vol.Invalid("conn_id must be a positive integer")
     return as_int
