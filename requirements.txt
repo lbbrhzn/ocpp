@@ -1,10 +1,10 @@
 colorlog==6.12.0
 uv>=0.4
-ruff==0.16.9
+ruff==0.17.0
 ocpp==2.1.0
-websockets==17.1
+websockets==17.2
 jsonschema==4.26.0
 pre-commit==4.6.2
-pytest-homeassistant-custom-component==0.13.367
+pytest-homeassistant-custom-component==0.13.372
 setuptools>=84.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
-zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=4.1.1 # not directly required, pinned by Snyk to avoid a vulnerability
