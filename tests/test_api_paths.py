@@ -87,9 +87,9 @@ class DummyCP:
         )
         return True
 
-    async def clear_profile(self):
+    async def clear_profile(self, conn_id=None):
         """Clear profile."""
-        self.calls.append(("clear_profile", {}))
+        self.calls.append(("clear_profile", {"conn_id": conn_id}))
         return True
 
     async def update_firmware(self, url, delay):

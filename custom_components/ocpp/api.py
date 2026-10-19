@@ -96,10 +96,33 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("requested_message"): cv.string,
     }
 )
+
+
+def _connector_id(value) -> int:
+    """Validate an integral, positive connector ID.
+
+    ``vol.Coerce(int)`` would silently truncate fractional values
+    (``1.9`` -> ``1``), changing the meaning of the request. Reject
+    those instead.
+    """
+    if isinstance(value, bool):
+        raise vol.Invalid("conn_id must be an integer")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as err:
+        raise vol.Invalid("conn_id must be an integer") from err
+    if number != int(number):
+        raise vol.Invalid("conn_id must be an integer, not a fraction")
+    as_int = int(number)
+    if as_int < 1:
+        raise vol.Invalid("conn_id must be a positive integer")
+    return as_int
+
+
 CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
-        vol.Optional("conn_id"): vol.Coerce(int),
+        vol.Optional("conn_id"): _connector_id,
     }
 )
 
