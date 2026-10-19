@@ -754,6 +754,14 @@ class ChargePoint(cp):
             _LOGGER.warning("Force Smart Charging feature profile")
             features |= prof.SMART
 
+        known_profiles = {
+            om.feature_profile_core: prof.CORE,
+            om.feature_profile_firmware: prof.FW,
+            om.feature_profile_smart: prof.SMART,
+            om.feature_profile_reservation: prof.RES,
+            om.feature_profile_remote: prof.REM,
+            om.feature_profile_auth: prof.AUTH,
+        }
         for item in feature_list:
             item = item.strip().replace(" ", "")
             if item == om.feature_profile_core:
@@ -769,6 +777,18 @@ class ChargePoint(cp):
             elif item == om.feature_profile_auth:
                 features |= prof.AUTH
             else:
+                # Some chargers (e.g. BYD AC0207EI50, see #2206) truncate the
+                # profile names in SupportedFeatureProfiles, reporting
+                # "RemoteTrigge" for "RemoteTrigger". Fall back to a prefix
+                # match against the known profile names.
+                matches = [
+                    flag
+                    for name, flag in known_profiles.items()
+                    if item and name.startswith(item)
+                ]
+                if len(matches) == 1:
+                    features |= matches[0]
+                    continue
                 _LOGGER.warning("Unknown feature profile detected ignoring: %s", item)
                 await self.notify_ha(
                     f"Warning: Unknown feature profile detected ignoring {item}"
