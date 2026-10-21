@@ -858,6 +858,40 @@ class ChargePoint(cp):
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
 
+
+    async def get_composite_schedule(
+        self,
+        conn_id: int = 1,
+        duration: int = 3600,
+        charging_rate_unit: str | None = None,
+    ) -> dict:
+        """Return the effective OCPP 1.6 composite charging schedule."""
+        unit = (
+            ChargingRateUnitType(charging_rate_unit)
+            if charging_rate_unit
+            else None
+        )
+        req = call.GetCompositeSchedule(
+            connector_id=int(conn_id),
+            duration=int(duration),
+            charging_rate_unit=unit,
+        )
+        resp: call_result.GetCompositeSchedule = await self.call(req)
+        result = {
+            "status": getattr(resp.status, "value", str(resp.status)),
+            "connector_id": resp.connector_id,
+            "schedule_start": resp.schedule_start,
+            "charging_schedule": resp.charging_schedule,
+        }
+        _LOGGER.debug(
+            "GetCompositeSchedule connector=%s duration=%s unit=%s returned: %s",
+            conn_id,
+            duration,
+            charging_rate_unit,
+            result,
+        )
+        return result
+
     async def _resolve_charge_rate(
         self,
         limit_amps: int | float | None,
