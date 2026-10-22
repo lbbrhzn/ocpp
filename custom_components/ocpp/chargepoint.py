@@ -753,7 +753,26 @@ class ChargePoint(cp):
                 _LOGGER.debug(f"monitor_connection stopping due to exception: {ex}")
                 break
 
+    @staticmethod
+    def _strip_blank_meter_samples(msg):
+        """Drop empty sampledValues and empty units from MeterValues.
+
+        Some firmware (e.g. Sungrow AC22E) reports unmeasured measurands as
+        value "" and sends unit "" for Frequency. The OCPP schema rejects an
+        empty unit, which drops the whole message, so clean it up before
+        validation. An empty value carries no reading, so the sample is dropped.
+        """
+        if getattr(msg, "action", None) != "MeterValues":
+            return
+        for meter_value in msg.payload.get("meterValue", []):
+            samples = [s for s in meter_value.get("sampledValue", []) if s.get("value")]
+            for sample in samples:
+                if sample.get("unit") == "":
+                    del sample["unit"]
+            meter_value["sampledValue"] = samples
+
     async def _handle_call(self, msg):
+        self._strip_blank_meter_samples(msg)
         try:
             await super()._handle_call(msg)
         except NotImplementedError as e:
