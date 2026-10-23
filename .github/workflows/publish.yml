@@ -40,7 +40,7 @@ jobs:
           python3 "$WORKSPACE/manage/update_manifest.py" --version "${RELEASE_VERSION#v}"
 
       - name: 📤 Upload zip to action
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         if: ${{ github.event_name == 'push' }}
         with:
           name: ocpp
