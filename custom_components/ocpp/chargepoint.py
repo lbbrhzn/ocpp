@@ -20,6 +20,7 @@ from homeassistant.const import UnitOfTime
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import slugify
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
@@ -1625,15 +1626,35 @@ class ChargePoint(cp):
 
     def get_ha_metric(self, measurand: str, connector_id: int | None = None):
         """Return last known value in HA for given measurand, or None if not available."""
-        base = self.settings.cpid.lower()
+        cpid = self.settings.cpid
         meas_slug = measurand.lower().replace(".", "_")
 
-        # Build list of possible sensor entity IDs.
-        # Include connector-specific ID if applicable, then the generic one as fallback.
-        candidates: list[str] = []
+        # Connector-specific sensor first, then the generic one as fallback.
+        connectors: list[int | None] = []
         if connector_id and connector_id > 0:
-            candidates.append(f"sensor.{base}_connector_{connector_id}_{meas_slug}")
-        candidates.append(f"sensor.{base}_{meas_slug}")
+            connectors.append(connector_id)
+        connectors.append(None)
+
+        # Resolve through the entity registry by unique_id, which survives
+        # entities renamed by the user. The slugified entity id is the
+        # fallback for sensors the registry doesn't know. Building the id
+        # with cpid.lower() never matched a cpid with spaces or hyphens
+        # ("Garage Charger"), since the sensor platform slugifies it.
+        er = entity_registry.async_get(self.hass)
+        candidates: list[str] = []
+        for conn in connectors:
+            uid = sensor_unique_id(cpid, measurand, conn)
+            if entity_id := er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid):
+                # Once the registry knows the sensor, its slug may belong to
+                # another charger: "CP-A" and "CP_A" both slugify to "cp_a".
+                candidates.append(entity_id)
+                continue
+            object_id = (
+                f"{cpid}_connector_{conn}_{meas_slug}"
+                if conn is not None
+                else f"{cpid}_{meas_slug}"
+            )
+            candidates.append(f"{SENSOR_DOMAIN}.{slugify(object_id)}")
 
         # Return the first valid state found among candidates.
         for entity_id in candidates:
