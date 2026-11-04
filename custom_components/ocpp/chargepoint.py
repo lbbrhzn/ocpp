@@ -1654,7 +1654,11 @@ class ChargePoint(cp):
                 if conn is not None
                 else f"{cpid}_{meas_slug}"
             )
-            candidates.append(f"{SENSOR_DOMAIN}.{slugify(object_id)}")
+            fallback = f"{SENSOR_DOMAIN}.{slugify(object_id)}"
+            # A registered entity at the slug isn't ours (ours would have
+            # resolved above): it belongs to another charger.
+            if er.async_get(fallback) is None:
+                candidates.append(fallback)
 
         # Return the first valid state found among candidates.
         for entity_id in candidates:

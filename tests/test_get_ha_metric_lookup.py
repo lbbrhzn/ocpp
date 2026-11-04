@@ -153,6 +153,33 @@ async def test_slug_of_another_charger_is_not_read(hass, own_state):
     assert cp.get_ha_metric(csess.meter_start, connector_id=1) == expected
 
 
+@pytest.mark.parametrize("own_state", ["111.0", "unavailable", None])
+async def test_fallback_slug_owned_by_another_charger_is_not_read(hass, own_state):
+    """The generic fallback skips a slug the registry gives to another charger.
+
+    A multi-connector "CP-A" has no generic Energy.Meter.Start sensor, so its
+    fallback slug "cp_a_energy_meter_start" is the sensor of "CP_A".
+    """
+    registry = er.async_get(hass)
+    for cpid, connector_id, object_id in (
+        ("CP_A", None, "cp_a_energy_meter_start"),
+        ("CP-A", 1, "cp_a_connector_1_energy_meter_start"),
+    ):
+        registry.async_get_or_create(
+            SENSOR_DOMAIN,
+            OCPP_DOMAIN,
+            sensor_unique_id(cpid, csess.meter_start, connector_id),
+            suggested_object_id=object_id,
+        )
+    hass.states.async_set("sensor.cp_a_energy_meter_start", "999.0")
+    if own_state is not None:
+        hass.states.async_set("sensor.cp_a_connector_1_energy_meter_start", own_state)
+
+    expected = "111.0" if own_state == "111.0" else None
+    cp = _cp_for(hass, "CP-A")
+    assert cp.get_ha_metric(csess.meter_start, connector_id=1) == expected
+
+
 @pytest.mark.timeout(20)
 async def test_restart_mid_session_restores_meter_start(hass, socket_enabled):
     """The restored Energy.Meter.Start is the session baseline after a restart.
