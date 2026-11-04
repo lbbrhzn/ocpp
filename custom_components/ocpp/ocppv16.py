@@ -554,6 +554,7 @@ class ChargePoint(cp):
 
         cfg = None
         if resp is not None:
+            self._record_unknown_config_keys(getattr(resp, "unknown_key", None))
             cfg = getattr(resp, "configuration_key", None)
 
             if (
@@ -627,6 +628,9 @@ class ChargePoint(cp):
         cfg_ok = {ConfigurationStatus.accepted, ConfigurationStatus.reboot_required}
 
         effective_csv: str = ""
+        # Only the charger accepting ChangeConfiguration answers this; with
+        # nothing requested it stays unknown.
+        self._measurands_configurable = None
 
         if autodetect_measurands:
             if desired_csv:
@@ -636,6 +640,9 @@ class ChargePoint(cp):
                 try:
                     resp = await self.call(
                         call.ChangeConfiguration(key=key, value=desired_csv)
+                    )
+                    self._measurands_configurable = (
+                        getattr(resp, "status", None) in cfg_ok
                     )
                     if getattr(resp, "status", None) in cfg_ok:
                         _LOGGER.debug(
@@ -651,6 +658,7 @@ class ChargePoint(cp):
                             getattr(resp, "status", None),
                         )
                 except Exception as ex:
+                    self._measurands_configurable = False
                     _LOGGER.debug(
                         "get_supported_measurands CSV set raised for '%s': %s",
                         self.id,
@@ -683,6 +691,7 @@ class ChargePoint(cp):
                 _LOGGER.debug(
                     "'%s' measurands set manually to %s", self.id, desired_csv
                 )
+                self._measurands_configurable = getattr(resp, "status", None) in cfg_ok
                 if getattr(resp, "status", None) in cfg_ok:
                     effective_csv = desired_csv
                 else:
@@ -693,6 +702,7 @@ class ChargePoint(cp):
                     )
                     effective_csv = await self.get_configuration(key)
             except Exception as ex:
+                self._measurands_configurable = False
                 _LOGGER.debug(
                     "Manual measurands set failed for '%s': %s; using charger's value",
                     self.id,
@@ -741,6 +751,7 @@ class ChargePoint(cp):
             )
             feature_list = [om.feature_profile_core]
         else:
+            self._record_unknown_config_keys(getattr(resp, "unknown_key", None))
             try:
                 feature_list = (resp.configuration_key[0][om.value]).split(",")
             except (IndexError, KeyError, TypeError):
@@ -1477,6 +1488,7 @@ class ChargePoint(cp):
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
+        self._record_unknown_config_keys(getattr(resp, "unknown_key", None))
         if resp.configuration_key:
             if key == "":
                 result = {}
@@ -1496,6 +1508,16 @@ class ChargePoint(cp):
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return "Unknown"
 
+    async def fetch_configuration_snapshot(self):
+        """Record the complete configuration via GetConfiguration without keys."""
+        resp = await self.call(call.GetConfiguration())
+        self._record_unknown_config_keys(getattr(resp, "unknown_key", None))
+        entries = getattr(resp, "configuration_key", None) or []
+        _LOGGER.debug(
+            "'%s' configuration snapshot returned %d keys", self.id, len(entries)
+        )
+        self._record_configuration_snapshot(entries)
+
     async def configure(self, key: str, value: str):
         """Configure charger by setting the key to target value.
 
@@ -1509,6 +1531,7 @@ class ChargePoint(cp):
         req = call.GetConfiguration(key=[key])
 
         resp = await self.call(req)
+        self._record_unknown_config_keys(getattr(resp, "unknown_key", None))
 
         if resp.unknown_key is not None:
             if key in resp.unknown_key:
@@ -1778,6 +1801,7 @@ class ChargePoint(cp):
 
         self._ensure_tx_store_loaded()
         self.hass.async_create_task(self.async_update_device_info_v16(kwargs))
+        self._record_boot_notification(kwargs)
         self._register_boot_notification()
         return resp
 
