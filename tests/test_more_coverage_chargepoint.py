@@ -352,13 +352,6 @@ async def test_update_traverses_children_and_skips_visited(
                     dev = self.async_get_device(identifiers)
                     return [dev] if dev is not None else []
 
-                @property
-                def _devices(self):
-                    # Duplicate the child to force the same ID to be appended twice -> will hit continue (L612)
-                    return SimpleNamespace(
-                        get_devices_for_config_entry_id=lambda _id: [root, child, child]
-                    )
-
             class FakeER:
                 """Fake ER: only ever passed to the patched entries_for_device."""
 
@@ -396,6 +389,7 @@ async def test_update_traverses_children_and_skips_visited(
             # task that resolves a registry inside this await sees the fakes.
             originals = (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,
@@ -403,6 +397,14 @@ async def test_update_traverses_children_and_skips_visited(
             with monkeypatch.context() as mp:
                 mp.setattr(
                     mod.device_registry, "async_get", lambda _: FakeDR(), raising=True
+                )
+                # Duplicate the child to force the same ID to be appended
+                # twice -> the second pop hits the visited 'continue'.
+                mp.setattr(
+                    mod.device_registry,
+                    "async_entries_for_config_entry",
+                    lambda _dr, _entry_id: [root, child, child],
+                    raising=True,
                 )
                 mp.setattr(
                     mod.entity_registry, "async_get", lambda _: FakeER(), raising=True
@@ -427,6 +429,7 @@ async def test_update_traverses_children_and_skips_visited(
             # helpers being restored right here is the actual contract.
             assert originals == (
                 mod.device_registry.async_get,
+                mod.device_registry.async_entries_for_config_entry,
                 mod.entity_registry.async_get,
                 mod.entity_registry.async_entries_for_device,
                 mod.async_dispatcher_send,
@@ -787,6 +790,12 @@ async def test_update_real_registry_includes_child_device(
             # the charger via via_device_id, holding one live entity.
             dev_reg = dr.async_get(hass)
             if legacy_mapping:
+                if not hasattr(dev_reg, "_devices"):
+                    pytest.skip(
+                        "registry has no _devices: this HA's real registry is "
+                        "already legacy, so the legacy_mapping=False case "
+                        "reproduces the crash"
+                    )
                 dev_reg.devices = dev_reg._devices
             root = next(
                 iter(
