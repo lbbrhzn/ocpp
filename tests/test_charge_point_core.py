@@ -295,6 +295,21 @@ def test_get_energy_kwh_and_session_derive(hass):
     assert cp._metrics[(1, csess.session_energy)].unit == HA_ENERGY_UNIT
 
 
+def test_process_measurands_defaults_missing_power_unit(hass):
+    """Missing power units default to watts before kW normalization."""
+    cp = _mk_cp(hass)
+
+    cp.process_measurands(
+        [[_mv("Power.Active.Import", 500.0)]],
+        is_transaction=False,
+        connector_id=1,
+    )
+
+    metric = cp._metrics[(1, "Power.Active.Import")]
+    assert metric.value == pytest.approx(0.5)
+    assert metric.unit == HA_POWER_UNIT
+
+
 @pytest.mark.asyncio
 async def test_handle_call_wraps_notimplementederror_and_sends(hass):
     """Test _handle_call Path: NotImplementedError → _send(...)."""
