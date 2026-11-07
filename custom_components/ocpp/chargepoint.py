@@ -1091,7 +1091,9 @@ class ChargePoint(cp):
                     continue
                 active_entities.add(ent.entity_id)
 
-            for dev in dr.devices:
+            for dev in device_registry.async_entries_for_config_entry(
+                dr, self.entry.entry_id
+            ):
                 if dev.via_device_id == dev_id and dev.id not in visited:
                     to_visit.append(dev.id)
 
