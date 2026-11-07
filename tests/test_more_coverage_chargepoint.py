@@ -353,16 +353,11 @@ async def test_update_traverses_children_and_skips_visited(
                     return [dev] if dev is not None else []
 
                 @property
-                def devices(self):
+                def _devices(self):
                     # Duplicate the child to force the same ID to be appended twice -> will hit continue (L612)
-                    class Container:
-                        def __iter__(self_inner):
-                            return iter([root, child, child])
-
-                        def values(self_inner):
-                            return [root, child, child]
-
-                    return Container()
+                    return SimpleNamespace(
+                        get_devices_for_config_entry_id=lambda _id: [root, child, child]
+                    )
 
             class FakeER:
                 """Fake ER: only ever passed to the patched entries_for_device."""
@@ -752,3 +747,82 @@ async def test_ocppv16_clean_measurands_logic():
     result_c = await CPv16.get_supported_measurands(cp)
 
     assert result_c == ""
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9417, "cp_id": "CP_real_registry", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_real_registry"])
+@pytest.mark.parametrize("port", [9417])
+@pytest.mark.parametrize("legacy_mapping", [False, True])
+async def test_update_real_registry_includes_child_device(
+    hass, socket_enabled, cp_id, port, setup_config_entry, legacy_mapping
+):
+    """Regression for #2227: update() walks a real registry's child devices.
+
+    Older HA exposes ``DeviceRegistry.devices`` as a mapping whose iteration
+    yields device-id strings; newer HA yields DeviceEntry. ``legacy_mapping``
+    swaps in the real underlying mapping to reproduce the older behaviour.
+    """
+    from homeassistant.helpers import device_registry as dr, entity_registry as er
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.ocpp.const import DATA_UPDATED, DOMAIN
+
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+
+            # Real registries (no fakes): a connector child device linked to
+            # the charger via via_device_id, holding one live entity.
+            dev_reg = dr.async_get(hass)
+            if legacy_mapping:
+                dev_reg.devices = dev_reg._devices
+            root = next(
+                iter(
+                    dev_reg.async_get_devices(
+                        identifiers={(DOMAIN, srv.settings.cpid), (DOMAIN, srv.id)},
+                        config_entry_id=srv.entry.entry_id,
+                    )
+                )
+            )
+            child = dev_reg.async_get_or_create(
+                config_entry_id=srv.entry.entry_id,
+                identifiers={(DOMAIN, f"{srv.settings.cpid}-conn1")},
+                via_device_id=root.id,
+            )
+            ent = er.async_get(hass).async_get_or_create(
+                "sensor",
+                DOMAIN,
+                "child_unique",
+                config_entry=srv.entry,
+                device_id=child.id,
+            )
+            hass.states.async_set(ent.entity_id, "on")
+
+            dispatched = []
+            unsub = async_dispatcher_connect(
+                hass, DATA_UPDATED, lambda ids: dispatched.append(ids)
+            )
+            try:
+                await srv.update(srv.settings.cpid)
+                await hass.async_block_till_done()
+            finally:
+                unsub()
+
+            assert ent.entity_id in dispatched[-1]
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
