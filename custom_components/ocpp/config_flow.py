@@ -5,7 +5,6 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    CONN_CLASS_LOCAL_PUSH,
     OptionsFlow,
 )
 from homeassistant.core import callback
@@ -151,7 +150,6 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 2
     MINOR_VERSION = 3
-    CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
         """Initialize."""
