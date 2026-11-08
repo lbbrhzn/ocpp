@@ -25,6 +25,7 @@ from .api import (
     CLEAR_PROFILE_SERVICE_DATA_SCHEMA,
     CONF_SERVICE_DATA_SCHEMA,
     GCONF_SERVICE_DATA_SCHEMA,
+    GCS_SERVICE_DATA_SCHEMA,
     GDIAG_SERVICE_DATA_SCHEMA,
     TRANS_SERVICE_DATA_SCHEMA,
     UFW_SERVICE_DATA_SCHEMA,
@@ -210,6 +211,9 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
     async def _route_get_configuration(call: ServiceCall) -> ServiceResponse:
         return await _route("handle_get_configuration", call)
 
+
+    async def _route_get_composite_schedule(call: ServiceCall) -> ServiceResponse:
+        return await _route("handle_get_composite_schedule", call)
     async def _route_data_transfer(call: ServiceCall) -> None:
         await _route("handle_data_transfer", call)
 
@@ -231,6 +235,7 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
     services = [
         csvcs.service_configure,
         csvcs.service_get_configuration,
+        csvcs.service_get_composite_schedule,
         csvcs.service_data_transfer,
         csvcs.service_trigger_custom_message,
         csvcs.service_clear_profile,
@@ -251,6 +256,13 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         csvcs.service_get_configuration,
         _route_get_configuration,
         GCONF_SERVICE_DATA_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        csvcs.service_get_composite_schedule,
+        _route_get_composite_schedule,
+        GCS_SERVICE_DATA_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
