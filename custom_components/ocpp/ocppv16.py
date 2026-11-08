@@ -417,6 +417,12 @@ class ChargePoint(cp):
             session_kwh = int(meter_stop) / 1000.0 - float(self._metrics[ms_key].value)
         except Exception:
             session_kwh = 0.0
+        # A stop below the start value can't be told apart from a
+        # session-relative meter, a meter replacement, a reset or a rollover,
+        # so keep the session value already derived instead of publishing a
+        # negative or the raw register.
+        if session_kwh < 0:
+            return
         self._metrics[(connector_id, csess.session_energy)].value = session_kwh
 
     def _forget_stop_candidate(self, connector_id: int) -> None:
@@ -1889,6 +1895,18 @@ class ChargePoint(cp):
                 meter_start_kwh = 0.0
             self._metrics[(connector_id, csess.meter_start)].value = meter_start_kwh
             self._metrics[(connector_id, csess.meter_start)].unit = HA_ENERGY_UNIT
+            # The energy reporting mode is detected from MeterValues, so a
+            # detection made in an earlier transaction must not decide how
+            # this one is read. The flag is charger-wide, so it is kept while a
+            # transaction is still running on another connector: that session
+            # may be the one it was detected on. Connector 0 is the main meter
+            # and never holds a transaction of its own.
+            if not any(
+                tx
+                for conn, tx in self._active_tx.items()
+                if conn not in (0, connector_id)
+            ):
+                self._charger_reports_session_energy = False
 
             self._metrics[(connector_id, csess.session_time)].value = 0
             self._metrics[(connector_id, csess.session_time)].unit = UnitOfTime.MINUTES
