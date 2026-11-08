@@ -4243,15 +4243,16 @@ async def test_session_energy_mode_does_not_outlive_its_transaction(
 )
 @pytest.mark.parametrize("cp_id", ["CP_session_mode_two_conn"])
 @pytest.mark.parametrize("port", [9400])
-async def test_session_energy_mode_cleared_while_another_connector_runs(
+async def test_session_energy_mode_kept_while_another_connector_runs(
     hass, socket_enabled, cp_id, port, setup_config_entry
 ):
-    """A new transaction clears the mode even while another connector charges.
+    """A new transaction keeps the mode while another connector charges.
 
-    The mode is charger-wide. On a lifetime-register charger, an anomalous
-    sample on connector 1 switches it on while connector 2 is mid-session.
-    Once connector 1 starts its next transaction, both sessions are derived
-    as EAIR - meter_start again, and connector 2's stop is too.
+    The charger reports session energy in MeterValues against a lifetime
+    meterStart. Connector 1's first sample is below its meter_start, which
+    detects the mode. A StartTransaction on connector 2 while connector 1 is
+    still charging must not clear it, or connector 1's next sample, now above
+    its meter_start, would be derived as EAIR - meter_start.
     """
     cs = setup_config_entry
     async with websockets.connect(
@@ -4275,40 +4276,20 @@ async def test_session_energy_mode_cleared_while_another_connector_runs(
                 )
                 return resp.transaction_id
 
-            async def stop(transaction_id: int, meter_stop: int) -> None:
-                await client.call(
-                    call.StopTransaction(
-                        meter_stop=meter_stop,
-                        timestamp=datetime.now(tz=UTC).isoformat(),
-                        transaction_id=transaction_id,
-                        reason="EVDisconnected",
-                        id_tag="test_cp",
-                    )
-                )
-
             def session(connector_id: int) -> float:
                 return cs.get_metric(cpid, "Energy.Session", connector_id=connector_id)
 
-            tx1 = await start(1, 356000)
-            tx2 = await start(2, 356000)
-            assert await client.call(_eair_sample(2, tx2, 356200)) is not None
-            assert session(2) == pytest.approx(0.2, rel=1e-6)
+            tx1 = await start(1, 5000)
+            assert await client.call(_eair_sample(1, tx1, 4900)) is not None
+            assert session(1) == pytest.approx(4.9, rel=1e-6)
 
-            # Anomalous sample on connector 1: taken as session energy.
-            assert await client.call(_eair_sample(1, tx1, 8620)) is not None
-            assert session(1) == pytest.approx(8.62, rel=1e-6)
-            await stop(tx1, 356300)
-
-            tx1 = await start(1, 356300)
-            assert await client.call(_eair_sample(2, tx2, 357000)) is not None
-            assert session(2) == pytest.approx(1.0, rel=1e-6), (
-                f"connector 2 shows the raw register: {session(2)}"
+            tx2 = await start(2, 20000)
+            assert await client.call(_eair_sample(1, tx1, 5100)) is not None
+            assert session(1) == pytest.approx(5.1, rel=1e-6), (
+                f"connector 1 lost the mode when connector 2 started: {session(1)}"
             )
-            assert await client.call(_eair_sample(1, tx1, 356800)) is not None
-            assert session(1) == pytest.approx(0.5, rel=1e-6)
-
-            await stop(tx2, 357100)
-            assert session(2) == pytest.approx(1.1, rel=1e-6)
+            assert await client.call(_eair_sample(2, tx2, 21000)) is not None
+            assert session(2) == pytest.approx(21.0, rel=1e-6)
 
         finally:
             task.cancel()

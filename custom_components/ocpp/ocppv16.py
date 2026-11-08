@@ -1842,11 +1842,16 @@ class ChargePoint(cp):
             self._metrics[(connector_id, csess.meter_start)].unit = HA_ENERGY_UNIT
             # The energy reporting mode is detected from MeterValues, so a
             # detection made in an earlier transaction must not decide how
-            # this one is read. The flag is charger-wide: a session running on
-            # another connector is re-detected on its next sample if that
-            # sample is below its meter_start or meter_start is 0, and its stop
-            # never goes negative (see _apply_stop_energy).
-            self._charger_reports_session_energy = False
+            # this one is read. The flag is charger-wide, so it is kept while a
+            # transaction is still running on another connector: that session
+            # may be the one it was detected on. Connector 0 is the main meter
+            # and never holds a transaction of its own.
+            if not any(
+                tx
+                for conn, tx in self._active_tx.items()
+                if conn not in (0, connector_id)
+            ):
+                self._charger_reports_session_energy = False
 
             self._metrics[(connector_id, csess.session_time)].value = 0
             self._metrics[(connector_id, csess.session_time)].unit = UnitOfTime.MINUTES
