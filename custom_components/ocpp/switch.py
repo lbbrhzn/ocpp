@@ -92,6 +92,7 @@ SWITCHES: Final[list[OcppSwitchDescription]] = [
             ChargePointStatus.suspended_ev.value,
             ChargePointStatus.finishing.value,
             ChargePointStatus.reserved.value,
+            ChargePointStatus.faulted.value,  # a fault is not out of service
         ],
         default_state=True,
         per_connector=True,

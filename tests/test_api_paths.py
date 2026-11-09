@@ -249,25 +249,35 @@ async def test_get_available_paths(hass):
     # Create a MockConfigEntry with existing standard config
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
     cs = CentralSystem(hass, entry)
-    # charger unavailable by status for connector 0
+    # no charger with this id
+    assert cs.get_available("test_cpid") is None
+
+    # charger disconnected
     cp = _install_dummy_cp(cs, status=STATE_UNAVAILABLE)
     assert cs.get_available("test_cpid", connector_id=0) is False
 
-    # specific connector via per-connector metric, charger available
-    cp = _install_dummy_cp(cs, status=STATE_OK)
-    meas = cstat.status_connector
-    cp._metrics[(1, meas)] = M("Charging", None)
+    # charger connected, no connector status reported yet
+    cp.status = STATE_OK
+    assert cs.get_available("test_cpid", connector_id=0) is True
     assert cs.get_available("test_cpid", connector_id=1) is True
 
-    # via flat extra_attr aggregator
-    cp2 = _install_dummy_cp(cs, cpid="agg", cp_id="CP_AGG", status=STATE_OK)
-    flat = M("Available", None)
-    flat.extra_attr = {2: "Finishing"}
-    cp2._metrics[meas] = flat
-    assert cs.get_available("agg", connector_id=2) is True
 
-    # fall back to charger status if no info
-    assert cs.get_available("agg", connector_id=3) is True  # charger STATE_OK
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [*(status.value for status in ChargePointStatus), "Occupied", "VendorSpecific"],
+)
+async def test_connector_status_does_not_change_availability(hass, status):
+    """Only the charger connection decides, whatever the connector reports."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_CONFIG_DATA.copy())
+    cs = CentralSystem(hass, entry)
+    cp = _install_dummy_cp(cs, status=STATE_OK)
+    cp._metrics[(1, cstat.status_connector)] = M(status, None)
+
+    assert cs.get_available("test_cpid", connector_id=1) is True
+
+    cp.status = STATE_UNAVAILABLE
+    assert cs.get_available("test_cpid", connector_id=1) is False
 
 
 @pytest.mark.asyncio

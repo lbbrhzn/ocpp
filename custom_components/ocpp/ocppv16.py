@@ -32,7 +32,6 @@ from ocpp.v16.enums import (
     ClearChargingProfileStatus,
     ConfigurationStatus,
     DataTransferStatus,
-    Measurand,
     MessageTrigger,
     ReadingContext,
     RegistrationStatus,
@@ -1871,6 +1870,7 @@ class ChargePoint(cp):
             if status in (
                 ChargePointStatus.suspended_ev.value,
                 ChargePointStatus.suspended_evse.value,
+                ChargePointStatus.faulted.value,
             ):
                 self._zero_flow_measurands(connector_id)
 
@@ -2068,17 +2068,3 @@ class ChargePoint(cp):
         self._metrics[0][cstat.heartbeat].value = now
         self._async_refresh_metric_entities([cstat.heartbeat])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
-
-    def _zero_flow_measurands(self, connector_id: int) -> None:
-        """Clear the readings that only have meaning while current is flowing."""
-        for meas in [
-            Measurand.current_import.value,
-            Measurand.power_active_import.value,
-            Measurand.power_reactive_import.value,
-            Measurand.current_export.value,
-            Measurand.power_active_export.value,
-            Measurand.power_reactive_export.value,
-        ]:
-            key = (connector_id, meas)
-            if key in self._metrics:
-                self._metrics[key].value = 0

@@ -410,6 +410,8 @@ class ChargePoint(cp):
         )
         if not downgrades_live_charge:
             self._metrics[(global_idx, cstat.status_connector)].value = translated.value
+        if translated == ChargePointStatusv16.faulted:
+            self._zero_flow_measurands(global_idx)
 
         evse_status = self._aggregate_evse_status(evse_id)
         if evse_status is not None:

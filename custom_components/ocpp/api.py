@@ -717,49 +717,18 @@ class CentralSystem:
         return None
 
     def get_available(self, id: str, connector_id: int | None = None):
-        """Return whether the charger (or a specific connector) is available."""
-        cp_id, m, cp, n_connectors = self._get_metrics(id)
+        """Return whether the charger is connected.
+
+        Only a lost connection makes entities unavailable, whatever connector_id
+        is. A connector's status, Faulted included, is something to show, not a
+        reason to hide it.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
 
         if cp is None:
             return None
 
-        if self._norm_conn(connector_id) == 0:
-            return cp.status == STATE_OK
-
-        status_val = None
-        with contextlib.suppress(Exception):
-            status_val = m[
-                (self._norm_conn(connector_id), cstat.status_connector)
-            ].value
-
-        if not status_val:
-            try:
-                flat = m[cstat.status_connector]
-                if hasattr(flat, "extra_attr"):
-                    status_val = flat.extra_attr.get(
-                        self._norm_conn(connector_id)
-                    ) or getattr(flat, "value", None)
-            except Exception:
-                pass
-
-        if not status_val:
-            return cp.status == STATE_OK
-
-        ok_statuses_norm = {
-            "available",
-            "preparing",
-            "charging",
-            "suspendedev",
-            "suspendedevse",
-            "finishing",
-            "occupied",
-            "reserved",
-            "unavailable",  # do NOT make HA entities unavailable for this OCPP state
-        }
-
-        ret = _norm(status_val) in ok_statuses_norm
-        # If backend/WS is down, entity should be unavailable regardless.
-        return ret and (cp.status == STATE_OK)
+        return cp.status == STATE_OK
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""
