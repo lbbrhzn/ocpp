@@ -1,5 +1,6 @@
 """Representation of a OCPP 1.6 charging station."""
 
+import asyncio
 from datetime import datetime, timedelta, UTC
 import hashlib
 import logging
@@ -201,6 +202,16 @@ class ChargePoint(cp):
             hass, _TX_STORE_VERSION, tx_store_key(entry.entry_id, id)
         )
         self._tx_store_load = None
+        # Smart Charging configuration keys the managed limits need (both
+        # required by OCPP 1.6 section 9.4), read on first use (#2148) and
+        # kept for the lifetime of this object, like the feature profiles and
+        # connector count read in post_connect. None means not read yet.
+        self._rate_units: tuple[bool, bool] | None = None  # (amps, watts)
+        # An int, or the charger's answer when it is not a number.
+        self._max_stack_level: int | str | None = None
+        # The library sends one request at a time, but two first limits would
+        # both read; the second waits for the first one's answer instead.
+        self._smart_charging_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Transaction identity, timing and containment (#2123)
@@ -864,6 +875,65 @@ class ChargePoint(cp):
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
 
+    async def _read_config_key(self, key: str) -> str | None:
+        """Read a configuration key: its value, or None without one.
+
+        A failed read raises, naming the key.
+        """
+        try:
+            value = await self.get_configuration(key)
+        except Exception as ex:
+            raise HomeAssistantError(f"Could not read {key} ({ex!r})") from ex
+        return value if isinstance(value, str) and value else None
+
+    async def _smart_charging_config(self) -> tuple[tuple[bool, bool], int]:
+        """Return the accepted rate units and the reported maximum stack level.
+
+        Each is read once. A failed read, or an answer without a value, keeps
+        nothing, so the next limit reads again. There is no fallback stack
+        level: one below a profile the charger already holds would be
+        accepted without effect.
+        """
+        async with self._smart_charging_lock:
+            rate_units = self._rate_units
+            if rate_units is None:
+                units = await self._read_config_key(
+                    ckey.charging_schedule_allowed_charging_rate_unit
+                )
+                # No answer, "Unknown" or no known unit: Amps, as before.
+                rate_units = _allowed_charging_rate_units(units)
+                if units is not None:
+                    self._rate_units = rate_units
+            if self._max_stack_level is None:
+                level = await self._read_config_key(ckey.charge_profile_max_stack_level)
+                if level is None:
+                    raise HomeAssistantError(
+                        f"Charger returned no {ckey.charge_profile_max_stack_level}"
+                    )
+                if level == "Unknown":
+                    # get_configuration's answer for a key the charger lists
+                    # as unknown. Level 1 is what releases up to 0.12.x sent
+                    # such a charger, so profiles they left are replaced, and
+                    # stack_level_below_max still brings it down to 0.
+                    _LOGGER.warning(
+                        "Charger does not support %s; using stack level 1",
+                        ckey.charge_profile_max_stack_level,
+                    )
+                    self._max_stack_level = 1
+                else:
+                    try:
+                        self._max_stack_level = int(level)
+                    except ValueError:
+                        self._max_stack_level = level
+            max_stack_level = self._max_stack_level
+        if not isinstance(max_stack_level, int):
+            raise HomeAssistantError(
+                f"Charger reported {ckey.charge_profile_max_stack_level}"
+                f" {max_stack_level!r}; OCPP 1.6 requires a number for smart"
+                " charging"
+            )
+        return rate_units, max_stack_level
+
     async def _resolve_charge_rate(
         self,
         limit_amps: int | float | None,
@@ -871,14 +941,8 @@ class ChargePoint(cp):
         conn_id: int,
     ) -> tuple[str, float, int]:
         """Resolve units, electrical conversion and stack level for managed limits."""
-        # Determine allowed unit (default to Amps if not reported)
-        units_resp = await self.get_configuration(
-            ckey.charging_schedule_allowed_charging_rate_unit
-        )
-        if not units_resp:
-            _LOGGER.debug("Charging rate unit not reported; assuming Amps")
-
-        supports_amps, supports_watts = _allowed_charging_rate_units(units_resp)
+        rate_units, stack_level = await self._smart_charging_config()
+        supports_amps, supports_watts = rate_units
         # Watt-only chargers (Huawei FusionCharge reports "Power") must not
         # fall back to the old limit_watts=22000 default when the HA number
         # entity passes only limit_amps.
@@ -914,13 +978,6 @@ class ChargePoint(cp):
             else ChargingRateUnitType.watts.value
         )
 
-        try:
-            stack_level_resp = await self.get_configuration(
-                ckey.charge_profile_max_stack_level
-            )
-            stack_level = int(stack_level_resp)
-        except Exception:
-            stack_level = 1
         # The 1.6 spec reads as both a maximum value and a count; some
         # chargers (Timxon A0, Morek MEV11, ABB Terra AC) take it as a count.
         if self.settings.stack_level_below_max:

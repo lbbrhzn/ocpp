@@ -283,7 +283,13 @@ async def test_new_master_ignores_old_restore_data(
     assert entity._confirmed_value is None
     cp = _attach_protocol(hass, flat_entry, central)
     cp.call = AsyncMock(return_value=SimpleNamespace(status="Accepted"))
-    cp.get_configuration = AsyncMock(return_value="Current")
+    cp.get_configuration = AsyncMock(
+        side_effect=lambda key: (
+            "Current"
+            if key == ConfigurationKey.charging_schedule_allowed_charging_rate_unit
+            else "3"
+        )
+    )
     await entity.async_set_native_value(18)
     central.charge_points.clear()
     assert await hass.config_entries.async_reload(flat_entry.entry_id)

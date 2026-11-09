@@ -9,6 +9,7 @@ the collaborators set_charge_rate depends on:
 They avoid any parallel/dummy implementation of ChargePoint.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +52,9 @@ def cp_v16():
     cp._active_tx = {}
     cp._tx_indeterminate = set()
     cp._accepted_stack_levels = set()
+    cp._rate_units = None
+    cp._max_stack_level = None
+    cp._smart_charging_lock = asyncio.Lock()
     cp._metrics = _ConnectorAwareMetrics()
     cp.settings = SimpleNamespace(
         charge_point_max_profile_absolute=False, stack_level_below_max=False
@@ -780,6 +784,7 @@ async def _levels_sent(cp, monkeypatch, reported):
         (True, "5", 4),
         (True, "1", 0),
         (True, "0", 0),
+        (False, "-1", 0),
     ],
 )
 async def test_every_managed_profile_uses_the_resolved_stack_level(
@@ -797,31 +802,6 @@ async def test_every_managed_profile_uses_the_resolved_stack_level(
         "TxProfile": expected,
         "TxDefaultProfile": expected,
     }
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("below_max", "reported", "expected"),
-    [
-        (False, "Unknown", 1),
-        (False, "5.0", 1),
-        (False, None, 1),
-        (False, "-1", 0),
-        (False, RuntimeError("no answer"), 1),
-        (True, "Unknown", 0),
-        (True, RuntimeError("no answer"), 0),
-    ],
-)
-async def test_an_unusable_maximum_falls_back_safely(
-    cp_v16, monkeypatch, below_max, reported, expected
-):
-    """An unparsable or missing maximum keeps the old fallback of 1.
-
-    A negative report is clamped to 0, so no level ever goes below 0.
-    """
-    cp_v16.settings.stack_level_below_max = below_max
-    sent = await _levels_sent(cp_v16, monkeypatch, reported)
-    assert set(sent.values()) == {expected}
 
 
 @pytest.mark.asyncio
@@ -977,3 +957,143 @@ async def test_a_level_once_accepted_is_not_blamed_for_a_refusal(cp_v16, monkeyp
     with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
         await cp_v16.set_session_limit(1, 10)
     assert _SUGGEST_OPTION not in str(err.value)
+
+
+def _counting_configuration(answers):
+    """Fake get_configuration answering from answers and counting reads per key.
+
+    An answer that is an exception is raised; a list is consumed one per read.
+    """
+    reads = {}
+
+    async def configuration(key):
+        reads[key] = reads.get(key, 0) + 1
+        answer = answers[key]
+        if isinstance(answer, list):
+            answer = answer.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return configuration, reads
+
+
+_UNITS = ckey.charging_schedule_allowed_charging_rate_unit
+_STACK = ckey.charge_profile_max_stack_level
+
+
+@pytest.mark.asyncio
+async def test_configuration_is_read_once_across_writes(cp_v16, monkeypatch):
+    """Several writes send one GetConfiguration per key (#2148)."""
+    configuration, reads = _counting_configuration({_UNITS: "Current", _STACK: "5"})
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    for amps in (6, 10, 16):
+        assert await cp_v16._resolve_charge_rate(amps, None, 0) == ("A", amps, 5)
+    assert reads == {_UNITS: 1, _STACK: 1}
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_first_writes_read_once(cp_v16, monkeypatch):
+    """A second write waits for the first one's answer instead of reading again."""
+    release = asyncio.Event()
+    reads = {}
+
+    async def configuration(key):
+        reads[key] = reads.get(key, 0) + 1
+        await release.wait()
+        return {_UNITS: "Power", _STACK: "3"}[key]
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    writes = [
+        asyncio.create_task(cp_v16._resolve_charge_rate(None, watts, 0))
+        for watts in (7000, 8000)
+    ]
+    await asyncio.sleep(0)
+    release.set()
+    assert await asyncio.gather(*writes) == [("W", 7000, 3), ("W", 8000, 3)]
+    assert reads == {_UNITS: 1, _STACK: 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_key", [_UNITS, _STACK])
+async def test_a_failed_read_fails_the_write_and_is_retried(
+    cp_v16, monkeypatch, failed_key
+):
+    """No fallback: the write fails naming the key, and the next one reads again."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    answers = {_UNITS: "Current", _STACK: "5"}
+    answers[failed_key] = [TimeoutError(), answers[failed_key]]
+    configuration, reads = _counting_configuration(answers)
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    with pytest.raises(HomeAssistantError, match=f"Could not read {failed_key}"):
+        await cp_v16._resolve_charge_rate(10, None, 0)
+    assert await cp_v16._resolve_charge_rate(10, None, 0) == ("A", 10, 5)
+    assert reads[failed_key] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answer", "reads_expected"), [("Unknown", 1), ("", 2), (None, 2)]
+)
+async def test_an_unreported_rate_unit_means_amps(
+    cp_v16, monkeypatch, answer, reads_expected
+):
+    """No usable unit means Amps, as before. Only an actual answer is kept."""
+    configuration, reads = _counting_configuration({_UNITS: answer, _STACK: "5"})
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    for _ in range(2):
+        assert await cp_v16._resolve_charge_rate(10, None, 0) == ("A", 10, 5)
+    assert reads[_UNITS] == reads_expected
+
+
+@pytest.mark.asyncio
+async def test_a_stack_level_that_is_not_a_number_fails_every_write(
+    cp_v16, monkeypatch
+):
+    """No guessed level, which a held profile could outrank; not asked again."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    configuration, reads = _counting_configuration({_UNITS: "Current", _STACK: "5.0"})
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    for _ in range(2):
+        with pytest.raises(HomeAssistantError, match="OCPP 1.6 requires a number"):
+            await cp_v16._resolve_charge_rate(10, None, 0)
+    assert reads == {_UNITS: 1, _STACK: 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("below_max", "expected"), [(False, 1), (True, 0)])
+async def test_an_unknown_stack_level_key_uses_level_1(
+    cp_v16, monkeypatch, caplog, below_max, expected
+):
+    """A charger without the key gets level 1, as up to 0.12.x; read once.
+
+    stack_level_below_max still applies on top, so the user can choose 0.
+    """
+    cp_v16.settings.stack_level_below_max = below_max
+    configuration, reads = _counting_configuration(
+        {_UNITS: "Current", _STACK: "Unknown"}
+    )
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    for _ in range(2):
+        assert await cp_v16._resolve_charge_rate(10, None, 0) == ("A", 10, expected)
+    assert reads == {_UNITS: 1, _STACK: 1}
+    warnings = [r for r in caplog.records if "does not support" in r.message]
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["", None])
+async def test_a_stack_level_without_a_value_is_read_again(cp_v16, monkeypatch, answer):
+    """An answer without a value is not kept: the write fails, the next reads again."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    configuration, reads = _counting_configuration(
+        {_UNITS: "Current", _STACK: [answer, "5"]}
+    )
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    with pytest.raises(HomeAssistantError, match=f"Charger returned no {_STACK}"):
+        await cp_v16._resolve_charge_rate(10, None, 0)
+    assert await cp_v16._resolve_charge_rate(10, None, 0) == ("A", 10, 5)
+    assert reads == {_UNITS: 1, _STACK: 2}

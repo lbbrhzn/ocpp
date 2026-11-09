@@ -2592,9 +2592,9 @@ async def test_set_charge_rate_units_none_fallback_to_amps_and_accept_first(
             await wait_ready(cs.charge_points[cp_id])
             srv_cp: ServerCP = cs.charge_points[cp_id]
 
-            # Force fallback path
+            # Force the unit fallback; the stack level has no fallback.
             async def fake_get_conf(key):
-                return None
+                return "3" if key == "ChargeProfileMaxStackLevel" else None
 
             monkeypatch.setattr(
                 srv_cp, "get_configuration", fake_get_conf, raising=True
