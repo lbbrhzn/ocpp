@@ -853,6 +853,8 @@ class ChargePoint(cp):
         """Share teardown and finish it even if a waiter is repeatedly cancelled."""
         if session is self._session:
             self.status = STATE_UNAVAILABLE
+            # Entities don't poll, so they only learn this from an update.
+            self.hass.async_create_task(self.update(self.settings.cpid))
         if session["cleanup"] is None:
             session["cleanup"] = asyncio.create_task(
                 self._close_session(session, asyncio.current_task())
@@ -932,6 +934,8 @@ class ChargePoint(cp):
                 return
             self._reset_protocol_generation_state()
             self.status = STATE_OK
+            # A reconnecting charger may stay silent for a long time.
+            self.hass.async_create_task(self.update(self.settings.cpid))
             self._connection = connection
             self._metrics[(0, cstat.reconnects)].value += 1
             installed = True
