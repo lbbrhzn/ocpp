@@ -40,6 +40,10 @@ To use these chargers:
 
 This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (firmware 1.6.6).
 
+### Charging profiles rejected at the reported stack level
+
+The charger rejects charging profiles at the `ChargeProfileMaxStackLevel` it reports ([Issue #1737](https://github.com/lbbrhzn/ocpp/issues/1737)). Enable **Charger accepts only stack levels below its reported maximum** in the charger options (see [Charging profile stack level](Charge_automation.md#charging-profile-stack-level)).
+
 ### [ABB Terra AC-W7-G5-R-0](https://new.abb.com/products/6AGC082156/tac-w7-g5-r-0)
 
 ### [ABB Terra AC-W11-G5-R-0](https://new.abb.com/products/6AGC082156/tac-w11-g5-r-0)
@@ -163,6 +167,8 @@ Reconnection (either protocol): the charger's OCPP client does not reliably redi
 Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.
 
 The "Charger idle sampling interval" is not supported. Set this to **0** to avoid a "ClockAlignedDataInterval is read-only" warning.
+
+The MEV11 (firmware A0-MEV-V2.1.8) reports `ChargeProfileMaxStackLevel` 5 but rejects charging profiles at level 5. Enable **Charger accepts only stack levels below its reported maximum** in the charger options (see [Charging profile stack level](Charge_automation.md#charging-profile-stack-level)).
 
 ## [Ocular LTE Plus v3](https://evse.com.au/) (tested: reports as BS-EV22, firmware 448.3251.0Q03197)
 Works, with some firmware quirks worth knowing about. The same behaviour has been seen on the BS-EV07, so it likely applies to other chargers reporting the vendor `BS AC EV Charger`.

@@ -50,8 +50,11 @@ def cp_v16():
     cp.active_transaction_id = 0
     cp._active_tx = {}
     cp._tx_indeterminate = set()
+    cp._accepted_stack_levels = set()
     cp._metrics = _ConnectorAwareMetrics()
-    cp.settings = SimpleNamespace(charge_point_max_profile_absolute=False)
+    cp.settings = SimpleNamespace(
+        charge_point_max_profile_absolute=False, stack_level_below_max=False
+    )
     # set_charge_rate calls these (we’ll monkeypatch per-test):
     # - cp.get_configuration(key)
     # - cp.call(req)
@@ -676,19 +679,13 @@ def test_session_default_request_builder_v16(cp_v16):
     assert request.connector_id == 2
     profile = request.cs_charging_profiles
     assert profile["chargingProfileId"] == 2002
-    assert profile["stackLevel"] == 4
+    assert profile["stackLevel"] == 5
     assert "transactionId" not in profile
     assert profile["chargingProfileKind"] == "Relative"
     assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
     assert profile["chargingSchedule"]["chargingSchedulePeriod"] == [
         {"startPeriod": 0, "limit": 12.0}
     ]
-    for reported, expected in ((0, 0), (1, 1), (2, 1)):
-        request = cp_v16.build_session_default_request(
-            1, 2001, {"unit": "A", "value": 6.0, "stack_level": reported}
-        )
-        assert request.cs_charging_profiles["stackLevel"] == expected
-        assert expected <= reported
 
 
 @pytest.mark.asyncio
@@ -715,7 +712,7 @@ async def test_set_session_default_limit_v16_needs_no_transaction(cp_v16, monkey
     assert await cp_v16.set_session_default_limit(1, 10) is True
     assert sent[-1].connector_id == 1
     profile = sent[-1].cs_charging_profiles
-    assert (profile["chargingProfileId"], profile["stackLevel"]) == (2001, 4)
+    assert (profile["chargingProfileId"], profile["stackLevel"]) == (2001, 5)
     assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
     assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
 
@@ -739,3 +736,244 @@ async def test_set_session_default_limit_v16_needs_no_transaction(cp_v16, monkey
     monkeypatch.setattr(cp_v16, "call", broken)
     with pytest.raises(HomeAssistantError, match="failed: closed"):
         await cp_v16.set_session_default_limit(1, 10)
+
+
+async def _levels_sent(cp, monkeypatch, reported):
+    """Run set_charge_rate with an active transaction; return levels per purpose.
+
+    The station ceiling is refused so the TxProfile and TxDefaultProfile legs
+    are sent too. reported is what ChargeProfileMaxStackLevel answers or an
+    exception to raise.
+    """
+    sent = {}
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            if isinstance(reported, Exception):
+                raise reported
+            return reported
+        pytest.fail(f"Unexpected get_configuration key: {key}")
+
+    async def record(req):
+        profile = req.cs_charging_profiles
+        sent[profile["chargingProfilePurpose"]] = profile["stackLevel"]
+        if profile["chargingProfilePurpose"] == "ChargePointMaxProfile":
+            return SimpleNamespace(status=ChargingProfileStatus.rejected)
+        return SimpleNamespace(status=ChargingProfileStatus.accepted)
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", record)
+    cp._active_tx = {1: 55}
+    assert await cp.set_charge_rate(limit_amps=10, conn_id=1) is True
+    return sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("below_max", "reported", "expected"),
+    [
+        (False, "5", 5),
+        (False, "0", 0),
+        (False, "1", 1),
+        (True, "5", 4),
+        (True, "1", 0),
+        (True, "0", 0),
+    ],
+)
+async def test_every_managed_profile_uses_the_resolved_stack_level(
+    cp_v16, monkeypatch, below_max, reported, expected
+):
+    """Station, TxProfile and TxDefaultProfile all go out at one level.
+
+    With stack_level_below_max it is one below the reported maximum: the
+    Morek MEV11 and Timxon report 5 but accept only up to 4.
+    """
+    cp_v16.settings.stack_level_below_max = below_max
+    sent = await _levels_sent(cp_v16, monkeypatch, reported)
+    assert sent == {
+        "ChargePointMaxProfile": expected,
+        "TxProfile": expected,
+        "TxDefaultProfile": expected,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("below_max", "reported", "expected"),
+    [
+        (False, "Unknown", 1),
+        (False, "5.0", 1),
+        (False, None, 1),
+        (False, "-1", 0),
+        (False, RuntimeError("no answer"), 1),
+        (True, "Unknown", 0),
+        (True, RuntimeError("no answer"), 0),
+    ],
+)
+async def test_an_unusable_maximum_falls_back_safely(
+    cp_v16, monkeypatch, below_max, reported, expected
+):
+    """An unparsable or missing maximum keeps the old fallback of 1.
+
+    A negative report is clamped to 0, so no level ever goes below 0.
+    """
+    cp_v16.settings.stack_level_below_max = below_max
+    sent = await _levels_sent(cp_v16, monkeypatch, reported)
+    assert set(sent.values()) == {expected}
+
+
+@pytest.mark.asyncio
+async def test_session_limit_uses_the_level_below_the_maximum(cp_v16, monkeypatch):
+    """The session sliders resolve the same level as the action."""
+    cp_v16.settings.stack_level_below_max = True
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    prepared = await cp_v16.prepare_session_limit(1, 16)
+    assert prepared["stack_level"] == 4
+    tx = cp_v16.build_session_limit_request(1, 55, 3001, prepared)
+    default = cp_v16.build_session_default_request(1, 2001, prepared)
+    assert tx.cs_charging_profiles["stackLevel"] == 4
+    assert default.cs_charging_profiles["stackLevel"] == 4
+
+
+_SUGGEST_OPTION = "enable 'Charger accepts only stack levels below its reported"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("below_max", "reported", "level", "suggested"),
+    [
+        (False, "5", 5, True),
+        (True, "5", 4, False),
+        (False, "0", 0, False),
+    ],
+)
+async def test_a_refused_station_ceiling_points_at_the_stack_level_option(
+    cp_v16, monkeypatch, below_max, reported, level, suggested
+):
+    """The error names the refused level and suggests the option while it is off.
+
+    At level 0 one level lower is impossible, so it is not suggested.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    cp_v16.settings.stack_level_below_max = below_max
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return reported
+        return None
+
+    async def reject(_req, **_kwargs):
+        return SimpleNamespace(status=ChargingProfileStatus.rejected)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    monkeypatch.setattr(cp_v16, "call", reject)
+    with pytest.raises(HomeAssistantError) as err:
+        await cp_v16.set_station_charge_rate(16)
+    message = err.value.translation_placeholders["message"]
+    assert f"stackLevel {level}" in message
+    assert (_SUGGEST_OPTION in message) is suggested
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("default_profile", [False, True])
+async def test_a_refused_session_limit_points_at_the_stack_level_option(
+    cp_v16, monkeypatch, default_profile
+):
+    """Both session sliders name the refused level and suggest the option."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    _show_transaction(cp_v16, 1, 55)
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    async def reject(_req):
+        return SimpleNamespace(status=ChargingProfileStatus.rejected)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    monkeypatch.setattr(cp_v16, "call", reject)
+    setter = (
+        cp_v16.set_session_default_limit
+        if default_profile
+        else cp_v16.set_session_limit
+    )
+    with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
+        await setter(1, 10)
+    assert _SUGGEST_OPTION in str(err.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", [ChargingProfileStatus.not_supported, ChargingProfileStatus.rejected]
+)
+async def test_not_supported_also_points_at_the_stack_level_option(
+    cp_v16, monkeypatch, status
+):
+    """Chargers refuse a level they do not take with NotSupported or Rejected.
+
+    Timxon A0 and Morek MEV11 answer NotSupported at the reported maximum,
+    ABB Terra AC answers Rejected.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    _show_transaction(cp_v16, 1, 55)
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    async def refuse(_req):
+        return SimpleNamespace(status=status)
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    monkeypatch.setattr(cp_v16, "call", refuse)
+    with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
+        await cp_v16.set_session_limit(1, 10)
+    assert _SUGGEST_OPTION in str(err.value)
+
+
+@pytest.mark.asyncio
+async def test_a_level_once_accepted_is_not_blamed_for_a_refusal(cp_v16, monkeypatch):
+    """After the charger accepted a profile at the level, a refusal has another cause."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    _show_transaction(cp_v16, 1, 55)
+
+    async def configuration(key):
+        if key == ckey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        if key == ckey.charge_profile_max_stack_level:
+            return "5"
+        return None
+
+    answers = [ChargingProfileStatus.accepted, ChargingProfileStatus.rejected]
+
+    async def answer(_req, **_kwargs):
+        return SimpleNamespace(status=answers.pop(0))
+
+    monkeypatch.setattr(cp_v16, "get_configuration", configuration)
+    monkeypatch.setattr(cp_v16, "call", answer)
+    assert await cp_v16.set_station_charge_rate(16)
+    with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
+        await cp_v16.set_session_limit(1, 10)
+    assert _SUGGEST_OPTION not in str(err.value)

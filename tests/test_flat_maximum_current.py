@@ -873,7 +873,7 @@ async def test_default_profile_session_entity_needs_no_transaction(
     assert sent[-1].connector_id == 1
     profile = sent[-1].cs_charging_profiles
     assert profile["chargingProfileId"] == 2001
-    assert profile["stackLevel"] == 4
+    assert profile["stackLevel"] == 5
     assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
     assert "transactionId" not in profile
     assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 10.0
@@ -929,7 +929,7 @@ async def test_default_profile_session_entity_works_on_201(
     assert entity.native_value == 12
     assert sent[-1].evse_id == 1
     profile = sent[-1].charging_profile
-    assert (profile["id"], profile["stack_level"]) == (2001, 2)
+    assert (profile["id"], profile["stack_level"]) == (2001, 3)
     assert profile["charging_profile_purpose"] == "TxDefaultProfile"
 
 

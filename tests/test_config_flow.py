@@ -12,6 +12,7 @@ from custom_components.ocpp.const import (
     CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_NUM_CONNECTORS,
     CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+    CONF_STACK_LEVEL_BELOW_MAX,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
 )
@@ -618,10 +619,13 @@ async def test_reconfigure_does_not_schedule_second_reload(hass, bypass_get_data
     )
 
 
-async def test_discovery_flow_stores_the_session_default_only_when_on(
-    hass, bypass_get_data
+@pytest.mark.parametrize(
+    "option", [CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX]
+)
+async def test_discovery_flow_stores_newer_options_only_when_on(
+    hass, bypass_get_data, option
 ):
-    """An enabled session default is stored; the default (off) is not."""
+    """An enabled option is stored; the default (off) is not."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         data=MOCK_CONFIG_CS,
@@ -644,7 +648,7 @@ async def test_discovery_flow_stores_the_session_default_only_when_on(
         )
         cp_input = {**MOCK_CONFIG_CP, CONF_CPID: cpid}
         if enabled is not None:
-            cp_input[CONF_SESSION_LIMIT_DEFAULT_PROFILE] = enabled
+            cp_input[option] = enabled
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input=cp_input
         )
@@ -658,6 +662,6 @@ async def test_discovery_flow_stores_the_session_default_only_when_on(
         for item in entry.data[CONF_CPIDS]
         for cp_id, settings in item.items()
     }
-    assert stored["cp_on"][CONF_SESSION_LIMIT_DEFAULT_PROFILE] is True
-    assert CONF_SESSION_LIMIT_DEFAULT_PROFILE not in stored["cp_off"]
-    assert CONF_SESSION_LIMIT_DEFAULT_PROFILE not in stored["cp_default"]
+    assert stored["cp_on"][option] is True
+    assert option not in stored["cp_off"]
+    assert option not in stored["cp_default"]

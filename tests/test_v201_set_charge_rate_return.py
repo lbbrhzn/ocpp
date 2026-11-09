@@ -667,7 +667,7 @@ async def test_set_session_limit_v201_aborts_when_the_transaction_changes(hass):
 
 @pytest.mark.asyncio
 async def test_session_default_limit_targets_the_connectors_evse(hass):
-    """A Relative TxDefaultProfile on the EVSE, no transaction, below the maximum."""
+    """A Relative TxDefaultProfile on the EVSE, no transaction, at the maximum."""
     cp = _mk_cp(hass)
     cp._inventory = InventoryReport(
         evse_count=2,
@@ -687,7 +687,7 @@ async def test_session_default_limit_targets_the_connectors_evse(hass):
     assert sent[-1].evse_id == 2
     profile = sent[-1].charging_profile
     assert profile["id"] == 2002
-    assert profile["stack_level"] == 4
+    assert profile["stack_level"] == 5
     assert profile["charging_profile_purpose"] == "TxDefaultProfile"
     assert profile["charging_profile_kind"] == "Relative"
     assert "transaction_id" not in profile
@@ -696,15 +696,29 @@ async def test_session_default_limit_targets_the_connectors_evse(hass):
         {"start_period": 0, "limit": 10.0}
     ]
 
-    for reported, expected in ((0, 0), (1, 1), (2, 1)):
-        request = cp.build_session_default_request(
-            1, 2001, {"unit": "A", "value": 6.0, "stack_level": reported, "evse_id": 1}
-        )
-        assert request.charging_profile["stack_level"] == expected
-
     async def reject(_request):
         return SimpleNamespace(status="Rejected")
 
     cp.call = reject
     with pytest.raises(HomeAssistantError, match=r"rejected .*\(Rejected\)"):
         await cp.set_session_default_limit(1, 10)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_session_limit_names_the_level_without_the_16_option(hass):
+    """2.0.1 defines ProfileStackLevel as the maximum value: no 1.6 advice."""
+    from custom_components.ocpp.enums import HAChargerSession as csess
+
+    cp = _mk_cp(hass, status=ChargingProfileStatusEnumType.rejected)
+    cp._inventory = InventoryReport(
+        evse_count=1,
+        connector_count=[1],
+        charging_rate_units=frozenset({"A"}),
+        profile_stack_level=5,
+    )
+    cp._build_connector_map()
+    cp._metrics[(1, csess.transaction_id)].value = "tx-abc"
+
+    with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
+        await cp.set_session_limit(1, 10)
+    assert "below its reported maximum" not in str(err.value)
