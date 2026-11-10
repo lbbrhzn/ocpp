@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import logging
 import re
 from typing import Final
+
+from ocpp.v16.enums import ChargingProfilePurposeType
 
 from homeassistant.components.number import (
     DOMAIN as NUMBER_DOMAIN,
@@ -22,6 +24,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import slugify
 
 from .api import CentralSystem
@@ -31,17 +34,18 @@ from .const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_MAX_CURRENT,
-    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     DATA_UPDATED,
     DEFAULT_MAX_CURRENT,
-    DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
     DOMAIN,
     ICON,
 )
 from .enums import Profiles
 
 MAX_SESSION_CONNECTORS = 10
-_TX_DEFAULT_PROFILE = "TxDefaultProfile"
+_TX_PROFILE = ChargingProfilePurposeType.tx_profile.value
+_TX_DEFAULT_PROFILE = ChargingProfilePurposeType.tx_default_profile.value
+# Per-connector entities, by unique-id key.
+_CONNECTOR_KEYS = ("session_current_limit", "default_current_limit")
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
@@ -90,10 +94,13 @@ async def async_setup_entry(hass, entry, async_add_devices):
         legacy_uid = re.compile(
             rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn\d+\.maximum_current"
         )
+        keys = "|".join(_CONNECTOR_KEYS)
         session_connector_uid = re.compile(
-            rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn(\d+)\.session_current_limit"
+            rf"{NUMBER_DOMAIN}\.{DOMAIN}\.{re.escape(cpid)}\.conn(\d+)\.(?:{keys})"
         )
-        session_flat_uid = f"{NUMBER_DOMAIN}.{DOMAIN}.{cpid}.session_current_limit"
+        session_flat_uids = {
+            f"{NUMBER_DOMAIN}.{DOMAIN}.{cpid}.{key}" for key in _CONNECTOR_KEYS
+        }
         for registry_entry in er.async_entries_for_config_entry(
             ent_reg, entry.entry_id
         ):
@@ -114,13 +121,13 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 or registry_entry.domain != NUMBER_DOMAIN
             ):
                 continue
-            # A session entity whose shape no longer matches the connector
+            # A connector entity whose shape no longer matches the connector
             # count is stale: the flat one on a multi-connector charger, the
             # connector ones on a single-connector charger, or a connector
             # beyond the configured count.
             session_match = session_connector_uid.fullmatch(registry_entry.unique_id)
             stale_session = (connector_count == 1 and session_match is not None) or (
-                connector_count > 1 and registry_entry.unique_id == session_flat_uid
+                connector_count > 1 and registry_entry.unique_id in session_flat_uids
             )
             if session_match is not None and int(session_match.group(1)) > min(
                 connector_count, MAX_SESSION_CONNECTORS
@@ -128,7 +135,7 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 stale_session = True
             if stale_session:
                 _LOGGER.info(
-                    "Removing stale session-current entity %s after connector "
+                    "Removing stale connector current-limit entity %s after connector "
                     "topology changed",
                     registry_entry.entity_id,
                 )
@@ -176,31 +183,96 @@ async def async_setup_entry(hass, entry, async_add_devices):
                 cpid,
                 MAX_SESSION_CONNECTORS,
             )
-        session_cls = (
-            SessionDefaultLimitNumber
-            if cp_id_settings.get(
-                CONF_SESSION_LIMIT_DEFAULT_PROFILE,
-                DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
-            )
-            else SessionCurrentLimitNumber
-        )
         for connector_id in range(1, min(connector_count, MAX_SESSION_CONNECTORS) + 1):
-            entities.append(
-                session_cls(
-                    hass,
-                    central_system,
-                    cpid,
-                    connector_id,
-                    connector_count,
-                    max_cur,
-                    charger_device_id=charger_device_id,
-                )
+            args = (
+                hass,
+                central_system,
+                cpid,
+                connector_id,
+                connector_count,
+                max_cur,
+                charger_device_id,
             )
+            session = SessionCurrentLimitNumber(*args)
+            default_uid = _connector_unique_id(
+                cpid, connector_id, connector_count, DefaultCurrentLimitNumber._key
+            )
+            default = DefaultCurrentLimitNumber(
+                *args,
+                fresh=ent_reg.async_get_entity_id(NUMBER_DOMAIN, DOMAIN, default_uid)
+                is None,
+            )
+            session.link_default(default)
+            default.link_session(session)
+            entities.extend((session, default))
 
     async_add_devices(entities, False)
 
 
-class ChargePointNumber(RestoreNumber, NumberEntity):
+def _connector_unique_id(
+    cpid: str, connector_id: int, connector_count: int, key: str
+) -> str:
+    """Return a connector limit's unique id: flat on a single-connector charger."""
+    if connector_count == 1:
+        return ".".join([NUMBER_DOMAIN, DOMAIN, cpid, key])
+    return ".".join([NUMBER_DOMAIN, DOMAIN, cpid, f"conn{connector_id}", key])
+
+
+class _CurrentLimitNumber(NumberEntity):
+    """Metric refreshes and rollback shared by the current-limit numbers.
+
+    _confirmed_value is the last limit the charger accepted; _attr_native_value
+    may run ahead of it while a request is in flight and falls back to it on
+    failure.
+    """
+
+    _confirmed_value: float | None
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the charger's metric refreshes like the other entities."""
+        await super().async_added_to_hass()
+
+        @callback
+        def _maybe_update(*args):
+            """Refresh when the update names this entity, or names none."""
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_schedule_update_ha_state(True)
+
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
+        )
+
+    def _revert_to_confirmed(self) -> None:
+        """Put the slider back to the last limit the charger accepted.
+
+        Reverting to whatever was displayed when this request started would
+        clobber a concurrent request that has since been accepted - two
+        quick drags, or an automation racing the UI - and leave the slider
+        disagreeing with the charger, which is the thing this is meant to
+        prevent rather than cause.
+        """
+        # Whole-amp values, so equality is exact (native_step=1). A
+        # fractional step would need a tolerance here and in the
+        # superseded check of ChargePointNumber.
+        if self._attr_native_value == self._confirmed_value:
+            return
+        _LOGGER.debug(
+            "Reverting current limit display from %s to last accepted %s",
+            self._attr_native_value,
+            self._confirmed_value,
+        )
+        self._attr_native_value = self._confirmed_value
+        self.async_write_ha_state()
+
+
+class ChargePointNumber(_CurrentLimitNumber, RestoreNumber):
     """Individual slider for setting charge rate."""
 
     _attr_has_entity_name = False
@@ -286,22 +358,6 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             # next accepted request either way.
             self._confirmed_value = restored.native_value
 
-        @callback
-        def _maybe_update(*args):
-            active_lookup = None
-            if args:
-                try:
-                    active_lookup = set(args[0])
-                except Exception:
-                    active_lookup = None
-
-            if active_lookup is None or self.entity_id in active_lookup:
-                self.async_schedule_update_ha_state(True)
-
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
-        )
-
     @property
     def available(self) -> bool:
         """Return if entity is available."""
@@ -372,41 +428,16 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             self._attr_native_value = target
             self.async_write_ha_state()
 
-    def _revert_to_confirmed(self) -> None:
-        """Put the slider back to the last limit the charger accepted.
 
-        Reverting to whatever was displayed when this request started would
-        clobber a concurrent request that has since been accepted - two
-        quick drags, or an automation racing the UI - and leave the slider
-        disagreeing with the charger, which is the thing this is meant to
-        prevent rather than cause.
-        """
-        # Whole-amp values, so equality is exact (native_step=1). A
-        # fractional step would need a tolerance here and in the
-        # superseded check above.
-        if self._attr_native_value == self._confirmed_value:
-            return
-        _LOGGER.debug(
-            "Reverting current limit display from %s to last accepted %s",
-            self._attr_native_value,
-            self._confirmed_value,
-        )
-        self._attr_native_value = self._confirmed_value
-        self.async_write_ha_state()
+class _ConnectorLimitNumber(_CurrentLimitNumber):
+    """A per-connector current limit the charger confirms request by request.
 
-
-class SessionCurrentLimitNumber(NumberEntity):
-    """Per-connector current limit bound to the transaction the connector displays.
-
-    The thin shape agreed on #2142: availability comes from the connector's
-    status and a displayed transaction id, the value is the last limit the
-    charger accepted for that transaction, and a request is a direct
-    SetChargingProfile. The charger is the safety net: it rejects a TxProfile
-    whose transaction id no longer matches, and it discards the profile when
-    the transaction ends. Nothing is restored across restarts, because the
-    entity cannot know what the previous run left on the charger.
+    Shared by Session and Default Current Limit: ids and device, and the
+    optimistic set that keeps only what the charger accepted.
     """
 
+    _key: str
+    _entity_name: str
     _attr_has_entity_name = False
     _attr_should_poll = False
     _attr_icon = ICON
@@ -424,35 +455,24 @@ class SessionCurrentLimitNumber(NumberEntity):
         max_current: float,
         charger_device_id: str | None = None,
     ) -> None:
-        """Initialize a connector-scoped session number."""
+        """Initialize a connector-scoped number."""
         self._hass = hass
         self.central_system = central_system
         self.cpid = cpid
         self.connector_id = connector_id
         self._attr_native_max_value = max_current
-        self._attr_name = "Session Current Limit"
+        self._attr_name = self._entity_name
+        self._attr_unique_id = _connector_unique_id(
+            cpid, connector_id, connector_count, self._key
+        )
         if connector_count == 1:
-            self._attr_unique_id = ".".join(
-                [NUMBER_DOMAIN, DOMAIN, cpid, "session_current_limit"]
-            )
-            self.entity_id = (
-                f"{NUMBER_DOMAIN}.{slugify(f'{cpid}_session_current_limit')}"
-            )
+            self.entity_id = f"{NUMBER_DOMAIN}.{slugify(f'{cpid}_{self._key}')}"
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, cpid)},
                 name=cpid,
             )
         else:
-            self._attr_unique_id = ".".join(
-                [
-                    NUMBER_DOMAIN,
-                    DOMAIN,
-                    cpid,
-                    f"conn{connector_id}",
-                    "session_current_limit",
-                ]
-            )
-            object_id = f"{cpid}_connector_{connector_id}_session_current_limit"
+            object_id = f"{cpid}_connector_{connector_id}_{self._key}"
             self.entity_id = f"{NUMBER_DOMAIN}.{slugify(object_id)}"
             device_info: DeviceInfo = {
                 "identifiers": {(DOMAIN, f"{cpid}-conn{connector_id}")},
@@ -463,14 +483,6 @@ class SessionCurrentLimitNumber(NumberEntity):
             else:
                 device_info["via_device"] = (DOMAIN, cpid)
             self._attr_device_info = DeviceInfo(**device_info)
-        # The value on display belongs to one transaction of one charger
-        # generation: the id the connector shows plus the charger's boot
-        # count, because a rebooted charger may reuse an id. When the key no
-        # longer matches, the charger has discarded that profile and the
-        # value goes back to unknown. _confirmed_value is what the charger
-        # accepted; _attr_native_value may run ahead of it while a request is
-        # in flight and falls back to it on failure.
-        self._display_key: tuple[int, str] | None = None
         self._confirmed_value: float | None = None
         self._attr_native_value = None
         # One operation at a time per connector, in the order asked. A set
@@ -480,77 +492,17 @@ class SessionCurrentLimitNumber(NumberEntity):
         # otherwise interleave their updates of the confirmed value.
         self._operation_lock = asyncio.Lock()
 
-    async def async_added_to_hass(self) -> None:
-        """Follow the charger's metric refreshes like the other entities."""
-        await super().async_added_to_hass()
-
-        @callback
-        def _maybe_update(*args):
-            active_lookup = None
-            if args:
-                try:
-                    active_lookup = set(args[0])
-                except Exception:
-                    active_lookup = None
-            if active_lookup is None or self.entity_id in active_lookup:
-                self.async_schedule_update_ha_state(True)
-
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
-        )
-
-    def _current_transaction(self) -> str | None:
-        return self.central_system.session_transaction_id(self.cpid, self.connector_id)
-
-    def _current_key(self) -> tuple[int, str] | None:
-        transaction = self._current_transaction()
-        if transaction is None:
-            return None
-        return (self.central_system.charger_generation(self.cpid), transaction)
-
-    @property
-    def available(self) -> bool:
-        """Charger up with SmartCharging, connector charging, transaction displayed."""
-        return bool(
-            self.central_system.session_limit_available(self.cpid, self.connector_id)
-        )
-
-    @property
-    def native_value(self) -> float | None:
-        """The value for the displayed transaction of this charger generation."""
-        key = self._current_key()
-        if key is not None and key == self._display_key:
-            return self._attr_native_value
-        if self._display_key is not None:
-            # A different transaction, or the same id after a reboot: the
-            # profile that value described is gone with it.
-            self._display_key = None
-            self._confirmed_value = None
-            self._attr_native_value = None
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        """Expose what the request is bound to."""
-        return {
-            "transaction_id": self._current_transaction(),
-            "charger_generation": self.central_system.charger_generation(self.cpid),
-            "profile_id": session_profile_id(self.connector_id),
-            "confirmed_current": self._confirmed_value,
-        }
-
     async def async_set_native_value(self, value: float) -> None:
         """Send the limit and keep only what the charger accepted.
 
         Optimistic like Maximum Current: the slider moves while the request
         is in flight, and goes back to the last accepted value on anything
-        but an Accepted reply. The maximum is a limit like any other: the
-        profile ends with its transaction, so it is set rather than cleared.
-        Operations on one connector run one at a time, in the order they
-        were asked for.
+        but an Accepted reply. The maximum is a limit like any other, so it is
+        set rather than cleared. Operations on one connector run one at a
+        time, in the order they were asked for.
         """
         async with self._operation_lock:
-            self._begin_set()
+            bound_to = self._begin_set()
             target = float(value)
             self._attr_native_value = target
             self.async_write_ha_state()
@@ -580,13 +532,195 @@ class SessionCurrentLimitNumber(NumberEntity):
                         "message": f"charger did not accept {target:.1f} A"
                     },
                 )
+            if not self._still_bound_to(bound_to):
+                # Accepted for something no longer on display, such as a
+                # transaction that ended in flight: it says nothing about
+                # what is displayed now.
+                _LOGGER.debug(
+                    "Accepted limit %.1f A no longer applies to what is displayed",
+                    target,
+                )
+                self.async_write_ha_state()
+                return
             self._confirmed_value = target
             self._attr_native_value = target
             self.async_write_ha_state()
+            self._confirmed_changed()
 
-    def _begin_set(self) -> None:
-        """Bind the display to the transaction the request is for."""
+    def _confirmed_changed(self) -> None:
+        """React to a new value the charger accepted."""
+
+    def _begin_set(self) -> object:
+        """Check and bind what the request is for, before it is sent."""
+        return None
+
+    def _still_bound_to(self, bound_to: object) -> bool:
+        """Return whether a reply still belongs to what is displayed."""
+        return True
+
+    async def _send(self, target: float) -> bool:
+        """Send the limit; True only when the charger accepted it."""
+        raise NotImplementedError
+
+
+@dataclass
+class _SessionStoredData(ExtraStoredData):
+    """What a Session Current Limit knew about its transaction."""
+
+    transaction_id: str | None
+    value: float | None
+
+    def as_dict(self) -> dict:
+        """Return a dict representation of the stored data."""
+        return asdict(self)
+
+
+class SessionCurrentLimitNumber(_ConnectorLimitNumber, RestoreEntity):
+    """Per-connector current limit bound to the transaction the connector displays.
+
+    The thin shape agreed on #2142: availability comes from the connector's
+    status and a displayed transaction id, the value is the last limit the
+    charger accepted for that transaction, and a request is a direct
+    SetChargingProfile. The charger is the safety net: it rejects a TxProfile
+    whose transaction id no longer matches, and it discards the profile when
+    the transaction ends.
+
+    Until a TxProfile is accepted for the transaction, the value is the
+    connector's current Default Current Limit, following it when it changes:
+    the charger combines whatever profiles are installed, and a TxProfile
+    overrules the TxDefaultProfile only once present. The source attribute
+    says which it is. The TxProfile value is restored for the same
+    transaction after a restart, since Home Assistant is assumed to be the
+    only one setting these profiles.
+    """
+
+    _key = "session_current_limit"
+    _entity_name = "Session Current Limit"
+
+    def __init__(self, *args) -> None:
+        """Initialize a connector-scoped session number."""
+        super().__init__(*args)
+        # The state on display belongs to one transaction of one charger
+        # generation: the id the connector shows plus the charger's boot
+        # count, because a rebooted charger may reuse an id. When the key no
+        # longer matches, the charger has discarded that profile.
+        self._display_key: tuple[int, str] | None = None
+        self._default: DefaultCurrentLimitNumber | None = None
+        self._restored: _SessionStoredData | None = None
+
+    def link_default(self, default: DefaultCurrentLimitNumber) -> None:
+        """Pair with the connector's Default Current Limit."""
+        self._default = default
+
+    async def async_added_to_hass(self) -> None:
+        """Keep what the previous run knew, for its transaction only."""
+        await super().async_added_to_hass()
+        extra = await self.async_get_last_extra_data()
+        if extra is None:
+            return
+        data = extra.as_dict()
+        transaction_id = data.get("transaction_id")
+        if transaction_id is not None:
+            self._restored = _SessionStoredData(str(transaction_id), data.get("value"))
+
+    @property
+    def extra_restore_state_data(self) -> _SessionStoredData:
+        """Save what the charger accepted, never a request still in flight."""
+        if self._display_key is None and self._restored is not None:
+            # Nothing bound yet, e.g. the charger has not reconnected: keep
+            # what the previous run saved instead of overwriting it.
+            return self._restored
+        return _SessionStoredData(
+            self._display_key[1] if self._display_key else None,
+            self._confirmed_value,
+        )
+
+    def _current_transaction(self) -> str | None:
+        """Return the transaction id the connector displays, or None."""
+        return self.central_system.session_transaction_id(self.cpid, self.connector_id)
+
+    def _current_key(self) -> tuple[int, str] | None:
+        """Return the displayed transaction, with what makes its id unique."""
+        transaction = self._current_transaction()
+        if transaction is None:
+            return None
+        return (self.central_system.transaction_generation(self.cpid), transaction)
+
+    async def async_update(self) -> None:
+        """Bind to the displayed transaction on a metric refresh."""
+        self._sync()
+
+    @callback
+    def async_write_ha_state(self) -> None:
+        """Bind to the displayed transaction once per state write."""
+        self._sync()
+        super().async_write_ha_state()
+
+    def _sync(self) -> tuple[int, str] | None:
+        """Bind the state on display to the displayed transaction."""
         key = self._current_key()
+        if key == self._display_key:
+            return key
+        # Another transaction, none, or the same id after a reboot: the
+        # profile the old value described is gone with it.
+        self._display_key = key
+        self._confirmed_value = None
+        self._attr_native_value = None
+        if key is None:
+            return None
+        # The previous run's state is for the first transaction seen only,
+        # and not after a reboot: the charger dropped its transactions, so a
+        # reused id names another one.
+        restored, self._restored = self._restored, None
+        if (
+            restored is not None
+            and restored.transaction_id == key[1]
+            and not self.central_system.charger_rebooted(self.cpid)
+        ):
+            self._confirmed_value = self._attr_native_value = restored.value
+        return key
+
+    def _value_and_source(self) -> tuple[float | None, str | None]:
+        """Return the value on display and the profile purpose it comes from."""
+        if self._display_key is None:
+            return None, None
+        if self._attr_native_value is not None:
+            return self._attr_native_value, _TX_PROFILE
+        if self._default is not None and self._default.confirmed_value is not None:
+            return self._default.confirmed_value, _TX_DEFAULT_PROFILE
+        return None, None
+
+    @property
+    def available(self) -> bool:
+        """Charger up with SmartCharging, connector charging, transaction displayed."""
+        return bool(
+            self.central_system.session_limit_available(self.cpid, self.connector_id)
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """The TxProfile value for the transaction, else the connector default."""
+        return self._value_and_source()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose what the request is bound to and where the value comes from."""
+        source = self._value_and_source()[1]
+        return {
+            "transaction_id": self._display_key[1] if self._display_key else None,
+            "charger_generation": self.central_system.charger_generation(self.cpid),
+            "profile_id": (
+                session_default_profile_id(self.connector_id)
+                if source == _TX_DEFAULT_PROFILE
+                else session_profile_id(self.connector_id)
+            ),
+            "confirmed_current": self._confirmed_value,
+            "source": source,
+        }
+
+    def _begin_set(self) -> tuple[int, str]:
+        """Bind the display to the transaction the request is for."""
+        key = self._sync()
         if key is None:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -598,48 +732,66 @@ class SessionCurrentLimitNumber(NumberEntity):
                     )
                 },
             )
-        if key != self._display_key:
-            self._display_key = key
-            self._confirmed_value = None
+        return key
+
+    def _still_bound_to(self, bound_to: object) -> bool:
+        """Return whether the transaction the request was for is still displayed."""
+        return self._sync() == bound_to
 
     async def _send(self, target: float) -> bool:
         return await self.central_system.set_session_charge_rate_amps(
             self.cpid, self.connector_id, target
         )
 
-    def _revert_to_confirmed(self) -> None:
-        if self._attr_native_value == self._confirmed_value:
-            return
-        self._attr_native_value = self._confirmed_value
-        self.async_write_ha_state()
 
+class DefaultCurrentLimitNumber(_ConnectorLimitNumber, RestoreNumber):
+    """Per-connector Default Current Limit, sent as a connector TxDefaultProfile.
 
-class SessionDefaultLimitNumber(SessionCurrentLimitNumber, RestoreNumber):
-    """Session Current Limit sent as a connector TxDefaultProfile.
-
-    Selected per charger by session_limit_default_profile, for chargers
-    that refuse both the station ceiling and a TxProfile but accept a
-    connector default and apply it to the running transaction (#2158). The
-    profile is not bound to a transaction, so the slider is available
-    whenever the charger is up with SmartCharging, and its value is the last
-    limit the charger accepted for the connector. That value is restored
-    across restarts, because the charger keeps the profile; a value left by
-    the transaction-bound slider is not, because that profile has ended.
+    The limit for the connector's new transactions that get no TxProfile of
+    their own. The profile is not bound to a transaction, so the slider is
+    available whenever the charger is up with SmartCharging, and its value is
+    the last limit the charger accepted for the connector. That value is
+    restored across restarts, because the charger keeps the profile. The
+    maximum is a limit like any other: clearing the profile would hand control
+    to any lower-level default left on the charger.
     """
 
+    _key = "default_current_limit"
+    _entity_name = "Default Current Limit"
+
+    def __init__(self, *args, fresh: bool = False) -> None:
+        """Initialize a connector Default Current Limit."""
+        super().__init__(*args)
+        # Restore data is keyed by entity id. A new entity must not inherit
+        # the value of one removed with an earlier connector layout; setup
+        # passes True when the registry has no entry for it yet.
+        self._fresh = fresh
+        self._session: SessionCurrentLimitNumber | None = None
+
+    def link_session(self, session: SessionCurrentLimitNumber) -> None:
+        """Pair with the connector's Session Current Limit, which shows this."""
+        self._session = session
+
+    def _confirmed_changed(self) -> None:
+        """Refresh the session, which follows the default without a TxProfile."""
+        if self._session is not None and self._session.hass is not None:
+            self._session.async_write_ha_state()
+
+    @property
+    def confirmed_value(self) -> float | None:
+        """The default the charger holds, as far as this entity knows."""
+        return self._confirmed_value
+
     async def async_added_to_hass(self) -> None:
-        """Restore the last accepted default, if this mode left one."""
+        """Restore the last accepted default."""
         await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if (
-            last_state is None
-            or last_state.attributes.get("profile_purpose") != _TX_DEFAULT_PROFILE
-        ):
+        if self._fresh:
             return
         restored = await self.async_get_last_number_data()
         if restored is not None and restored.native_value is not None:
             self._attr_native_value = restored.native_value
             self._confirmed_value = restored.native_value
+            self._confirmed_changed()
 
     @property
     def extra_restore_state_data(self) -> NumberExtraStoredData:
@@ -662,11 +814,6 @@ class SessionDefaultLimitNumber(SessionCurrentLimitNumber, RestoreNumber):
         )
 
     @property
-    def native_value(self) -> float | None:
-        """The last limit the charger accepted for this connector."""
-        return self._attr_native_value
-
-    @property
     def extra_state_attributes(self) -> dict:
         """Expose what the request writes."""
         return {
@@ -674,9 +821,6 @@ class SessionDefaultLimitNumber(SessionCurrentLimitNumber, RestoreNumber):
             "profile_id": session_default_profile_id(self.connector_id),
             "confirmed_current": self._confirmed_value,
         }
-
-    def _begin_set(self) -> None:
-        """Send without a transaction: a default profile needs none."""
 
     async def _send(self, target: float) -> bool:
         return await self.central_system.set_session_default_charge_rate_amps(

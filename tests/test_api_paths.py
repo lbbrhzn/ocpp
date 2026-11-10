@@ -1355,6 +1355,10 @@ async def test_session_limit_availability_rule(hass):
     cp.charger_generation = 3
     assert cs.charger_generation("cpid_1") == 3
     assert cs.charger_generation("missing") == 0
+    assert cs.transaction_generation("cpid_1") == 3
+    cp.transaction_ids_reused = False  # 1.6: ids allocated here
+    assert cs.transaction_generation("cpid_1") == 0
+    assert cs.transaction_generation("missing") == 0
     assert not cs.session_limit_available("cpid_1", 2)  # nothing displayed
     assert cs.session_transaction_id("cpid_1", 2) is None
     assert not cs.session_limit_available("missing", 1)

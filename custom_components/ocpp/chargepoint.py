@@ -269,6 +269,10 @@ class MeasurandValue:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    # Whether the charger may reuse a transaction id after it restarts, so an
+    # id is only unique together with charger_generation.
+    transaction_ids_reused: bool = True
+
     def __init__(
         self,
         id,  # is charger cp_id not HA cpid
@@ -344,9 +348,16 @@ class ChargePoint(cp):
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
         self.session_controller = None
-        # Counts BootNotifications. A rebooted charger may reuse transaction
-        # ids, so anything keyed on an id alone must also carry this number.
+        # Counts BootNotifications, except a 2.0.1 one with reason Triggered,
+        # which answers a TriggerMessage and is not a restart. Where
+        # transaction_ids_reused, anything keyed on a transaction id must also
+        # carry this number.
         self.charger_generation: int = 0
+        # Whether the charger reported a real reboot since Home Assistant
+        # started. Its transactions, and their profiles, did not survive it,
+        # so an id it reuses names a different transaction. Set by 2.0.1 only:
+        # 1.6 transaction ids are allocated here and are never reused.
+        self.rebooted_since_start: bool = False
 
     def _init_connector_slots(self, conn_id: int) -> None:
         """Ensure connector-scoped metrics exist and carry the right units."""
@@ -536,11 +547,12 @@ class ChargePoint(cp):
     ) -> bool:
         """Set a TxDefaultProfile on the connector, with or without a transaction.
 
-        For chargers that refuse both the station ceiling and a TxProfile but
-        accept a connector default, which they also apply to the running
-        transaction. Returns True only for an Accepted reply; anything else
-        raises a HomeAssistantError, as set_session_limit does. The profile
-        stays on the charger until it is replaced; nothing is cleared.
+        The Default Current Limit: the limit for the connector's transactions
+        that have no TxProfile of their own. Returns True only for an Accepted
+        reply; anything else raises a HomeAssistantError, as set_session_limit
+        does. The profile stays on the charger until it is replaced; nothing
+        is cleared, so a lower-level default left on the charger cannot take
+        over.
         """
         conn = int(connector_id)
         prepared = await self.prepare_session_limit(conn, float(limit_amps))
@@ -1013,8 +1025,10 @@ class ChargePoint(cp):
             sw_version=firmware_version,
         )
 
-    def _register_boot_notification(self):
-        self.charger_generation += 1
+    def _register_boot_notification(self, *, restarted: bool = True):
+        """Record a BootNotification; restarted=False for one sent on request."""
+        if restarted:
+            self.charger_generation += 1
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
             if not self.post_connect_success:

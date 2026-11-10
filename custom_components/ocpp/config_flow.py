@@ -27,7 +27,6 @@ from .const import (
     CONF_NUM_CONNECTORS,
     CONF_OCPP_VERSION,
     CONF_PORT,
-    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
     CONF_SSL_CERTFILE_PATH,
@@ -52,7 +51,6 @@ from .const import (
     DEFAULT_NUM_CONNECTORS,
     DEFAULT_OCPP_VERSION,
     DEFAULT_PORT,
-    DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
     DEFAULT_SKIP_SCHEMA_VALIDATION,
     DEFAULT_SSL,
     DEFAULT_SSL_CERTFILE_PATH,
@@ -114,10 +112,6 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
             default=DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
         ): bool,
         vol.Required(
-            CONF_SESSION_LIMIT_DEFAULT_PROFILE,
-            default=DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
-        ): bool,
-        vol.Required(
             CONF_STACK_LEVEL_BELOW_MAX, default=DEFAULT_STACK_LEVEL_BELOW_MAX
         ): bool,
         vol.Required(
@@ -135,11 +129,15 @@ STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
 
 
 # Options added after 0.12.0, stored only while they are on.
-_STORED_ONLY_WHEN_ON = (CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX)
+_STORED_ONLY_WHEN_ON = (CONF_STACK_LEVEL_BELOW_MAX,)
+# Options that no longer exist, dropped from a record the next time it is
+# saved: session_limit_default_profile (0.12.1) became the Default Current
+# Limit entity.
+_REMOVED_OPTIONS = ("session_limit_default_profile",)
 
 
 def _store_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
-    """Drop the _STORED_ONLY_WHEN_ON options from a charger record while off.
+    """Drop the _STORED_ONLY_WHEN_ON options while off, and removed options.
 
     Releases up to 0.12.0 expand the record into ChargerSystemSettings and
     fail on a key they do not know. Leaving the options out while they are
@@ -148,7 +146,7 @@ def _store_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in settings.items()
-        if key not in _STORED_ONLY_WHEN_ON or value
+        if key not in _REMOVED_OPTIONS and (key not in _STORED_ONLY_WHEN_ON or value)
     }
 
 
@@ -497,13 +495,6 @@ class OCPPOptionsFlow(OptionsFlow):
                     default=current.get(
                         CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
                         DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE,
-                    ),
-                ): bool,
-                vol.Required(
-                    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
-                    default=current.get(
-                        CONF_SESSION_LIMIT_DEFAULT_PROFILE,
-                        DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
                     ),
                 ): bool,
                 vol.Required(

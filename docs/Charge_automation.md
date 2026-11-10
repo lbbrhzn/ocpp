@@ -25,6 +25,7 @@ If your charger reports more than one connector, the sensors below are created p
 | `sensor.<cpid>_current_import` | `sensor.<cpid>_connector_1_current_import` |
 | `number.<cpid>_maximum_current` | `number.<cpid>_maximum_current` |
 | `number.<cpid>_session_current_limit` | `number.<cpid>_connector_1_session_current_limit` |
+| `number.<cpid>_default_current_limit` | `number.<cpid>_connector_1_default_current_limit` |
 
 ## Adjusting the charge current
 
@@ -52,7 +53,7 @@ For session-scoped control, use a profile that is active exclusively during the 
 
 ### Session Current Limit
 
-`Session Current Limit` is a number per connector that limits only the transaction the connector is running. It is available while the charger is connected with SmartCharging, the connector reads Charging or Suspended, and a transaction id is displayed for it; on OCPP 1.6 it is also withheld for the few seconds after a StopTransaction the integration could not attribute (#2128), until the charger's next report settles the connector. Its value is the last limit the charger accepted for the displayed transaction and nothing else: it starts unknown, it is not restored across a restart, and it goes back to unknown when the transaction id changes, because the charger discards a `TxProfile` when its transaction ends.
+`Session Current Limit` is a number per connector that limits only the transaction the connector is running. It is available while the charger is connected with SmartCharging, the connector reads Charging or Suspended, and a transaction id is displayed for it; on OCPP 1.6 it is also withheld for the few seconds after a StopTransaction the integration could not attribute (#2128), until the charger's next report settles the connector. Its value is the last limit the charger accepted for the displayed transaction. Until one is accepted, it shows the connector's current [Default Current Limit](#default-current-limit) and follows it when the default is moved, as the composite-schedule rule implies: the charger combines the profiles it holds, and a `TxProfile` only overrules the `TxDefaultProfile` once one is set. A charger that reads the default only when a transaction starts keeps the old value until the next transaction, or until a session limit is set. Once a session limit is accepted, moving the default no longer changes the value for that transaction. The `source` attribute says `TxProfile` or `TxDefaultProfile`, `profile_id` names that profile, and both are empty when neither is known. The session limit is restored after a restart for the same transaction, assuming Home Assistant is the only one setting these profiles. It is not restored on a 2.0.1 charger that reported a reboot since Home Assistant started, because a rebooted charger may reuse a transaction id. When the transaction id changes, the slider starts from the default again, because the charger discards a `TxProfile` when its transaction ends. No `TxProfile` is ever sent automatically.
 
 Moving the slider sends one `SetChargingProfile`: a `TxProfile` of kind `Relative` bound to the displayed transaction id, at the stack level the charger reports as its maximum (`ChargeProfileMaxStackLevel` on 1.6, `SmartChargingCtrlr/ProfileStackLevel` on 2.0.1; see [Charging profile stack level](#charging-profile-stack-level)), in amps or, on a watt-only station, in watts using the voltage and phase count described below. It uses profile id `3000+n`, where `n` is the connector, the same id the `ocpp.set_charge_rate` action uses for its TxProfile leg on 1.6, so a connector has one session limit whichever way it is set. The maximum is a limit like any other: the same profile is sent with the maximum current, and nothing is cleared, because the charger discards the profile when the transaction ends. The slider moves while the request is in flight and returns to the last accepted value on anything but an Accepted reply, with the charger's status in the error.
 
@@ -60,7 +61,7 @@ What this control does not do, so that automations do not assume it:
 
 * It trusts the displayed transaction id. A compliant charger rejects a `TxProfile` whose transaction id no longer matches, which is the safety net; a charger that does not validate the id could apply the profile to its next transaction.
 * A request that times out but was applied by the charger leaves the slider showing the previous value until it is moved again. Use the current or power sensors, not the slider, when an automation needs the delivered current.
-* After a restart the slider is available for the running transaction but cannot know about a profile set before the restart.
+* A profile set outside these sliders, by the `ocpp.set_charge_rate` action, `ocpp.clear_profile` or another system, is not reflected in their values.
 * Once moved, the slider's profile stays on the charger until the transaction ends; the slider cannot remove it. At the maximum it still takes precedence over a `TxDefaultProfile` or a `TxProfile` at a lower stack level rather than handing control back to it. On a watt-only station the maximum is converted to watts like any other value, so if fewer phases are counted than the supply has, it caps the session below what it could draw.
 * A custom `TxProfile` sent with the same stack level and connector replaces the slider's profile under the SetChargingProfile replacement rule, and the slider does not learn of it. When creating custom profiles, avoid the stack level the session slider uses, which is the charger's reported maximum (one below it with the [stack level option](#charging-profile-stack-level) on 1.6), and its profile id. The slider and the 1.6 action's TxProfile leg share one profile id, so they overwrite each other. `ChargePointMaxProfile` remains a ceiling over everything regardless of stack level, so the station and session sliders never compete: the applied limit is the lower of the two.
 
@@ -82,19 +83,25 @@ On 1.6 the integration reads `ChargeProfileMaxStackLevel` and `ChargingScheduleA
 
 Upgrade notes:
 
-* Earlier releases sent the 1.6 `TxDefaultProfile`, and the default-profile session limit below, one level below the reported maximum. That happened to work around the chargers above. Now every managed profile uses the same level, so on those chargers enable the option.
+* Earlier releases sent the 1.6 `TxDefaultProfile`, and the 0.12.1 default-profile session limit, one level below the reported maximum. That happened to work around the chargers above. Now every managed profile uses the same level, so on those chargers enable the option.
 * After enabling or disabling the option, set each limit once. The managed profiles keep their ids (`1000`, `2000+n`, `3000+n`), so each new profile replaces the one left at the old level. There is no need for `ocpp.clear_profile`, which on 1.6 also removes custom and vendor profiles.
 * Disable the option before installing release 0.12.0 or older. Those releases fail to start a charger whose configuration has a setting they do not know. Release 0.12.1 and later ignore it. The option is stored only while it is enabled, so a charger that never used it is unaffected.
 
-### Session Current Limit as a default profile
+### Default Current Limit
 
-Some chargers refuse both the station-wide `ChargePointMaxProfile` and a transaction-bound `TxProfile`, but accept a `TxDefaultProfile` on the connector and apply it to the running transaction too (#2158: Timxon A0, ABB Terra AC, Morek MEV11). Those three reject profiles at their reported maximum stack level, so try the [stack level option](#charging-profile-stack-level) first. For chargers that still need it, enable **Send Session Current Limit as a default profile** in the charge point's options. The option changes only how `Session Current Limit` works:
+`Default Current Limit` is a number per connector that sets the connector's `TxDefaultProfile`: the limit for its transactions that have no `TxProfile` of their own, including future ones. Whether a changed default also applies to a transaction that is already running depends on the charger.
 
 * Moving the slider sends one `SetChargingProfile`: a `TxDefaultProfile` of kind `Relative` with no transaction id, on the slider's connector (1.6) or on that connector's EVSE (2.0.1). It uses profile id `2000+n`, where `n` is the connector, at the same stack level as the `TxProfile` (see [Charging profile stack level](#charging-profile-stack-level)). On 1.6 that is the same profile id and stack level the `ocpp.set_charge_rate` action uses for its `TxDefaultProfile` leg, so the action and the slider overwrite each other, and the slider does not learn of a value the action set.
-* The slider is available whenever the charger is connected with SmartCharging, whether or not a transaction is running. On 2.0.1 it also waits until the charger has reported which EVSE the connector is on, so a profile that outlives the request is never sent to a guessed EVSE. Its value is the last limit the charger accepted for the connector. It is kept across transactions and restored after a restart, because the charger keeps the profile. A value left over from before the option was enabled is not restored.
-* The profile stays on the charger after the option is turned off. To lift it, set the slider to the maximum before turning the option off. On 1.6, `ocpp.clear_profile` also removes it, together with every other profile on the charger. On 2.0.1 it does not: that action clears only the station-wide `ChargingStationMaxProfile`, so raise the slider first.
+* The maximum is a limit like any other: the same profile is sent with the maximum current. Nothing is cleared, so a lower-level `TxDefaultProfile` left on the charger by another system or an earlier release cannot take over.
+* The slider is available whenever the charger is connected with SmartCharging, whether or not a transaction is running. On 2.0.1 it also waits until the charger has reported which EVSE the connector is on, so a profile that outlives the request is never sent to a guessed EVSE. Its value is the last limit the charger accepted for the connector. It is kept across transactions and restored after a restart, because the charger keeps the profile.
+* On a watt-only charger the amps are converted to watts with the voltage and the phase count measured when the slider is moved, as described [below](#units-voltage-and-phases). Measured while idle, that is usually one phase, so a default set then can cap later three-phase sessions at a third. Set it while the charger is charging, or use a `custom_profile` in watts.
+* All connectors use the same stack level. OCPP 1.6 states its replacement rule (same stack level and purpose replaces the existing profile) for the Charge Point; a charger that applies it across connectors rather than per connector would keep only the last connector's default. No such charger is known.
 * On a 2.0.1 charger with more than one connector on an EVSE, the connectors' sliders target the same EVSE with different profile ids at the same stack level. OCPP 2.0.1 forbids that combination (K01.FR.06), so expect the charger to reject the second connector's limit. One connector per EVSE, the usual layout, is unaffected.
-* Turn the option off before installing an older release of the integration. Releases before it do not know the setting, and fail to start a charger whose configuration has it switched on. A charger that never had it on stores nothing, so it is unaffected.
+
+Upgrade notes:
+
+* The **Send Session Current Limit as a default profile** option (0.12.1) is removed. `Session Current Limit` always sends a `TxProfile` again, and the connector default moved to `Default Current Limit`. The new slider starts unknown: a profile the old option left on the charger has the same id and stays in effect until you set `Default Current Limit` once.
+* Chargers that refused both profiles in #2158 (Timxon A0, ABB Terra AC, Morek MEV11) reject profiles at their reported maximum stack level; enable the [stack level option](#charging-profile-stack-level) for them.
 
 Essentially, the slider in your GUI maintains control over the absolute maximum current the charger can utilize.
 
@@ -243,7 +250,7 @@ condition:
 
 ### Limiting future sessions
 
-`transactionId` only means something for a `TxProfile`. To limit **future** sessions, send a `TxDefaultProfile` with no transaction binding at all — do not take the profile above and change only the purpose, as the leftover `transactionId` can get the profile rejected:
+For one limit per connector, use [Default Current Limit](#default-current-limit). `transactionId` only means something for a `TxProfile`. To limit **future** sessions with your own profile, send a `TxDefaultProfile` with no transaction binding at all — do not take the profile above and change only the purpose, as the leftover `transactionId` can get the profile rejected:
 
 ```yaml
 - action: ocpp.set_charge_rate

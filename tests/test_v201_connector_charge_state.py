@@ -1867,3 +1867,17 @@ async def test_fault_clears_flow_readings_and_stays_in_service(hass):
     assert _connector_status(cp) in CONNECTOR_AVAILABILITY.metric_condition
     assert cp._metrics[(1, current)].value == 0
     assert cp._metrics[(1, energy)].value == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "rebooted"), [("Triggered", False), ("PowerUp", True)]
+)
+async def test_only_a_real_boot_counts_as_a_reboot(hass, reason, rebooted):
+    """A triggered BootNotification leaves the charger's transactions in place."""
+    cp = _mk_cp(hass)
+    assert cp.rebooted_since_start is False
+    cp.on_boot_notification({}, reason)
+    await hass.async_block_till_done()
+    assert cp.rebooted_since_start is rebooted
+    assert cp.charger_generation == (1 if rebooted else 0)
