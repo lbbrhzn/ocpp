@@ -25,6 +25,7 @@ from custom_components.ocpp.const import (
     CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_STACK_LEVEL_BELOW_MAX,
+    CONF_THREE_PHASE_SUPPLY,
     CONF_FORCE_SMART_CHARGING,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -174,7 +175,12 @@ async def test_editing_absolute_charge_point_max_profile(hass):
 
 
 @pytest.mark.parametrize(
-    "option", [CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX]
+    "option",
+    [
+        CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+        CONF_STACK_LEVEL_BELOW_MAX,
+        CONF_THREE_PHASE_SUPPLY,
+    ],
 )
 async def test_editing_an_option_stored_only_when_on(hass, option):
     """The toggle round-trips through the options flow and is dropped when off."""
@@ -196,8 +202,12 @@ async def test_editing_an_option_stored_only_when_on(hass, option):
 
     assert _stored(entry, "CP_1")[option] is True
 
-    # Off again: the key leaves the record, so a rollback can still load it.
+    # The form shows it on, so saving another change doesn't turn it off.
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = {str(key): key.default() for key in result["data_schema"].schema}
+    assert defaults[option] is True
+
+    # Off again: the key leaves the record, so a rollback can still load it.
     await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
