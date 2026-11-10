@@ -1,6 +1,7 @@
 """Common classes for charge points of all OCPP versions."""
 
 import asyncio
+import contextlib
 from collections import defaultdict
 from collections.abc import MutableMapping
 from dataclasses import dataclass
@@ -269,6 +270,26 @@ class MeasurandValue:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    async def call(self, payload, suppress=True, unique_id=None, skip_schema_validation=False):
+        """Override to apply skip_schema_validation from charger settings.
+
+        Some chargers (e.g. Delta) return non-spec-compliant values such as
+        integers (0/1) where the OCPP 1.6 schema requires booleans (false/true)
+        for fields like ``readonly`` in GetConfiguration responses. When
+        ``skip_schema_validation`` is enabled for the charger, propagate that
+        flag to outgoing calls so these responses are not rejected.
+        """
+        if not skip_schema_validation and getattr(self, "settings", None) is not None:
+            skip_schema_validation = getattr(
+                self.settings, "skip_schema_validation", False
+            )
+        return await super().call(
+            payload,
+            suppress=suppress,
+            unique_id=unique_id,
+            skip_schema_validation=skip_schema_validation,
+        )
+
     def __init__(
         self,
         id,  # is charger cp_id not HA cpid
@@ -281,7 +302,7 @@ class ChargePoint(cp):
     ):
         """Instantiate a ChargePoint."""
 
-        super().__init__(id, connection, 10)
+        super().__init__(id, connection, 30)
         if version == OcppVersion.V16:
             self._call = callv16
             self._call_result = call_resultv16
@@ -304,6 +325,14 @@ class ChargePoint(cp):
         self.entry = entry
         self.cs_settings = central
         self.settings = charger
+        # Use the configurable response_timeout from charger settings.
+        response_timeout = getattr(self.settings, "response_timeout", 30)
+        if response_timeout < 1:
+            _LOGGER.warning(
+                "Invalid response_timeout %s, using default", response_timeout
+            )
+            response_timeout = 30
+        self._response_timeout = response_timeout
         self.status = "init"
         # Indicates if the charger requires a reboot to apply new
         # configuration.
@@ -317,6 +346,7 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        self._post_connect_task: asyncio.Task | None = None
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
         self._targeted_refresh_ready = False
@@ -388,6 +418,11 @@ class ChargePoint(cp):
 
     async def post_connect(self):
         """Logic to be executed right after a charger connects."""
+        if self._post_connect_running:
+            _LOGGER.debug("'%s' post_connect already running, skipping", self.id)
+            return
+        self._post_connect_running = True
+        self._post_connect_task = asyncio.current_task()
         try:
             _LOGGER.debug("'%s' starting post connection setup", self.id)
             self.status = STATE_OK
@@ -416,6 +451,9 @@ class ChargePoint(cp):
 
             self.post_connect_success = True
             _LOGGER.debug("'%s' post connection setup completed successfully", self.id)
+        finally:
+            self._post_connect_running = False
+            self._post_connect_task = None
 
             # nice to have, but not needed for integration to function
             # and can cause issues with some chargers
@@ -704,7 +742,26 @@ class ChargePoint(cp):
         # after 10s to allow for when a boot notification has not been received
         await asyncio.sleep(MONITOR_BACKSTOP_DELAY)
         if not self.post_connect_success:
-            self.hass.async_create_task(self.post_connect())
+            if self._post_connect_running and self._post_connect_task is not None:
+                task = self._post_connect_task
+                try:
+                    await asyncio.wait({task})
+                except asyncio.CancelledError:
+                    if task is not None and not task.done():
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await task
+                    raise
+                if task.cancelled():
+                    _LOGGER.debug(
+                        "'%s' post_connect task cancelled, will retry", self.id
+                    )
+                elif task.exception() is not None:
+                    _LOGGER.debug(
+                        "'%s' post_connect task raised: %s", self.id, task.exception()
+                    )
+            if not self.post_connect_success and not self._post_connect_running:
+                self.hass.async_create_task(self.post_connect())
 
         while connection.state is State.OPEN:
             try:
@@ -1017,7 +1074,9 @@ class ChargePoint(cp):
         self.charger_generation += 1
         if self.triggered_boot_notification is False:
             self.hass.async_create_task(self.notify_ha(f"Charger {self.id} rebooted"))
-            if not self.post_connect_success:
+            if not self.post_connect_success and not self._post_connect_running:
+                if self._post_connect_task is not None and not self._post_connect_task.done():
+                    self._post_connect_task.cancel()
                 self.hass.async_create_task(self.post_connect())
 
     def _async_refresh_metric_entities(

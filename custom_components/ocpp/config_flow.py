@@ -25,6 +25,7 @@ from .const import (
     CONF_MONITORED_VARIABLES,
     CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
+    CONF_RESPONSE_TIMEOUT,
     CONF_OCPP_VERSION,
     CONF_PORT,
     CONF_SESSION_LIMIT_DEFAULT_PROFILE,
@@ -50,6 +51,7 @@ from .const import (
     DEFAULT_MONITORED_VARIABLES,
     DEFAULT_MONITORED_VARIABLES_AUTOCONFIG,
     DEFAULT_NUM_CONNECTORS,
+    DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_OCPP_VERSION,
     DEFAULT_PORT,
     DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE,
@@ -62,6 +64,8 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_TRIES,
+    MAX_RESPONSE_TIMEOUT,
+    MIN_RESPONSE_TIMEOUT,
     DOMAIN,
     MEASURANDS,
     OCPP_VERSIONS,
@@ -93,6 +97,10 @@ STEP_USER_CS_DATA_SCHEMA = vol.Schema(
     }
 )
 
+RESPONSE_TIMEOUT_VALIDATOR = vol.All(
+    vol.Coerce(int), vol.Range(min=MIN_RESPONSE_TIMEOUT, max=MAX_RESPONSE_TIMEOUT)
+)
+
 STEP_USER_CP_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CPID, default=DEFAULT_CPID): str,
@@ -103,6 +111,9 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         ): bool,
         vol.Required(CONF_METER_INTERVAL, default=DEFAULT_METER_INTERVAL): int,
         vol.Required(CONF_IDLE_INTERVAL, default=DEFAULT_IDLE_INTERVAL): int,
+        vol.Required(
+            CONF_RESPONSE_TIMEOUT, default=DEFAULT_RESPONSE_TIMEOUT
+        ): RESPONSE_TIMEOUT_VALIDATOR,
         vol.Required(
             CONF_SKIP_SCHEMA_VALIDATION, default=DEFAULT_SKIP_SCHEMA_VALIDATION
         ): bool,
@@ -480,6 +491,12 @@ class OCPPOptionsFlow(OptionsFlow):
                     CONF_IDLE_INTERVAL,
                     default=current.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL),
                 ): int,
+                vol.Required(
+                    CONF_RESPONSE_TIMEOUT,
+                    default=current.get(
+                        CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT
+                    ),
+                ): RESPONSE_TIMEOUT_VALIDATOR,
                 vol.Required(
                     CONF_SKIP_SCHEMA_VALIDATION,
                     default=current.get(
