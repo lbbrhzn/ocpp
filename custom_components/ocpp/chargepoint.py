@@ -452,6 +452,33 @@ class ChargePoint(cp):
 
             self.post_connect_success = True
             _LOGGER.debug("'%s' post connection setup completed successfully", self.id)
+
+            # nice to have, but not needed for integration to function
+            # and can cause issues with some chargers
+            try:
+                await self.set_availability()
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                _LOGGER.debug("post_connect: set_availability ignored error: %s", ex)
+
+            if prof.REM in self._attr_supported_features:
+                if self.received_boot_notification is False:
+                    try:
+                        await asyncio.wait_for(
+                            self.trigger_boot_notification(), timeout=3
+                        )
+                    except Exception as ex:
+                        _LOGGER.debug("trigger_boot_notification ignored: %s", ex)
+                try:
+                    await asyncio.wait_for(
+                        self.trigger_status_notification(), timeout=3
+                    )
+                except Exception as ex:
+                    _LOGGER.debug("trigger_status_notification ignored: %s", ex)
+
+            # Ensure HA states are correct immediately after connection
+            self.hass.async_create_task(self.update(self.settings.cpid))
         except asyncio.CancelledError:
             # The connection dropped mid-setup, so the task was cancelled rather
             # than failed. CancelledError is not an Exception, so it passes the
@@ -463,33 +490,6 @@ class ChargePoint(cp):
         finally:
             self._post_connect_running = False
             self._post_connect_task = None
-
-        # nice to have, but not needed for integration to function
-        # and can cause issues with some chargers
-        try:
-            await self.set_availability()
-        except asyncio.CancelledError:
-            raise
-        except Exception as ex:
-            _LOGGER.debug("post_connect: set_availability ignored error: %s", ex)
-
-        if prof.REM in self._attr_supported_features:
-            if self.received_boot_notification is False:
-                try:
-                    await asyncio.wait_for(
-                        self.trigger_boot_notification(), timeout=3
-                    )
-                except Exception as ex:
-                    _LOGGER.debug("trigger_boot_notification ignored: %s", ex)
-            try:
-                await asyncio.wait_for(
-                    self.trigger_status_notification(), timeout=3
-                )
-            except Exception as ex:
-                _LOGGER.debug("trigger_status_notification ignored: %s", ex)
-
-        # Ensure HA states are correct immediately after connection
-        self.hass.async_create_task(self.update(self.settings.cpid))
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
