@@ -51,7 +51,7 @@ For OCPP 1.6, the sensor can show these values:
 * **Finishing** – Charging has stopped, but the session isn’t fully closed yet (typically waiting for the cable to be unplugged).
 * **Reserved** – The connector is reserved (via ReserveNow); only the intended user/ID may start. This is not supported by the OCPP integration yet.
 * **Unavailable** – Intentionally set out of service (e.g., ChangeAvailability(Inoperative)) or temporarily not usable. (Entities remain available in Home Assistant.)
-* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details.
+* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details. (Entities remain available in Home Assistant.)
 
 Note
 In OCPP 1.6, `connectorId = 0` (station level) only uses Available, Unavailable, or Faulted.<br>

@@ -1261,6 +1261,20 @@ class ChargePoint(cp):
             return float(DEFAULT_MAX_CURRENT)
         return round(watts / denominator, 1)
 
+    def _zero_flow_measurands(self, connector_id: int) -> None:
+        """Clear the readings that only have meaning while current is flowing."""
+        for meas in [
+            Measurand.current_import.value,
+            Measurand.power_active_import.value,
+            Measurand.power_reactive_import.value,
+            Measurand.current_export.value,
+            Measurand.power_active_export.value,
+            Measurand.power_reactive_export.value,
+        ]:
+            key = (connector_id, meas)
+            if key in self._metrics:
+                self._metrics[key].value = 0
+
     def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
         """Process per-phase MeterValues and aggregate them into per-connector metrics.
 

@@ -1846,3 +1846,24 @@ async def test_a_failing_hook_cannot_break_transaction_events(hass, caplog):
     assert cp._metrics[(1, csess.transaction_id)].value == ""
     assert cp._tx_event_state["U"] == {"seq": 1, "ended": True}
     assert caplog.text.count("session hook failed") == 4
+
+
+@pytest.mark.asyncio
+async def test_fault_clears_flow_readings_and_stays_in_service(hass):
+    """A fault stops the current, so its last reading must not stay published."""
+    cp = _mk_cp(hass)
+    current = MeasurandEnumType.current_import.value
+    energy = MeasurandEnumType.energy_active_import_register.value
+    cp._metrics[(1, current)].value = 32
+    cp._metrics[(1, energy)].value = 5
+
+    cp.on_status_notification("2026-01-01T00:00:00Z", "Occupied", 1, 1)
+    assert cp._metrics[(1, current)].value == 32
+
+    cp.on_status_notification("2026-01-01T00:00:01Z", "Faulted", 1, 1)
+    await hass.async_block_till_done()
+
+    assert _connector_status(cp) == ChargePointStatusv16.faulted.value
+    assert _connector_status(cp) in CONNECTOR_AVAILABILITY.metric_condition
+    assert cp._metrics[(1, current)].value == 0
+    assert cp._metrics[(1, energy)].value == 5
