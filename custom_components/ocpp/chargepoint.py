@@ -747,6 +747,12 @@ class ChargePoint(cp):
                 try:
                     await asyncio.wait({task})
                 except asyncio.CancelledError:
+                    # asyncio.wait only raises CancelledError for the calling
+                    # coroutine (this monitor), not the inner task. Reaching
+                    # here always means the monitor is being torn down.
+                    # Explicitly cancel and clean up the setup task so it does
+                    # not linger, then propagate so teardown cannot schedule
+                    # another post_connect run.
                     if task is not None and not task.done():
                         task.cancel()
                         with contextlib.suppress(asyncio.CancelledError, Exception):
