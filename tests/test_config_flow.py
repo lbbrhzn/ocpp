@@ -11,7 +11,6 @@ import pytest
 from custom_components.ocpp.const import (
     CONF_ENABLE_HA_NOTIFICATIONS,
     CONF_NUM_CONNECTORS,
-    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_STACK_LEVEL_BELOW_MAX,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
@@ -619,13 +618,9 @@ async def test_reconfigure_does_not_schedule_second_reload(hass, bypass_get_data
     )
 
 
-@pytest.mark.parametrize(
-    "option", [CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX]
-)
-async def test_discovery_flow_stores_newer_options_only_when_on(
-    hass, bypass_get_data, option
-):
+async def test_discovery_flow_stores_newer_options_only_when_on(hass, bypass_get_data):
     """An enabled option is stored; the default (off) is not."""
+    option = CONF_STACK_LEVEL_BELOW_MAX
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         data=MOCK_CONFIG_CS,

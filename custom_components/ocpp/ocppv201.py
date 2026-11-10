@@ -1247,6 +1247,11 @@ class ChargePoint(cp):
     @on(Action.boot_notification)
     def on_boot_notification(self, charging_station, reason, **kwargs):
         """Perform OCPP callback."""
+        # A Triggered boot answers a TriggerMessage: the charger did not
+        # restart, and its transactions and profiles are still in place.
+        restarted = reason != "Triggered"
+        if restarted:
+            self.rebooted_since_start = True
         resp = call_result.BootNotification(
             current_time=datetime.now(tz=UTC).isoformat(),
             interval=10,
@@ -1295,7 +1300,7 @@ class ChargePoint(cp):
         self._pending_transaction_events.clear()
         self._pending_transaction_overflow_logged = False
         self.received_boot_notification = True
-        self._register_boot_notification()
+        self._register_boot_notification(restarted=restarted)
         return resp
 
     @on(Action.heartbeat)

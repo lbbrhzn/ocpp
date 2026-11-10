@@ -25,7 +25,7 @@ Measurands (according to OCPP terminology) are actually metrics provided by the 
 
 OCPP integration can automatically detect supported measurands. However, some chargers have faulty firmware that causes the detection mechanism to fail. For such chargers, it is possible to disable automatic measurand detection and manually set the measurands to those supported by the charger. When set manually, selected measurands are not checked for compatibility with the charger and are requested from it. See below for OCPP compliance notes and charger-specific instructions in [supported devices](supported-devices).
 
-For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices. Maximum Current is station-wide: every charger has one slider on the charger device, with default entity id `number.<cpid>_maximum_current`, regardless of its connector count. Session Current Limit is per connector: one on the charger device for a single-connector charger, one on each connector device otherwise. See the Maximum Current upgrade notes in the [charge automation guide](Charge_automation) for changes to existing entities and charger compatibility.
+For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices. Maximum Current is station-wide: every charger has one slider on the charger device, with default entity id `number.<cpid>_maximum_current`, regardless of its connector count. Session Current Limit and Default Current Limit are per connector: on the charger device for a single-connector charger, on each connector device otherwise. See the Maximum Current upgrade notes in the [charge automation guide](Charge_automation) for changes to existing entities and charger compatibility.
 
 ## Removing a charge point
 
@@ -117,6 +117,7 @@ actions:
 * `Availability` (must be set to ON before EV is plugged in)
 * `Maximum Current` (sets the station-wide maximum charging current available)
 * `Session Current Limit` (per connector; limits only the running transaction, available while the connector displays a transaction)
+* `Default Current Limit` (per connector; limit for new transactions without a session limit of their own)
 * `Reset`
 
 ## Useful Entities for ABB Terra AC
@@ -148,6 +149,7 @@ actions:
 * `Availability` (OFF when something causes a problem or during a reboot etc)
 * `Maximum Current` (sets the station-wide maximum charging current available)
 * `Session Current Limit` (per connector; limits only the running transaction, available while the connector displays a transaction)
+* `Default Current Limit` (per connector; limit for new transactions without a session limit of their own)
 * `Reset`
 
 ## Useful Entities and Workarounds for United Chargers Grizzl-E
@@ -174,6 +176,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Availability` (ON when charger is idle. OFF during active charging session, or when something causes a problem)
 * `Maximum Current` (sets the station-wide maximum charging current available. Reverts to value set by charger's internal DIP switch following reboots; tweak slider to reload)
 * `Session Current Limit` (per connector; limits only the running transaction, available while the connector displays a transaction)
+* `Default Current Limit` (per connector; limit for new transactions without a session limit of their own)
 
 ## Useful Entities for Vestel EVC-04 Wallboxes
 
@@ -196,6 +199,7 @@ The Grizzl-E updates these metrics every 30s during charging sessions:
 * `Availability` (must be set to ON before EV is plugged in)
 * `Maximum Current` (sets the station-wide maximum charging current available)
 * `Session Current Limit` (per connector; limits only the running transaction, available while the connector displays a transaction)
+* `Default Current Limit` (per connector; limit for new transactions without a session limit of their own)
 * `Reset`
 
 ## Useful Entities for Rolec EVO
@@ -224,6 +228,7 @@ There are many other diagnostic entities about the features, ids, model, firmwar
 * `Charge Control`
 * `Maximum Current` (if `Current Offered` doesn't reach this when charging, raise the current to the max in the EVO app itself, connect via Bluetooth)
 * `Session Current Limit` (per connector; limits only the running transaction, available while the connector displays a transaction)
+* `Default Current Limit` (per connector; limit for new transactions without a session limit of their own)
 * `Reset` (reboot the charger)
 * `Unlock` (I think this will unlock the charging cable, if permanent lock is enabled from the app)
 

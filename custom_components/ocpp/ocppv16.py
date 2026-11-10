@@ -155,6 +155,11 @@ def _allowed_charging_rate_units(units_resp: str | None) -> tuple[bool, bool]:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    # 1.6 transaction ids are allocated here and never reused, so a boot,
+    # including the one post_connect requests, does not detach a value from
+    # its transaction.
+    transaction_ids_reused = False
+
     def __init__(
         self,
         id: str,

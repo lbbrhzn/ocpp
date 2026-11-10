@@ -140,18 +140,20 @@ async def test_one_master_on_station_device(hass, flat_entry, setup_flat, connec
         for e in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
         if e.domain == "number"
     ]
-    assert len(numbers) == connectors + 1
+    assert len(numbers) == 2 * connectors + 1
     master = next(
         entry
         for entry in numbers
         if entry.unique_id == "number.ocpp.test_cpid.maximum_current"
     )
+    keys = ("session_current_limit", "default_current_limit")
     expected_sessions = (
-        {"number.ocpp.test_cpid.session_current_limit"}
+        {f"number.ocpp.test_cpid.{key}" for key in keys}
         if connectors == 1
         else {
-            f"number.ocpp.test_cpid.conn{connector}.session_current_limit"
+            f"number.ocpp.test_cpid.conn{connector}.{key}"
             for connector in range(1, connectors + 1)
+            for key in keys
         }
     )
     assert {
@@ -571,12 +573,23 @@ def _session_number(hass):
 
 
 def _charging(cp, connector: int, transaction_id: int | None) -> None:
+    """Show the connector charging with transaction_id, or with none."""
     cp._metrics[(connector, cstat.status_connector)].value = "Charging"
     cp._metrics[(connector, csess.transaction_id)].value = transaction_id
     if transaction_id:
         cp._active_tx[connector] = transaction_id
     else:
         cp._active_tx.pop(connector, None)
+    _write_session_states(cp.hass)
+
+
+def _write_session_states(hass) -> None:
+    """Write the session sliders' state, as the charger's next refresh would."""
+    from custom_components.ocpp.number import SessionCurrentLimitNumber
+
+    for entity in hass.data["entity_components"]["number"].entities:
+        if isinstance(entity, SessionCurrentLimitNumber):
+            entity.async_write_ha_state()
 
 
 async def test_session_entity_follows_the_displayed_transaction(
@@ -797,6 +810,38 @@ async def test_session_entity_shows_the_first_request_while_pending(
     assert entity.native_value == 9
 
 
+async def test_a_reply_for_an_ended_transaction_is_not_shown_for_the_next(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A limit accepted for transaction 55 says nothing about transaction 56."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def gated(_id, _connector, _value):
+        started.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", gated)
+    task = asyncio.create_task(entity.async_set_native_value(9))
+    await started.wait()
+    _charging(cp, 1, 56)
+    release.set()
+    await task
+    assert entity.native_value is None
+    assert entity.extra_state_attributes["transaction_id"] == "56"
+    assert entity.extra_state_attributes["confirmed_current"] is None
+    assert entity.extra_restore_state_data.as_dict() == {
+        "transaction_id": "56",
+        "value": None,
+    }
+
+
 async def test_session_entity_forgets_a_confirmation_after_a_boot(
     hass, flat_entry, setup_flat, monkeypatch
 ):
@@ -819,6 +864,7 @@ async def test_session_entity_forgets_a_confirmation_after_a_boot(
 
     cp.triggered_boot_notification = True  # keep the boot's side effects quiet
     cp._register_boot_notification()
+    _write_session_states(hass)
     assert entity.extra_state_attributes["charger_generation"] == 1
     assert entity.native_value is None  # same id, new charger generation
     assert entity.extra_state_attributes["transaction_id"] == "same"
@@ -827,26 +873,32 @@ async def test_session_entity_forgets_a_confirmation_after_a_boot(
     assert entity.native_value == 7
 
 
-def _restore_session(hass, value, attributes):
-    entity_id = "number.test_cpid_session_current_limit"
+def _default_number(hass):
+    """Return the single-connector Default Current Limit entity."""
+    return live_entity(hass, "number.test_cpid_default_current_limit", "number")
+
+
+def _restore_default(hass, value, attributes):
+    """Seed the restore cache with a Default Current Limit value."""
+    entity_id = "number.test_cpid_default_current_limit"
     data = NumberExtraStoredData(48, 0, 1, UnitOfElectricCurrent.AMPERE, value)
     mock_restore_cache_with_extra_data(
         hass, [(State(entity_id, str(value), attributes), data.as_dict())]
     )
 
 
-async def test_default_profile_session_entity_needs_no_transaction(
+async def test_default_current_limit_needs_no_transaction(
     hass, flat_entry, setup_flat, monkeypatch
 ):
-    """With the option on, the slider writes a connector TxDefaultProfile."""
+    """Default Current Limit writes a connector TxDefaultProfile."""
     from ocpp.v16.enums import ChargingProfileStatus
 
-    from custom_components.ocpp.number import SessionDefaultLimitNumber
+    from custom_components.ocpp.number import DefaultCurrentLimitNumber
 
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    _configure(hass, flat_entry, num_connectors=1)
     central = await setup_flat()
-    entity = _session_number(hass)
-    assert isinstance(entity, SessionDefaultLimitNumber)
+    entity = _default_number(hass)
+    assert isinstance(entity, DefaultCurrentLimitNumber)
     assert not entity.available
     assert entity.native_value is None
 
@@ -908,13 +960,13 @@ async def test_default_profile_session_entity_needs_no_transaction(
     assert not entity.available
 
 
-async def test_default_profile_session_entity_works_on_201(
+async def test_default_current_limit_works_on_201(
     hass, flat_entry, setup_flat, monkeypatch
 ):
     """On 2.0.1 the slider is available without a transaction and sets the EVSE default."""
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    _configure(hass, flat_entry, num_connectors=1)
     central = await setup_flat()
-    entity = _session_number(hass)
+    entity = _default_number(hass)
     cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
     cp._inventory = InventoryReport(
         evse_count=1,
@@ -939,13 +991,13 @@ async def test_default_profile_session_entity_works_on_201(
     assert profile["charging_profile_purpose"] == "TxDefaultProfile"
 
 
-async def test_default_profile_session_entity_waits_for_the_evse_mapping_on_201(
+async def test_default_current_limit_waits_for_the_evse_mapping_on_201(
     hass, flat_entry, setup_flat, monkeypatch
 ):
     """No persistent profile goes to a guessed EVSE before the charger names it."""
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    _configure(hass, flat_entry, num_connectors=1)
     central = await setup_flat()
-    entity = _session_number(hass)
+    entity = _default_number(hass)
     cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
     cp.post_connect_success = True
     cp.num_connectors = 1
@@ -975,43 +1027,61 @@ async def test_default_profile_session_entity_waits_for_the_evse_mapping_on_201(
     assert entity.native_value == 6
 
 
-@pytest.mark.parametrize(
-    ("attributes", "expected"),
-    [
-        ({"profile_purpose": "TxDefaultProfile"}, 12),
-        ({"transaction_id": "55", "profile_id": 3001}, None),
-        ({}, None),
-    ],
-)
-async def test_default_profile_session_entity_restores_only_its_own_value(
-    hass, flat_entry, setup_flat, attributes, expected
+def _register_default(hass, entry):
+    """Register the single-connector Default Current Limit entity."""
+    return _register(
+        hass,
+        entry,
+        "number.ocpp.test_cpid.default_current_limit",
+        suggested_object_id="test_cpid_default_current_limit",
+    )
+
+
+@pytest.mark.parametrize("attributes", [{"profile_purpose": "TxDefaultProfile"}, {}])
+async def test_default_current_limit_restores_its_value(
+    hass, flat_entry, setup_flat, attributes
 ):
-    """The charger keeps a default profile; a transaction-bound value has ended."""
-    _restore_session(hass, 12, attributes)
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    """The charger keeps the profile, so the value is restored.
+
+    Also when the state was saved while unavailable, which drops attributes.
+    """
+    _register_default(hass, flat_entry)
+    _restore_default(hass, 12, attributes)
+    _configure(hass, flat_entry, num_connectors=1)
     await setup_flat()
-    entity = _session_number(hass)
-    assert entity.native_value == expected
-    assert entity.extra_state_attributes["confirmed_current"] == expected
+    entity = _default_number(hass)
+    assert entity.native_value == 12
+    assert entity.extra_state_attributes["confirmed_current"] == 12
 
 
-async def test_default_profile_session_entity_ignores_an_unknown_restored_value(
+async def test_a_new_default_current_limit_restores_nothing(
+    hass, flat_entry, setup_flat
+):
+    """A new entity must not pick up a value left by an earlier connector layout."""
+    _restore_default(hass, 12, {"profile_purpose": "TxDefaultProfile"})
+    _configure(hass, flat_entry, num_connectors=1)
+    await setup_flat()
+    assert _default_number(hass).native_value is None
+
+
+async def test_default_current_limit_ignores_an_unknown_restored_value(
     hass, flat_entry, setup_flat
 ):
     """A restored state with no number stays unknown."""
-    _restore_session(hass, None, {"profile_purpose": "TxDefaultProfile"})
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    _register_default(hass, flat_entry)
+    _restore_default(hass, None, {"profile_purpose": "TxDefaultProfile"})
+    _configure(hass, flat_entry, num_connectors=1)
     await setup_flat()
-    assert _session_number(hass).native_value is None
+    assert _default_number(hass).native_value is None
 
 
-async def test_default_profile_session_entity_saves_only_what_was_accepted(
+async def test_default_current_limit_saves_only_what_was_accepted(
     hass, flat_entry, setup_flat, monkeypatch
 ):
     """A request in flight is never saved as a limit, and a cancel reverts it."""
-    _configure(hass, flat_entry, num_connectors=1, session_limit_default_profile=True)
+    _configure(hass, flat_entry, num_connectors=1)
     central = await setup_flat()
-    entity = _session_number(hass)
+    entity = _default_number(hass)
     _attach_protocol(hass, flat_entry, central)
 
     async def accepted(_id, _connector, _value):
@@ -1038,3 +1108,335 @@ async def test_default_profile_session_entity_saves_only_what_was_accepted(
         await task
     assert entity.native_value == 32
     assert hass.states.get(entity.entity_id).state == "32.0"
+
+
+@pytest.mark.parametrize("connectors", [1, 2])
+async def test_every_connector_has_a_session_and_a_default_limit(
+    hass, flat_entry, setup_flat, connectors
+):
+    """Both sliders exist per connector, on the connector's device."""
+    _configure(hass, flat_entry, num_connectors=connectors)
+    await setup_flat()
+    registry = er.async_get(hass)
+    uids = {
+        e.unique_id
+        for e in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if e.domain == "number"
+    }
+    if connectors == 1:
+        expected = {
+            "number.ocpp.test_cpid.session_current_limit",
+            "number.ocpp.test_cpid.default_current_limit",
+        }
+    else:
+        expected = {
+            f"number.ocpp.test_cpid.conn{n}.{key}"
+            for n in (1, 2)
+            for key in ("session_current_limit", "default_current_limit")
+        }
+    assert expected <= uids
+    if connectors == 2:
+        assert live_entity(
+            hass, "number.test_cpid_connector_2_default_current_limit", "number"
+        )
+
+
+async def test_stale_default_limits_are_removed_when_connectors_change(
+    hass, flat_entry, setup_flat
+):
+    """A connector default left from another topology is removed like a session one."""
+    stale = [
+        _register(
+            hass, flat_entry, "number.ocpp.test_cpid.conn1.default_current_limit"
+        ),
+        _register(
+            hass, flat_entry, "number.ocpp.test_cpid.conn3.default_current_limit"
+        ),
+    ]
+    _configure(hass, flat_entry, num_connectors=1)
+    await setup_flat()
+    registry = er.async_get(hass)
+    for entry in stale:
+        assert registry.async_get(entry.entity_id) is None
+    assert registry.async_get_entity_id(
+        "number", DOMAIN, "number.ocpp.test_cpid.default_current_limit"
+    )
+
+
+async def test_default_current_limit_at_maximum_is_a_profile(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """At the maximum a profile is sent, not cleared: a lower default must not apply."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    entity = _default_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    sent = []
+
+    async def configuration(key):
+        if key == ConfigurationKey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        return "5"
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", accept)
+    await entity.async_set_native_value(48)
+    assert len(sent) == 1
+    profile = sent[0].cs_charging_profiles
+    assert profile["chargingProfileId"] == 2001
+    assert profile["chargingProfilePurpose"] == "TxDefaultProfile"
+    assert profile["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 48.0
+    assert entity.native_value == 48
+
+
+async def test_session_limit_follows_the_default_until_set(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A transaction without a TxProfile runs at the connector's current default."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    default = _default_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+
+    async def configuration(key):
+        if key == ConfigurationKey.charging_schedule_allowed_charging_rate_unit:
+            return "Current"
+        return "5"
+
+    async def accept(request):
+        return SimpleNamespace(status="Accepted")
+
+    monkeypatch.setattr(cp, "get_configuration", configuration)
+    monkeypatch.setattr(cp, "call", accept)
+
+    await default.async_set_native_value(10)
+    # No transaction: nothing to inherit for.
+    assert session.native_value is None
+    assert session.extra_state_attributes["source"] is None
+
+    _charging(cp, 1, 55)
+    assert session.native_value == 10
+    assert session.extra_state_attributes["source"] == "TxDefaultProfile"
+    assert session.extra_state_attributes["profile_id"] == 2001
+    # Without a TxProfile the running transaction follows the new default.
+    await default.async_set_native_value(12)
+    assert session.native_value == 12
+    assert hass.states.get(session.entity_id).state == "12.0"
+
+    # A TxProfile overrides the default for this transaction.
+    await session.async_set_native_value(16)
+    assert session.native_value == 16
+    assert session.extra_state_attributes["source"] == "TxProfile"
+    assert session.extra_state_attributes["profile_id"] == 3001
+    await default.async_set_native_value(8)
+    assert session.native_value == 16
+
+    # The next transaction starts from the default again.
+    _charging(cp, 1, 56)
+    assert session.native_value == 8
+    assert session.extra_state_attributes["source"] == "TxDefaultProfile"
+
+    await default.async_set_native_value(48)
+    _charging(cp, 1, 57)
+    assert session.native_value == 48
+    assert session.extra_state_attributes["source"] == "TxDefaultProfile"
+
+
+async def test_a_refused_session_limit_goes_back_to_the_default(
+    hass, flat_entry, setup_flat, monkeypatch
+):
+    """A failed TxProfile leaves the transaction on the default, as displayed."""
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    default = _default_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+
+    async def accepted(*_args):
+        return True
+
+    async def refused(*_args):
+        return False
+
+    monkeypatch.setattr(central, "set_session_default_charge_rate_amps", accepted)
+    await default.async_set_native_value(10)
+    _charging(cp, 1, 55)
+    monkeypatch.setattr(central, "set_session_charge_rate_amps", refused)
+    with pytest.raises(HomeAssistantError, match="did not accept"):
+        await session.async_set_native_value(20)
+    assert session.native_value == 10
+    assert session.extra_state_attributes["source"] == "TxDefaultProfile"
+
+
+async def test_session_restore_data_survives_until_the_charger_reconnects(
+    hass, flat_entry, setup_flat
+):
+    """Saving before the transaction is shown keeps what the last run saved."""
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State("number.test_cpid_session_current_limit", "16.0"),
+                {"transaction_id": "55", "value": 16},
+            )
+        ],
+    )
+    _configure(hass, flat_entry, num_connectors=1)
+    await setup_flat()
+    session = _session_number(hass)
+    assert session.extra_restore_state_data.as_dict() == {
+        "transaction_id": "55",
+        "value": 16,
+    }
+
+
+async def test_session_limit_is_not_restored_after_a_charger_reboot(
+    hass, flat_entry, setup_flat
+):
+    """A 2.0.1 charger that rebooted dropped its transactions: a reused id is new."""
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State("number.test_cpid_session_current_limit", "16.0"),
+                {"transaction_id": "1", "value": 16},
+            )
+        ],
+    )
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central, protocol="2.0.1")
+    cp.rebooted_since_start = True
+    cp._metrics[(1, cstat.status_connector)].value = "Charging"
+    cp._metrics[(1, csess.transaction_id)].value = "1"
+    _write_session_states(hass)
+    assert session.extra_state_attributes["transaction_id"] == "1"
+    assert session.native_value is None
+    assert session.extra_state_attributes["source"] is None
+
+
+@pytest.mark.parametrize(
+    ("restored_transaction", "value", "source"),
+    [("55", 16, "TxProfile"), ("54", None, None)],
+)
+async def test_session_limit_is_restored_for_its_own_transaction(
+    hass, flat_entry, setup_flat, restored_transaction, value, source
+):
+    """After a restart the TxProfile of the same transaction is still in force."""
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State("number.test_cpid_session_current_limit", "16.0"),
+                {"transaction_id": restored_transaction, "value": 16},
+            )
+        ],
+    )
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+    assert session.native_value == value
+    assert session.extra_state_attributes["source"] == source
+
+
+async def test_a_16_boot_keeps_the_session_limit(hass, flat_entry, setup_flat):
+    """1.6 transaction ids are allocated here, so a boot does not detach a value.
+
+    After a restart post_connect requests a BootNotification from a charger
+    that did not boot; the restored value of the running transaction stays.
+    """
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State("number.test_cpid_session_current_limit", "16.0"),
+                {"transaction_id": "55", "value": 16},
+            )
+        ],
+    )
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    cp.post_connect_success = True
+    cp.triggered_boot_notification = True  # keep the boot's side effects quiet
+    _charging(cp, 1, 55)
+    assert session.native_value == 16
+
+    cp.on_boot_notification(charge_point_vendor="v", charge_point_model="m")
+    _write_session_states(hass)
+    assert session.extra_state_attributes["charger_generation"] == 1
+    assert session.native_value == 16
+    assert session.extra_state_attributes["source"] == "TxProfile"
+    assert session.extra_restore_state_data.as_dict() == {
+        "transaction_id": "55",
+        "value": 16,
+    }
+    await hass.async_block_till_done()
+
+
+async def test_session_limit_after_restart_shows_the_restored_default(
+    hass, flat_entry, setup_flat
+):
+    """Without a TxProfile, a restart mid-transaction shows the restored default."""
+    _register_default(hass, flat_entry)
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State("number.test_cpid_session_current_limit", "10.0"),
+                # Saved by the previous release, with its starting default.
+                {"transaction_id": "55", "value": None, "default": 4},
+            ),
+            (
+                State("number.test_cpid_default_current_limit", "10.0"),
+                {
+                    "native_max_value": 48,
+                    "native_min_value": 0,
+                    "native_step": 1,
+                    "native_unit_of_measurement": "A",
+                    "native_value": 10,
+                },
+            ),
+        ],
+    )
+    _configure(hass, flat_entry, num_connectors=1)
+    central = await setup_flat()
+    session = _session_number(hass)
+    cp = _attach_protocol(hass, flat_entry, central)
+    _charging(cp, 1, 55)
+    assert session.native_value == 10
+    assert session.extra_state_attributes["source"] == "TxDefaultProfile"
+    assert session.extra_restore_state_data.as_dict() == {
+        "transaction_id": "55",
+        "value": None,
+    }
+
+
+async def test_a_flat_default_limit_is_removed_on_a_multi_connector_charger(
+    hass, flat_entry, setup_flat
+):
+    """The single-connector entity goes when the charger reports two connectors."""
+    stale = _register(hass, flat_entry, "number.ocpp.test_cpid.default_current_limit")
+    _configure(hass, flat_entry, num_connectors=2)
+    await setup_flat()
+    registry = er.async_get(hass)
+    assert registry.async_get(stale.entity_id) is None
+    uids = {
+        e.unique_id
+        for e in er.async_entries_for_config_entry(registry, flat_entry.entry_id)
+        if e.domain == "number"
+    }
+    assert uids == {"number.ocpp.test_cpid.maximum_current"} | {
+        f"number.ocpp.test_cpid.conn{n}.{key}"
+        for n in (1, 2)
+        for key in ("session_current_limit", "default_current_limit")
+    }

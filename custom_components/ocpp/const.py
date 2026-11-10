@@ -31,7 +31,6 @@ CONF_NUM_CONNECTORS = "num_connectors"
 CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
-CONF_SESSION_LIMIT_DEFAULT_PROFILE = "session_limit_default_profile"
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
@@ -57,7 +56,6 @@ DEFAULT_NUM_CONNECTORS = 1
 DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
 DEFAULT_FORCE_SMART_CHARGING = False
-DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE = False
 DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
@@ -202,7 +200,6 @@ class ChargerSystemSettings:
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
     charge_point_max_profile_absolute: bool = DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE
-    session_limit_default_profile: bool = DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE
     # OCPP 1.6: send managed profiles one level below the reported
     # ChargeProfileMaxStackLevel, for chargers that read it as a count.
     stack_level_below_max: bool = DEFAULT_STACK_LEVEL_BELOW_MAX

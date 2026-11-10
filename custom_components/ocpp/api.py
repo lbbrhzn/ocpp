@@ -756,6 +756,22 @@ class CentralSystem:
         _cp_id, _m, cp, _n = self._get_metrics(id)
         return int(getattr(cp, "charger_generation", 0) or 0) if cp else 0
 
+    def transaction_generation(self, id: str) -> int:
+        """Return the generation that makes the charger's transaction ids unique.
+
+        0 when the charger never reuses an id (1.6), so a boot does not
+        detach a value from its transaction.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
+        if cp is None or not getattr(cp, "transaction_ids_reused", True):
+            return 0
+        return int(getattr(cp, "charger_generation", 0) or 0)
+
+    def charger_rebooted(self, id: str) -> bool:
+        """Return whether the charger reported a reboot since Home Assistant started."""
+        _cp_id, _m, cp, _n = self._get_metrics(id)
+        return bool(getattr(cp, "rebooted_since_start", False)) if cp else False
+
     def session_limit_available(self, id: str, connector_id: int) -> bool:
         """Whether a connector's session limit can be set right now.
 
