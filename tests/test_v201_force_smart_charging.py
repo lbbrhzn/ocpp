@@ -63,8 +63,8 @@ def _mk_cp(hass, force_smart_charging: bool):
     )
     cp = ChargePoint("CP_A", conn, hass, entry, central, charger)
     # A charger that does not advertise SmartChargingCtrlr/Available. Seeding
-    # the inventory also short-circuits _get_inventory, so the only calls made
-    # are the UpdateFirmware and TriggerMessage capability probes.
+    # the inventory also short-circuits _get_inventory, so the remaining
+    # capability probe is TriggerMessage (FirmwareManagement is assumed).
     cp._inventory = InventoryReport(evse_count=1, connector_count=[1])
 
     async def refuse_probes(req):

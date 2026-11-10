@@ -1,12 +1,13 @@
 """A capability probe that goes unanswered must cost only its own profile.
 
-get_supported_features probes the charger with UpdateFirmware and
-TriggerMessage. The ocpp library raises asyncio.TimeoutError - not an
-OCPPError - when a charger accepts the call and then never replies, so
-catching OCPPError alone let the timeout escape get_supported_features and
-skip the assignment in fetch_supported_features. post_connect swallowed it
-at DEBUG, so a charger that ignored one optional probe ended up with no
-feature profiles at all and no feature metric, after a silent 10s stall.
+get_supported_features assumes FirmwareManagement (no side-effecting
+UpdateFirmware call - see #2248) and probes the charger with TriggerMessage.
+The ocpp library raises asyncio.TimeoutError - not an OCPPError - when a
+charger accepts the call and then never replies, so catching OCPPError alone
+let the timeout escape get_supported_features and skip the assignment in
+fetch_supported_features. post_connect swallowed it at DEBUG, so a charger
+that ignored one optional probe ended up with no feature profiles at all and
+no feature metric, after a silent 10s stall.
 
 SMART is the consequence that bites: without it number.<cpid>_maximum_current
 is never created, so charge current cannot be set.
@@ -78,9 +79,10 @@ def _mk_cp(hass, stalls_on=(), raises=None):
         subprotocol="ocpp2.0.1",
     )
     cp = ChargePoint("CP_A", conn, hass, entry, central, charger)
-    # Seeding the inventory short-circuits _get_inventory, so the only calls
-    # made are the two capability probes. SMART and AUTH come from the report,
-    # and are what a probe timeout used to take down with it.
+    # Seeding the inventory short-circuits _get_inventory, so the only call
+    # made is the TriggerMessage capability probe. SMART and AUTH come from
+    # the report, and are what a probe timeout used to take down with it.
+    # FirmwareManagement is assumed without probing (#2248).
     cp._inventory = InventoryReport(
         evse_count=1,
         connector_count=[1],
@@ -98,22 +100,27 @@ def _mk_cp(hass, stalls_on=(), raises=None):
 
 
 @pytest.mark.asyncio
-async def test_a_stalled_firmware_probe_costs_only_that_profile(hass):
-    """FW is the probed capability, so FW is all that may be lost."""
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware"])
+async def test_firmware_profile_is_assumed_without_updatefirmware_call(hass):
+    """FW must be set without ever sending UpdateFirmware (#2248)."""
+    called = []
+
+    cp = _mk_cp(hass)
+
+    async def track(req):
+        called.append(type(req).__name__)
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = track
 
     features = await cp.get_supported_features()
 
-    assert Profiles.FW not in features
-    assert Profiles.REM in features
-    assert Profiles.SMART in features
-    assert Profiles.AUTH in features
-    assert Profiles.CORE in features
+    assert Profiles.FW in features
+    assert "UpdateFirmware" not in called
 
 
 @pytest.mark.asyncio
 async def test_a_stalled_trigger_probe_costs_only_that_profile(hass):
-    """The second probe has to be independent of the first."""
+    """The remaining probe has to be independent of assumed FW."""
     cp = _mk_cp(hass, stalls_on=["TriggerMessage"])
 
     features = await cp.get_supported_features()
@@ -124,13 +131,13 @@ async def test_a_stalled_trigger_probe_costs_only_that_profile(hass):
 
 
 @pytest.mark.asyncio
-async def test_both_probes_stalling_still_yields_the_detected_profiles(hass):
-    """A charger answering neither probe keeps what the report established."""
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware", "TriggerMessage"])
+async def test_trigger_probe_stalling_still_yields_the_detected_profiles(hass):
+    """A charger answering no TriggerMessage keeps what the report established."""
+    cp = _mk_cp(hass, stalls_on=["TriggerMessage"])
 
     features = await cp.get_supported_features()
 
-    assert features == Profiles.CORE | Profiles.SMART | Profiles.AUTH
+    assert features == Profiles.CORE | Profiles.SMART | Profiles.AUTH | Profiles.FW
 
 
 @pytest.mark.asyncio
@@ -141,12 +148,13 @@ async def test_the_feature_metric_is_still_written(hass):
     so sensor.<cpid>_features stayed empty and _attr_supported_features stayed
     NONE - and post_connect logged it at DEBUG, so nothing said why.
     """
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware"])
+    cp = _mk_cp(hass, stalls_on=["TriggerMessage"])
 
     await cp.fetch_supported_features()
 
     assert cp._attr_supported_features == cp._metrics[(0, cdet.features)].value
     assert Profiles.SMART in cp._attr_supported_features
+    assert Profiles.FW in cp._attr_supported_features
 
 
 @pytest.mark.asyncio
@@ -157,7 +165,7 @@ async def test_post_connect_is_not_aborted_by_a_stalled_probe(hass):
     connector count uninitialised too - visible as missing connector entities
     rather than as an error.
     """
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware"])
+    cp = _mk_cp(hass, stalls_on=["TriggerMessage"])
 
     await cp.post_connect()
 
@@ -171,12 +179,12 @@ async def test_a_refusal_is_still_handled(hass):
     This is the path that already worked, and the new handler must not be
     reached for it - a refusal is a definite no, not a stall.
     """
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware"], raises=OCPPError("not supported"))
+    cp = _mk_cp(hass, stalls_on=["TriggerMessage"], raises=OCPPError("not supported"))
 
     features = await cp.get_supported_features()
 
-    assert Profiles.FW not in features
-    assert Profiles.REM in features
+    assert Profiles.REM not in features
+    assert Profiles.FW in features
 
 
 @pytest.mark.asyncio
@@ -188,18 +196,18 @@ async def test_a_stall_is_logged_louder_than_a_refusal(hass, caplog):
     will not admit to - and the dropped profile has real consequences, so it
     warrants a warning that names what was lost.
     """
-    cp = _mk_cp(hass, stalls_on=["UpdateFirmware"])
+    cp = _mk_cp(hass, stalls_on=["TriggerMessage"])
 
     with caplog.at_level("INFO", logger="custom_components.ocpp"):
         await cp.get_supported_features()
 
     stalls = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(stalls) == 1
-    assert "UpdateFirmware" in stalls[0].getMessage()
+    assert "TriggerMessage" in stalls[0].getMessage()
 
     caplog.clear()
     refusing = _mk_cp(
-        hass, stalls_on=["UpdateFirmware"], raises=OCPPError("not supported")
+        hass, stalls_on=["TriggerMessage"], raises=OCPPError("not supported")
     )
 
     with caplog.at_level("INFO", logger="custom_components.ocpp"):
@@ -219,7 +227,7 @@ async def test_a_closed_connection_still_propagates(hass):
     """
     cp = _mk_cp(
         hass,
-        stalls_on=["UpdateFirmware"],
+        stalls_on=["TriggerMessage"],
         raises=ConnectionClosedError(None, None),
     )
 
