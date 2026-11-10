@@ -346,6 +346,7 @@ class ChargePoint(cp):
         self.triggered_boot_notification = False
         self.received_boot_notification = False
         self.post_connect_success = False
+        self._post_connect_running = False
         self._post_connect_task: asyncio.Task | None = None
         # Set once every sensor requested by a targeted refresh has
         # resolved; bounds the full-update fallback to the startup window.
