@@ -1347,9 +1347,19 @@ class ChargePoint(cp):
 
     @on(Action.status_notification)
     def on_status_notification(
-        self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
+        self,
+        timestamp: str,
+        connector_status: str,
+        evse_id: int,
+        connector_id: int,
+        **kwargs,
     ):
-        """Perform OCPP callback."""
+        """Perform OCPP callback.
+
+        ``**kwargs`` absorbs optional OCPP fields such as ``custom_data``
+        (e.g. KEBA sends ``customData: {vendorId: ...}``). Without it the
+        ocpp library raises TypeError and the CSMS replies InternalError.
+        """
         # Station-level (0, 0) and malformed ids never route through the
         # connector map, so they are applied immediately: buffering them on a
         # charger whose inventory yields no map would strand them - and the
