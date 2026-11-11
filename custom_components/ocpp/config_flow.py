@@ -33,6 +33,7 @@ from .const import (
     CONF_SSL_CERTFILE_PATH,
     CONF_SSL_KEYFILE_PATH,
     CONF_STACK_LEVEL_BELOW_MAX,
+    CONF_THREE_PHASE_SUPPLY,
     CONF_WEBSOCKET_CLOSE_TIMEOUT,
     CONF_WEBSOCKET_PING_INTERVAL,
     CONF_WEBSOCKET_PING_TIMEOUT,
@@ -58,6 +59,7 @@ from .const import (
     DEFAULT_SSL_CERTFILE_PATH,
     DEFAULT_SSL_KEYFILE_PATH,
     DEFAULT_STACK_LEVEL_BELOW_MAX,
+    DEFAULT_THREE_PHASE_SUPPLY,
     DEFAULT_WEBSOCKET_CLOSE_TIMEOUT,
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
@@ -120,6 +122,7 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_STACK_LEVEL_BELOW_MAX, default=DEFAULT_STACK_LEVEL_BELOW_MAX
         ): bool,
+        vol.Required(CONF_THREE_PHASE_SUPPLY, default=DEFAULT_THREE_PHASE_SUPPLY): bool,
         vol.Required(
             CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
@@ -135,7 +138,11 @@ STEP_USER_MEASURANDS_SCHEMA = vol.Schema(
 
 
 # Options added after 0.12.0, stored only while they are on.
-_STORED_ONLY_WHEN_ON = (CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX)
+_STORED_ONLY_WHEN_ON = (
+    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+    CONF_STACK_LEVEL_BELOW_MAX,
+    CONF_THREE_PHASE_SUPPLY,
+)
 
 
 def _store_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
@@ -510,6 +517,12 @@ class OCPPOptionsFlow(OptionsFlow):
                     CONF_STACK_LEVEL_BELOW_MAX,
                     default=current.get(
                         CONF_STACK_LEVEL_BELOW_MAX, DEFAULT_STACK_LEVEL_BELOW_MAX
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_THREE_PHASE_SUPPLY,
+                    default=current.get(
+                        CONF_THREE_PHASE_SUPPLY, DEFAULT_THREE_PHASE_SUPPLY
                     ),
                 ): bool,
                 vol.Required(
