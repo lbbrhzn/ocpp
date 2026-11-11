@@ -1288,7 +1288,13 @@ class ChargePoint(cp):
         return _DEFAULT_LINE_VOLTAGE
 
     def _phase_count(self, conn_id: int) -> int:
-        """Count electrically active phases; conservatively default to one."""
+        """Count electrically active phases, or three if the charger is set so."""
+        if self.settings.three_phase_supply:
+            # Meter values don't always show the wiring: none survive a
+            # restart, and a one-phase car can show as one phase. A
+            # three-phase power-only charger sent a one-phase limit may refuse
+            # to charge (#2224), so the configured wiring wins.
+            return 3
         measurands = (
             Measurand.voltage.value,
             Measurand.current_import.value,

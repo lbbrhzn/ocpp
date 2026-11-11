@@ -57,7 +57,9 @@ def cp_v16():
     cp._smart_charging_lock = asyncio.Lock()
     cp._metrics = _ConnectorAwareMetrics()
     cp.settings = SimpleNamespace(
-        charge_point_max_profile_absolute=False, stack_level_below_max=False
+        charge_point_max_profile_absolute=False,
+        stack_level_below_max=False,
+        three_phase_supply=False,
     )
     # set_charge_rate calls these (we’ll monkeypatch per-test):
     # - cp.get_configuration(key)
@@ -298,7 +300,7 @@ async def _accept_first_profile(cp, monkeypatch, units: str):
             return "1"
         pytest.fail(f"Unexpected get_configuration key: {key}")
 
-    async def fake_call(req):
+    async def fake_call(req, **_kwargs):
         captured.append(req)
         return SimpleNamespace(status=ChargingProfileStatus.accepted)
 
@@ -372,6 +374,62 @@ async def test_power_only_single_phase_ignores_zero_phase_placeholders(
     unit, limit = _schedule_limit(captured[0])
     assert unit == ChargingRateUnitType.watts.value
     assert limit == 3680.0  # 16 A * 230 V * 1 active phase
+
+
+@pytest.mark.asyncio
+async def test_three_phase_option_converts_before_meter_values_arrive(
+    cp_v16, monkeypatch
+):
+    """Regression for #2224: a Huawei SCharger-22KT after a restart.
+
+    With no per-phase meter values yet, 16 A went out as 3680 W, below what
+    the charger charges at on three phases, so it ended every session.
+    """
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Power")
+    cp_v16.settings.three_phase_supply = True
+
+    assert await cp_v16.set_station_charge_rate(16) is True
+
+    unit, limit = _schedule_limit(captured[0])
+    assert unit == ChargingRateUnitType.watts.value
+    assert limit == 11040.0  # 16 A * 230 V * 3 phases
+
+
+@pytest.mark.parametrize(
+    ("measurand", "unit", "phase_values"),
+    [
+        (Measurand.voltage.value, "V", {"L1-N": 230.0, "L2-N": 0.0, "L3-N": 0.0}),
+        (Measurand.current_import.value, "A", {"L1": 0.4, "L2": 0.0, "L3": 0.0}),
+    ],
+    ids=["one_phase_voltage", "residual_draw_on_l1"],
+)
+@pytest.mark.asyncio
+async def test_three_phase_option_wins_over_one_phase_meter_values(
+    cp_v16, monkeypatch, measurand, unit, phase_values
+):
+    """A one-phase reading doesn't bring #2224 back with the option on."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Power")
+    cp_v16.settings.three_phase_supply = True
+    metric = Metric(phase_values["L1-N" if unit == "V" else "L1"], unit)
+    metric.extra_attr = phase_values
+    cp_v16._metrics[(1, measurand)] = metric
+
+    assert await cp_v16.set_charge_rate(limit_amps=16, conn_id=1) is True
+
+    assert _schedule_limit(captured[0])[1] == 11040.0
+
+
+@pytest.mark.asyncio
+async def test_three_phase_option_splits_watts_for_a_current_charger(
+    cp_v16, monkeypatch
+):
+    """Watts sent to a three-phase current-only charger are split over three."""
+    captured = await _accept_first_profile(cp_v16, monkeypatch, "Current")
+    cp_v16.settings.three_phase_supply = True
+
+    assert await cp_v16.set_charge_rate(limit_watts=11040, conn_id=1) is True
+
+    assert _schedule_limit(captured[0]) == (ChargingRateUnitType.amps.value, 16.0)
 
 
 def test_phase_count_defaults_to_one_when_all_phase_values_are_zero(cp_v16):

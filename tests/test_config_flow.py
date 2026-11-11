@@ -13,6 +13,7 @@ from custom_components.ocpp.const import (
     CONF_NUM_CONNECTORS,
     CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_STACK_LEVEL_BELOW_MAX,
+    CONF_THREE_PHASE_SUPPLY,
     DEFAULT_NUM_CONNECTORS,
     DOMAIN,
 )
@@ -620,7 +621,12 @@ async def test_reconfigure_does_not_schedule_second_reload(hass, bypass_get_data
 
 
 @pytest.mark.parametrize(
-    "option", [CONF_SESSION_LIMIT_DEFAULT_PROFILE, CONF_STACK_LEVEL_BELOW_MAX]
+    "option",
+    [
+        CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+        CONF_STACK_LEVEL_BELOW_MAX,
+        CONF_THREE_PHASE_SUPPLY,
+    ],
 )
 async def test_discovery_flow_stores_newer_options_only_when_on(
     hass, bypass_get_data, option

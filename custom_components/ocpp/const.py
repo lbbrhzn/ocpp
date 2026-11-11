@@ -41,6 +41,7 @@ CONF_SSL_KEYFILE_PATH = "ssl_keyfile_path"
 CONF_STACK_LEVEL_BELOW_MAX = "stack_level_below_max"
 CONF_STEP = input_number.CONF_STEP
 CONF_SUBPROTOCOL = "subprotocol"
+CONF_THREE_PHASE_SUPPLY = "three_phase_supply"
 CONF_UNIT_OF_MEASUREMENT = ha.CONF_UNIT_OF_MEASUREMENT
 CONF_USERNAME = ha.CONF_USERNAME
 CONF_WEBSOCKET_CLOSE_TIMEOUT = "websocket_close_timeout"
@@ -67,6 +68,7 @@ DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
 DEFAULT_STACK_LEVEL_BELOW_MAX = False
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+DEFAULT_THREE_PHASE_SUPPLY = False
 # Anchor used when the station ceiling (ChargePointMaxProfile / 1.6,
 # ChargingStationMaxProfile / 2.0.1+) is sent as an absolute schedule
 # (charge_point_max_profile_absolute). Any fixed past instant works, since
@@ -211,6 +213,9 @@ class ChargerSystemSettings:
     # OCPP 1.6: send managed profiles one level below the reported
     # ChargeProfileMaxStackLevel, for chargers that read it as a count.
     stack_level_below_max: bool = DEFAULT_STACK_LEVEL_BELOW_MAX
+    # Convert limits between amps and watts for three phases, whatever the
+    # per-phase meter values show.
+    three_phase_supply: bool = DEFAULT_THREE_PHASE_SUPPLY
 
 
 @dataclass

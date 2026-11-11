@@ -159,6 +159,10 @@ Reconnection (either protocol): the charger's OCPP client does not reliably redi
 
 ## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
 
+## Huawei SCharger (FusionCharge)
+
+Power-only: the charger reports `ChargingScheduleAllowedChargingRateUnit` as `Power`, so the integration converts current limits to watts. A three-phase Huawei won't charge below about 4140 W, 6 A on each phase ([Issue #1810](https://github.com/lbbrhzn/ocpp/issues/1810)). On a three-phase model such as the SCharger-22KT, enable **Charger is fed three-phase** in the charger options, then set Maximum Current again. Otherwise a limit set before any per-phase meter values arrive, as after a restart, is converted for one phase, so a limit below 18 A goes out under 4140 W and the charger ends the session ([Issue #2224](https://github.com/lbbrhzn/ocpp/issues/2224)). With it on, every limit is converted for three phases, so a single-phase car can draw up to three times the current set. Unless the charger reports its voltage between phases, the conversion takes each phase as fed to neutral, so on a supply without neutral, such as a 230 V IT network, the charger can draw about 1.7 times the current set. Leave it off on the single-phase SCharger-7KS.
+
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
 ## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)

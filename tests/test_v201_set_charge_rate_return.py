@@ -341,6 +341,26 @@ async def test_watt_only_station_receives_converted_amp_limit(hass):
 
 
 @pytest.mark.asyncio
+async def test_three_phase_option_reaches_the_2_0_1_conversion(hass):
+    """The option sets the phase count on 2.0.1 too."""
+    cp = _mk_cp(hass)
+    cp.settings.three_phase_supply = True
+    cp._inventory = InventoryReport(
+        evse_count=1, connector_count=[1], charging_rate_units=frozenset({"W"})
+    )
+    cp._build_connector_map()
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+    prepared = await cp.prepare_session_limit(1, 16)
+
+    period = cp.sent[0].charging_profile["charging_schedule"][0][
+        "charging_schedule_period"
+    ][0]
+    assert period["limit"] == 11040
+    assert (prepared["value"], prepared["conversion_phases"]) == (11040, 3)
+
+
+@pytest.mark.asyncio
 async def test_amp_only_station_receives_converted_watt_limit(hass):
     """RateUnit=A turns a managed watt request into the equivalent current."""
     cp = _mk_cp(hass)
