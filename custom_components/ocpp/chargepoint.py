@@ -89,6 +89,9 @@ _PHASE_KEY_GROUPS = (
 )
 
 
+# Allow 10 Wh quantization in EAIR samples versus meterStart reported in Wh.
+SESSION_ENERGY_DETECT_TOLERANCE = 0.01  # kWh
+
 SESSION_PROFILE_BASE_ID = 3000
 
 
@@ -1585,7 +1588,8 @@ class ChargePoint(cp):
                         if (
                             ms_metric.value is not None
                             and ms_metric.unit == unit
-                            and value < ms_metric.value
+                            and value
+                            < ms_metric.value - SESSION_ENERGY_DETECT_TOLERANCE
                         ):
                             _LOGGER.warning(
                                 "%s[%s]: Energy.Active.Import.Register sample "
@@ -1658,7 +1662,9 @@ class ChargePoint(cp):
                             elif ms_metric.unit == unit:
                                 self._metrics[
                                     (target_cid, csess.session_energy)
-                                ].value = round(1000 * (value - ms_metric.value)) / 1000
+                                ].value = max(
+                                    0.0, round(1000 * (value - ms_metric.value)) / 1000
+                                )
                                 self._metrics[
                                     (target_cid, csess.session_energy)
                                 ].unit = unit
