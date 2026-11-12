@@ -2762,6 +2762,58 @@ async def test_on_meter_values_tx_updates_connector_and_session_energy(
             await ws.close()
 
 
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9404, "cp_id": "CP_eair_l1_n", "cms": "cms_eair_l1_n"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_l1_n"])
+@pytest.mark.parametrize("port", [9404])
+async def test_session_energy_from_single_l1_n_register(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """An isolated L1-N lifetime register updates session energy (#2213)."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws, no_connectors=1)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            await cp.send_start_transaction(meter_start=15203)
+            await cp.call(
+                call.MeterValues(
+                    connector_id=1,
+                    transaction_id=cp.active_transactionId,
+                    meter_value=[
+                        {
+                            "timestamp": datetime.now(tz=UTC).isoformat(),
+                            "sampledValue": [
+                                {
+                                    "measurand": "Energy.Active.Import.Register",
+                                    "unit": "Wh",
+                                    "value": "15845",
+                                    "phase": "L1-N",
+                                }
+                            ],
+                        }
+                    ],
+                )
+            )
+            cpid = cs.charge_points[cp_id].settings.cpid
+            assert cs.get_metric(
+                cpid, "Energy.Session", connector_id=1
+            ) == pytest.approx(0.642)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
 @pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "setup_config_entry",

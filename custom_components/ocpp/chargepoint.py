@@ -1509,12 +1509,12 @@ class ChargePoint(cp):
                 location = sampled_value.location
                 context = sampled_value.context or ReadingContext.sample_periodic.value
 
-                # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 energy reading.
+                # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 or L1-N energy reading.
                 # If multiple phases exist (e.g., L1, L2), leave them intact so process_phases() can sum them.
                 normalized_measurand = measurand or DEFAULT_MEASURAND
                 if (
                     normalized_measurand == DEFAULT_MEASURAND
-                    and phase == Phase.l1.value
+                    and phase in (Phase.l1.value, Phase.l1_n.value)
                     and len(eair_phases) == 1
                 ):
                     phase = None
