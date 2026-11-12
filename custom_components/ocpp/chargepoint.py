@@ -37,7 +37,7 @@ from ocpp.v16.enums import (
 )
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
-from ocpp.messages import CallError
+from ocpp.messages import Call, CallError, validate_payload
 from ocpp.exceptions import NotImplementedError
 
 from .enums import (
@@ -762,7 +762,76 @@ class ChargePoint(cp):
                 _LOGGER.debug(f"monitor_connection stopping due to exception: {ex}")
                 break
 
+    @staticmethod
+    def _strip_blank_meter_samples(msg) -> bool:
+        """Drop empty sampledValues and empty units from MeterValues.
+
+        Some firmware (e.g. Sungrow AC22E) reports unmeasured measurands as
+        value "" and sends unit "" for Frequency. The OCPP schema rejects an
+        empty unit, which drops the whole message, so clean it up before
+        validation. An empty value carries no reading, so the sample is dropped.
+
+        Return True when every sample was blank: the message carries no reading
+        and must be acknowledged without being applied.
+        """
+        if getattr(msg, "action", None) != "MeterValues":
+            return False
+        meter_values = (
+            msg.payload.get("meterValue") if isinstance(msg.payload, dict) else None
+        )
+        # Malformed structures are left as they are for schema validation to reject.
+        if not isinstance(meter_values, list) or not all(
+            isinstance(mv, dict)
+            and isinstance(mv.get("sampledValue"), list)
+            and all(isinstance(s, dict) for s in mv["sampledValue"])
+            for mv in meter_values
+        ):
+            return False
+        cleaned = []
+        for meter_value in meter_values:
+            samples = [s for s in meter_value["sampledValue"] if s.get("value") != ""]
+            if samples:
+                cleaned.append({**meter_value, "sampledValue": samples})
+        if not cleaned:
+            # The schema needs at least one sample, and the handler would read
+            # "" as 0. Nothing to apply, so the caller acknowledges it as is.
+            return True
+        for meter_value in cleaned:
+            for sample in meter_value["sampledValue"]:
+                if sample.get("unit") == "":
+                    del sample["unit"]
+        msg.payload["meterValue"] = cleaned
+        return False
+
     async def _handle_call(self, msg):
+        if self._strip_blank_meter_samples(msg):
+            # Validate everything but the blank samples; a schema error raises
+            # an OCPPError, which route_message answers with a CallError.
+            check = Call(
+                unique_id=msg.unique_id,
+                action=msg.action,
+                payload={
+                    **msg.payload,
+                    "meterValue": [
+                        {
+                            **mv,
+                            "sampledValue": [
+                                {k: v for k, v in s.items() if (k, v) != ("unit", "")}
+                                for s in mv["sampledValue"]
+                            ],
+                        }
+                        for mv in msg.payload["meterValue"]
+                    ],
+                },
+            )
+            handlers = self.route_map.get(msg.action, {})
+            if not handlers.get("_skip_schema_validation", False):
+                await validate_payload(check, self._ocpp_version)
+            _LOGGER.debug(
+                "Ignoring MeterValues from '%s' with only blank samples", self.id
+            )
+            await self._send(msg.create_call_result({}).to_json())
+            return
         try:
             await super()._handle_call(msg)
         except NotImplementedError as e:

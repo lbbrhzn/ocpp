@@ -293,6 +293,14 @@ for the dated sensor observations and their limitations.
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly
 
+## Sungrow AC22E-01 (tested: firmware LE-01.1E1.001.101.50)
+Works over OCPP 1.6J on plain `ws://`, with some firmware quirks:
+
+- The charger's app only switches OCPP mode on; it cannot set the central system address, and the `BackOfficeURL` configuration key rejects writes. To point the charger at Home Assistant, redirect its outgoing connection to the vendor backend (for example with a DNAT rule on the router).
+- MeterValues report unmeasured measurands with `value: ""` and send Frequency with `unit: ""`. These blank samples are dropped before validation; a MeterValues message with only blank samples is acknowledged and ignored.
+- With `FreeVendModeEn` set to `true` the charger starts charging as soon as a car is plugged in. Set it to `false` with `ocpp.configure` to control charging from Home Assistant.
+- A current limit set in the vendor app is stored as a charging profile and caps any limit set from Home Assistant. Remove it with `ocpp.clear_profile`.
+
 ## [SyncEV Compact EVCP](https://sync.energy/support/instruction-manuals)
 These are a discontinued (but cheap) 7kw 1PH smart charger, with an OCPP implementation that's seemingly quite close to standard, and tolerent.
 Mine works well with the plugin, OCPP setup is done through the local AP-Wifi. The admin panel password is admin.
