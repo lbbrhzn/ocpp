@@ -764,12 +764,30 @@ class ChargePoint(cp):
         """
         if getattr(msg, "action", None) != "MeterValues":
             return
-        for meter_value in msg.payload.get("meterValue", []):
-            samples = [s for s in meter_value.get("sampledValue", []) if s.get("value")]
-            for sample in samples:
+        meter_values = (
+            msg.payload.get("meterValue") if isinstance(msg.payload, dict) else None
+        )
+        # Malformed structures are left as they are for schema validation to reject.
+        if not isinstance(meter_values, list) or not all(
+            isinstance(mv, dict)
+            and isinstance(mv.get("sampledValue"), list)
+            and all(isinstance(s, dict) for s in mv["sampledValue"])
+            for mv in meter_values
+        ):
+            return
+        cleaned = []
+        for meter_value in meter_values:
+            samples = [s for s in meter_value["sampledValue"] if s.get("value") != ""]
+            if samples:
+                cleaned.append({**meter_value, "sampledValue": samples})
+        if not cleaned:
+            # Nothing valid remains; let validation reject the original message.
+            return
+        for meter_value in cleaned:
+            for sample in meter_value["sampledValue"]:
                 if sample.get("unit") == "":
                     del sample["unit"]
-            meter_value["sampledValue"] = samples
+        msg.payload["meterValue"] = cleaned
 
     async def _handle_call(self, msg):
         self._strip_blank_meter_samples(msg)
