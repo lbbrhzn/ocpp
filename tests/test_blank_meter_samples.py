@@ -2,10 +2,11 @@
 
 import copy
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from ocpp.charge_point import ChargePoint as OcppChargePoint
+from ocpp.exceptions import OCPPError
 from ocpp.messages import Call, validate_payload
 
 from custom_components.ocpp.chargepoint import ChargePoint
@@ -111,11 +112,18 @@ def test_all_blank_payload_is_flagged_for_ack(unit):
     assert msg.payload == original
 
 
+def _bare_charge_point() -> ChargePoint:
+    """Return a real ChargePoint with only the transport mocked."""
+    cp = object.__new__(ChargePoint)
+    cp.id = "cp"
+    cp._ocpp_version = "1.6"
+    cp._send = AsyncMock()
+    return cp
+
+
 async def test_all_blank_meter_values_are_acked_not_applied():
     """_handle_call answers with an empty MeterValues.conf and skips the handler."""
-    cp = MagicMock()
-    cp.id = "cp"
-    cp._send = AsyncMock()
+    cp = _bare_charge_point()
     msg = _meter_values(
         [{"measurand": "Energy.Active.Import.Register", "value": "", "unit": "Wh"}]
     )
@@ -150,3 +158,25 @@ def test_malformed_payload_is_left_for_validation(meter_value):
     ChargePoint._strip_blank_meter_samples(msg)
 
     assert msg.payload == {"meterValue": meter_value}
+
+
+async def test_all_blank_meter_values_with_bad_fields_still_fail_validation():
+    """Skipping the blank samples must not skip validation of the rest."""
+    cp = _bare_charge_point()
+    msg = Call(
+        unique_id="5",
+        action="MeterValues",
+        payload={
+            "connectorId": "bad",
+            "meterValue": [{"sampledValue": [{"value": "", "unit": ""}]}],
+        },
+    )
+
+    with (
+        patch.object(OcppChargePoint, "_handle_call", new=AsyncMock()) as handler,
+        pytest.raises(OCPPError),
+    ):
+        await ChargePoint._handle_call(cp, msg)
+
+    handler.assert_not_called()
+    cp._send.assert_not_called()

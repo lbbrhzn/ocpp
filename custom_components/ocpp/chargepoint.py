@@ -36,7 +36,7 @@ from ocpp.v16.enums import (
 )
 from ocpp.v201 import call as callv201
 from ocpp.v201 import call_result as call_resultv201
-from ocpp.messages import CallError
+from ocpp.messages import Call, CallError, validate_payload
 from ocpp.exceptions import NotImplementedError
 
 from .enums import (
@@ -796,6 +796,26 @@ class ChargePoint(cp):
 
     async def _handle_call(self, msg):
         if self._strip_blank_meter_samples(msg):
+            # Validate everything but the blank samples; a schema error raises
+            # an OCPPError, which route_message answers with a CallError.
+            check = Call(
+                unique_id=msg.unique_id,
+                action=msg.action,
+                payload={
+                    **msg.payload,
+                    "meterValue": [
+                        {
+                            **mv,
+                            "sampledValue": [
+                                {k: v for k, v in s.items() if (k, v) != ("unit", "")}
+                                for s in mv["sampledValue"]
+                            ],
+                        }
+                        for mv in msg.payload["meterValue"]
+                    ],
+                },
+            )
+            await validate_payload(check, self._ocpp_version)
             _LOGGER.debug(
                 "Ignoring MeterValues from '%s' with only blank samples", self.id
             )
