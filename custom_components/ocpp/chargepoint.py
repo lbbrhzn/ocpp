@@ -815,7 +815,9 @@ class ChargePoint(cp):
                     ],
                 },
             )
-            await validate_payload(check, self._ocpp_version)
+            handlers = self.route_map.get(msg.action, {})
+            if not handlers.get("_skip_schema_validation", False):
+                await validate_payload(check, self._ocpp_version)
             _LOGGER.debug(
                 "Ignoring MeterValues from '%s' with only blank samples", self.id
             )

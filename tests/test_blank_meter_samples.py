@@ -117,6 +117,7 @@ def _bare_charge_point() -> ChargePoint:
     cp = object.__new__(ChargePoint)
     cp.id = "cp"
     cp._ocpp_version = "1.6"
+    cp.route_map = {"MeterValues": {}}
     cp._send = AsyncMock()
     return cp
 
@@ -180,3 +181,23 @@ async def test_all_blank_meter_values_with_bad_fields_still_fail_validation():
 
     handler.assert_not_called()
     cp._send.assert_not_called()
+
+
+async def test_all_blank_meter_values_respect_skip_schema_validation():
+    """With validation disabled for the action, the bad payload is still acked."""
+    cp = _bare_charge_point()
+    cp.route_map = {"MeterValues": {"_skip_schema_validation": True}}
+    msg = Call(
+        unique_id="6",
+        action="MeterValues",
+        payload={
+            "connectorId": "bad",
+            "meterValue": [{"sampledValue": [{"value": "", "unit": ""}]}],
+        },
+    )
+
+    with patch.object(OcppChargePoint, "_handle_call", new=AsyncMock()) as handler:
+        await ChargePoint._handle_call(cp, msg)
+
+    handler.assert_not_called()
+    assert json.loads(cp._send.call_args.args[0]) == [3, "6", {}]
