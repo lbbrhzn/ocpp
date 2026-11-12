@@ -754,16 +754,19 @@ class ChargePoint(cp):
                 break
 
     @staticmethod
-    def _strip_blank_meter_samples(msg):
+    def _strip_blank_meter_samples(msg) -> bool:
         """Drop empty sampledValues and empty units from MeterValues.
 
         Some firmware (e.g. Sungrow AC22E) reports unmeasured measurands as
         value "" and sends unit "" for Frequency. The OCPP schema rejects an
         empty unit, which drops the whole message, so clean it up before
         validation. An empty value carries no reading, so the sample is dropped.
+
+        Return True when every sample was blank: the message carries no reading
+        and must be acknowledged without being applied.
         """
         if getattr(msg, "action", None) != "MeterValues":
-            return
+            return False
         meter_values = (
             msg.payload.get("meterValue") if isinstance(msg.payload, dict) else None
         )
@@ -774,23 +777,30 @@ class ChargePoint(cp):
             and all(isinstance(s, dict) for s in mv["sampledValue"])
             for mv in meter_values
         ):
-            return
+            return False
         cleaned = []
         for meter_value in meter_values:
             samples = [s for s in meter_value["sampledValue"] if s.get("value") != ""]
             if samples:
                 cleaned.append({**meter_value, "sampledValue": samples})
         if not cleaned:
-            # Nothing valid remains; let validation reject the original message.
-            return
+            # The schema needs at least one sample, and the handler would read
+            # "" as 0. Nothing to apply, so the caller acknowledges it as is.
+            return True
         for meter_value in cleaned:
             for sample in meter_value["sampledValue"]:
                 if sample.get("unit") == "":
                     del sample["unit"]
         msg.payload["meterValue"] = cleaned
+        return False
 
     async def _handle_call(self, msg):
-        self._strip_blank_meter_samples(msg)
+        if self._strip_blank_meter_samples(msg):
+            _LOGGER.debug(
+                "Ignoring MeterValues from '%s' with only blank samples", self.id
+            )
+            await self._send(msg.create_call_result({}).to_json())
+            return
         try:
             await super()._handle_call(msg)
         except NotImplementedError as e:

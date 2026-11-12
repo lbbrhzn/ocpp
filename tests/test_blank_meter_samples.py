@@ -1,8 +1,11 @@
 """Test that MeterValues with blank values or units pass schema validation."""
 
 import copy
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from ocpp.charge_point import ChargePoint as OcppChargePoint
 from ocpp.messages import Call, validate_payload
 
 from custom_components.ocpp.chargepoint import ChargePoint
@@ -96,14 +99,33 @@ async def test_bucket_left_empty_is_dropped():
     await validate_payload(msg, "1.6")
 
 
-def test_all_blank_payload_is_left_for_validation():
-    """With no reading left, the original payload is kept untouched."""
-    msg = _meter_values([{"measurand": "SoC", "value": "", "unit": ""}])
+@pytest.mark.parametrize("unit", ["", "Wh"])
+def test_all_blank_payload_is_flagged_for_ack(unit):
+    """With no reading left, the payload is untouched and flagged, valid unit or not."""
+    msg = _meter_values(
+        [{"measurand": "Energy.Active.Import.Register", "value": "", "unit": unit}]
+    )
     original = copy.deepcopy(msg.payload)
 
-    ChargePoint._strip_blank_meter_samples(msg)
-
+    assert ChargePoint._strip_blank_meter_samples(msg) is True
     assert msg.payload == original
+
+
+async def test_all_blank_meter_values_are_acked_not_applied():
+    """_handle_call answers with an empty MeterValues.conf and skips the handler."""
+    cp = MagicMock()
+    cp.id = "cp"
+    cp._send = AsyncMock()
+    msg = _meter_values(
+        [{"measurand": "Energy.Active.Import.Register", "value": "", "unit": "Wh"}]
+    )
+
+    with patch.object(OcppChargePoint, "_handle_call", new=AsyncMock()) as handler:
+        await ChargePoint._handle_call(cp, msg)
+
+    handler.assert_not_called()
+    sent = json.loads(cp._send.call_args.args[0])
+    assert sent == [3, msg.unique_id, {}]
 
 
 def test_numeric_zero_is_kept():
