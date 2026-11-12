@@ -4293,6 +4293,65 @@ async def test_eair_session_relative_against_lifetime_meter_start(
             await ws.close()
 
 
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9418, "cp_id": "CP_eair_quantized", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_eair_quantized"])
+@pytest.mark.parametrize("port", [9418])
+async def test_eair_quantization_below_meter_start(
+    hass, socket_enabled, cp_id, port, setup_config_entry
+):
+    """Quantized lifetime readings keep session energy nonnegative and derived."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        client = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(client.start())
+        try:
+            await client.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            cpid = srv.settings.cpid
+            await client.send_start_transaction(meter_start=788591)
+            txid = client.active_transactionId
+
+            for value, expected_session in [("788.59", 0.0), ("789.59", 0.999)]:
+                mv = call.MeterValues(
+                    connector_id=1,
+                    transaction_id=txid,
+                    meter_value=[
+                        {
+                            "timestamp": datetime.now(tz=UTC).isoformat(),
+                            "sampledValue": [
+                                {
+                                    "value": value,
+                                    "measurand": "Energy.Active.Import.Register",
+                                    "unit": "kWh",
+                                    "context": "Sample.Periodic",
+                                }
+                            ],
+                        }
+                    ],
+                )
+                assert await client.call(mv) is not None
+                assert cs.get_metric(
+                    cpid, "Energy.Session", connector_id=1
+                ) == pytest.approx(expected_session)
+                assert cs.get_metric(
+                    cpid, "Energy.Active.Import.Register", connector_id=1
+                ) == pytest.approx(float(value))
+                assert not srv._charger_reports_session_energy
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
 def _eair_sample(connector_id: int, transaction_id: int, wh: int) -> call.MeterValues:
     """Build a transaction-bound Energy.Active.Import.Register sample in Wh."""
     return call.MeterValues(
