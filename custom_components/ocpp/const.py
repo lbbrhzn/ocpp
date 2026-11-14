@@ -33,6 +33,7 @@ CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
 CONF_SESSION_LIMIT_DEFAULT_PROFILE = "session_limit_default_profile"
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
+CONF_RESPONSE_TIMEOUT = "response_timeout"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
 CONF_SSL_CERTFILE_PATH = "ssl_certfile_path"
@@ -57,6 +58,9 @@ DEFAULT_MAX_CURRENT = 32
 DEFAULT_NUM_CONNECTORS = 1
 DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
+DEFAULT_RESPONSE_TIMEOUT = 30
+MIN_RESPONSE_TIMEOUT = 1
+MAX_RESPONSE_TIMEOUT = 600
 DEFAULT_FORCE_SMART_CHARGING = False
 DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE = False
 DEFAULT_SSL = False
@@ -200,6 +204,7 @@ class ChargerSystemSettings:
     monitored_variables_autoconfig: bool
     skip_schema_validation: bool
     force_smart_charging: bool
+    response_timeout: int = DEFAULT_RESPONSE_TIMEOUT
     enable_ha_notifications: bool = DEFAULT_ENABLE_HA_NOTIFICATIONS
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
