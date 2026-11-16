@@ -166,6 +166,16 @@ Power-only: the charger reports `ChargingScheduleAllowedChargingRateUnit` as `Po
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
 ## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)
+Tested on a Mennekes AMTRON® Professional+ (CC612_2M4R controller by Bender), firmware 5.33.11, on OCPP 1.6J.
+
+The charger rejects the whole `MeterValuesSampledData` list if a single measurand in it is not supported, and the defaults include several it does not sample, such as `Voltage`. With measurand autodetection on, the integration then tries each measurand on its own and keeps the accepted ones. With it off, the charger keeps its own list, `Energy.Active.Import.Register` alone by default, so power and current are never reported. To set the lists yourself, open **Meter** in the charger's web interface and enter them without spaces, picking from:
+
+* **Meter values sampled data**: `Energy.Active.Import.Register`, `Power.Active.Import`, `Power.Offered`, `Current.Import`, `Current.Offered`, `Frequency`, `SoC`, `Temperature`
+* **Meter values aligned data**: `Energy.Active.Import.Register`, `Power.Active.Import`, `Current.Import`, `Current.Offered`, `Voltage`, `SoC`, `Frequency`, `Temperature`
+
+`Voltage` is only available as aligned data, so it updates once per **Clock aligned data interval**.
+
+To charge without a badge, set **Free Charging Mode** to *With OCPP Full fixed RFID without auth*. In *With OCPP status notif without auth*, the charger sends no StartTransaction or StopTransaction, so session energy and session time stay empty.
 
 ## [Morek Smart AC Charger](https://ev.morek.eu/products-morek-quick-charge-11-22-kw/)
 Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.

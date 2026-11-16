@@ -662,10 +662,22 @@ class ChargePoint(cp):
                         effective_csv = desired_csv
                     else:
                         _LOGGER.debug(
-                            "'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration",
+                            "'%s' measurands CSV rejected with status=%s; probing one by one",
                             self.id,
                             getattr(resp, "status", None),
                         )
+                        # Some chargers (Bender: Mennekes and rebrands) reject
+                        # the whole list over one measurand they don't sample,
+                        # so keep the ones accepted alone.
+                        accepted = []
+                        for m in desired_csv.split(","):
+                            m = m.strip()
+                            r = await self.call(
+                                call.ChangeConfiguration(key=key, value=m)
+                            )
+                            if getattr(r, "status", None) in cfg_ok:
+                                accepted.append(m)
+                        effective_csv = ",".join(accepted)
                 except Exception as ex:
                     _LOGGER.debug(
                         "get_supported_measurands CSV set raised for '%s': %s",

@@ -835,3 +835,41 @@ async def test_update_real_registry_includes_child_device(
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await ws.close()
+
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_autodetect_probes_measurands_when_csv_rejected():
+    """A charger that rejects the whole list keeps the measurands it accepts alone.
+
+    Bender controllers (Mennekes, many rebrands) answer Rejected to the full
+    default list because a few entries, such as Voltage, are not sampled.
+    """
+    from ocpp.v16 import call
+
+    supported = {
+        "Energy.Active.Import.Register",
+        "Power.Active.Import",
+        "Current.Import",
+    }
+    cp = MagicMock(spec=CPv16)
+    cp.id = "bender"
+    cp.settings = MagicMock()
+    cp.settings.monitored_variables = (
+        "Current.Import,Voltage,Energy.Active.Import.Register,RPM,Power.Active.Import"
+    )
+    cp.settings.monitored_variables_autoconfig = True
+    cp.configure = AsyncMock()
+    cp.get_configuration = AsyncMock(return_value="Energy.Active.Import.Register")
+
+    async def fake_call(req):
+        assert isinstance(req, call.ChangeConfiguration)
+        ok = set(req.value.split(",")) <= supported
+        return SimpleNamespace(status="Accepted" if ok else "Rejected")
+
+    cp.call = AsyncMock(side_effect=fake_call)
+
+    result = await CPv16.get_supported_measurands(cp)
+
+    expected = "Current.Import,Energy.Active.Import.Register,Power.Active.Import"
+    assert result == expected
+    cp.configure.assert_awaited_once_with("MeterValuesSampledData", expected)
