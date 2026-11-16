@@ -168,12 +168,16 @@ Power-only: the charger reports `ChargingScheduleAllowedChargingRateUnit` as `Po
 ## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)
 Tested on a Mennekes AMTRON® Professional+ (CC612_2M4R controller by Bender), firmware 5.33.11, on OCPP 1.6J.
 
-The charger rejects the whole `MeterValuesSampledData` list if a single measurand in it is not supported, and the defaults include several it does not sample, such as `Voltage`. With measurand autodetection on, the integration then tries each measurand on its own and keeps the accepted ones. With it off, the charger keeps its own list, `Energy.Active.Import.Register` alone by default, so power and current are never reported. To set the lists yourself, open **Meter** in the charger's web interface and enter them without spaces, picking from:
+The charger rejects the whole `MeterValuesSampledData` list if a single measurand in it is not supported, and the integration's default list includes several it does not sample, such as `Voltage`. With measurand autodetection on, the integration then tries each measurand on its own and keeps the accepted ones.
+
+Autodetection only starts from the full list when the charger is added. The integration stores the accepted list and asks for that list on later connections, so a charger set up before this was handled stays on `Energy.Active.Import.Register` alone, with no power or current sensors. To fix it, remove the charger and add it again, or turn measurand autodetection off in the charger options and select the measurands yourself. With autodetection off, the integration sends the selected list on every connection, and it replaces the list entered in the charger's web interface whenever the charger accepts it, so select only measurands from the sampled list below.
+
+The charger accepts, under **Meter** in its web interface (lists without spaces):
 
 * **Meter values sampled data**: `Energy.Active.Import.Register`, `Power.Active.Import`, `Power.Offered`, `Current.Import`, `Current.Offered`, `Frequency`, `SoC`, `Temperature`
 * **Meter values aligned data**: `Energy.Active.Import.Register`, `Power.Active.Import`, `Current.Import`, `Current.Offered`, `Voltage`, `SoC`, `Frequency`, `Temperature`
 
-`Voltage` is only available as aligned data, so it updates once per **Clock aligned data interval**.
+The integration does not configure the aligned list. `Voltage` is only accepted there, and the integration only creates sensors for the sampled list it stored, so there is no voltage sensor even when the charger sends it.
 
 To charge without a badge, set **Free Charging Mode** to *With OCPP Full fixed RFID without auth*. In *With OCPP status notif without auth*, the charger sends no StartTransaction or StopTransaction, so session energy and session time stay empty.
 

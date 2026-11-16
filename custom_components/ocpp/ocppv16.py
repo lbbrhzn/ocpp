@@ -669,15 +669,35 @@ class ChargePoint(cp):
                         # Some chargers (Bender: Mennekes and rebrands) reject
                         # the whole list over one measurand they don't sample,
                         # so keep the ones accepted alone.
+                        original = await self.get_configuration(key)
                         accepted = []
-                        for m in desired_csv.split(","):
-                            m = m.strip()
-                            r = await self.call(
-                                call.ChangeConfiguration(key=key, value=m)
-                            )
-                            if getattr(r, "status", None) in cfg_ok:
-                                accepted.append(m)
-                        effective_csv = ",".join(accepted)
+                        try:
+                            for m in desired_csv.split(","):
+                                m = m.strip()
+                                r = await self.call(
+                                    call.ChangeConfiguration(key=key, value=m)
+                                )
+                                if getattr(r, "status", None) in cfg_ok:
+                                    accepted.append(m)
+                            if accepted:
+                                r = await self.call(
+                                    call.ChangeConfiguration(
+                                        key=key, value=",".join(accepted)
+                                    )
+                                )
+                                if getattr(r, "status", None) in cfg_ok:
+                                    effective_csv = ",".join(accepted)
+                        finally:
+                            # Each accepted probe replaced the charger's list, so
+                            # unless the combined list took, put the original back.
+                            if (
+                                accepted
+                                and not effective_csv
+                                and original not in (None, "Unknown")
+                            ):
+                                await self.call(
+                                    call.ChangeConfiguration(key=key, value=original)
+                                )
                 except Exception as ex:
                     _LOGGER.debug(
                         "get_supported_measurands CSV set raised for '%s': %s",

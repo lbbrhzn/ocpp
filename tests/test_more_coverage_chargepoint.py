@@ -873,3 +873,66 @@ async def test_ocppv16_autodetect_probes_measurands_when_csv_rejected():
     expected = "Current.Import,Energy.Active.Import.Register,Power.Active.Import"
     assert result == expected
     cp.configure.assert_awaited_once_with("MeterValuesSampledData", expected)
+
+
+def _bender_like_cp(original: str, accepts, fail_on: str | None = None):
+    """Return a v1.6 cp stub backed by a charger holding one stored list.
+
+    ``accepts(value)`` decides whether a ChangeConfiguration is accepted;
+    a ChangeConfiguration for ``fail_on`` times out instead of answering.
+    """
+    from ocpp.v16 import call
+
+    charger = {"value": original}
+    cp = MagicMock(spec=CPv16)
+    cp.id = "bender"
+    cp.settings = MagicMock()
+    cp.settings.monitored_variables = (
+        "Current.Import,Voltage,Energy.Active.Import.Register,RPM,Power.Active.Import"
+    )
+    cp.settings.monitored_variables_autoconfig = True
+    cp.configure = AsyncMock()
+    cp.get_configuration = AsyncMock(side_effect=lambda key: charger["value"])
+
+    async def fake_call(req):
+        assert isinstance(req, call.ChangeConfiguration)
+        if req.value == fail_on:
+            raise TimeoutError
+        if not accepts(req.value):
+            return SimpleNamespace(status="Rejected")
+        charger["value"] = req.value
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = AsyncMock(side_effect=fake_call)
+    return cp, charger
+
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_probe_timeout_restores_the_charger_list():
+    """A probe that fails midway puts the charger's own list back."""
+    supported = {"Energy.Active.Import.Register", "Current.Import"}
+    cp, charger = _bender_like_cp(
+        "Energy.Active.Import.Register",
+        lambda v: set(v.split(",")) <= supported,
+        fail_on="Voltage",
+    )
+
+    result = await CPv16.get_supported_measurands(cp)
+
+    assert charger["value"] == "Energy.Active.Import.Register"
+    assert result == "Energy.Active.Import.Register"
+
+
+@pytest.mark.timeout(5)
+async def test_ocppv16_rejected_combined_list_restores_the_charger_list():
+    """A charger taking each measurand alone but not together keeps its list."""
+    supported = {"Energy.Active.Import.Register", "Current.Import"}
+    cp, charger = _bender_like_cp(
+        "Energy.Active.Import.Register",
+        lambda v: "," not in v and v in supported,
+    )
+
+    result = await CPv16.get_supported_measurands(cp)
+
+    assert charger["value"] == "Energy.Active.Import.Register"
+    assert result == "Energy.Active.Import.Register"
