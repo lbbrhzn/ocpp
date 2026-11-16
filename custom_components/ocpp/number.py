@@ -209,7 +209,61 @@ async def async_setup_entry(hass, entry, async_add_devices):
     async_add_devices(entities, False)
 
 
-class ChargePointNumber(RestoreNumber, NumberEntity):
+class _CurrentLimitNumber(NumberEntity):
+    """Metric refreshes and rollback shared by the current-limit numbers.
+
+    _confirmed_value is the last limit the charger accepted; _attr_native_value
+    may run ahead of it while a request is in flight and falls back to it on
+    failure.
+    """
+
+    _confirmed_value: float | None
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the charger's metric refreshes like the other entities."""
+        await super().async_added_to_hass()
+
+        @callback
+        def _maybe_update(*args):
+            """Refresh when the update names this entity, or names none."""
+            active_lookup = None
+            if args:
+                try:
+                    active_lookup = set(args[0])
+                except Exception:
+                    active_lookup = None
+
+            if active_lookup is None or self.entity_id in active_lookup:
+                self.async_schedule_update_ha_state(True)
+
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
+        )
+
+    def _revert_to_confirmed(self) -> None:
+        """Put the slider back to the last limit the charger accepted.
+
+        Reverting to whatever was displayed when this request started would
+        clobber a concurrent request that has since been accepted - two
+        quick drags, or an automation racing the UI - and leave the slider
+        disagreeing with the charger, which is the thing this is meant to
+        prevent rather than cause.
+        """
+        # Whole-amp values, so equality is exact (native_step=1). A
+        # fractional step would need a tolerance here and in the
+        # superseded check of ChargePointNumber.
+        if self._attr_native_value == self._confirmed_value:
+            return
+        _LOGGER.debug(
+            "Reverting current limit display from %s to last accepted %s",
+            self._attr_native_value,
+            self._confirmed_value,
+        )
+        self._attr_native_value = self._confirmed_value
+        self.async_write_ha_state()
+
+
+class ChargePointNumber(_CurrentLimitNumber, RestoreNumber):
     """Individual slider for setting charge rate."""
 
     _attr_has_entity_name = False
@@ -295,22 +349,6 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             # next accepted request either way.
             self._confirmed_value = restored.native_value
 
-        @callback
-        def _maybe_update(*args):
-            active_lookup = None
-            if args:
-                try:
-                    active_lookup = set(args[0])
-                except Exception:
-                    active_lookup = None
-
-            if active_lookup is None or self.entity_id in active_lookup:
-                self.async_schedule_update_ha_state(True)
-
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
-        )
-
     @property
     def available(self) -> bool:
         """Return if entity is available."""
@@ -381,30 +419,8 @@ class ChargePointNumber(RestoreNumber, NumberEntity):
             self._attr_native_value = target
             self.async_write_ha_state()
 
-    def _revert_to_confirmed(self) -> None:
-        """Put the slider back to the last limit the charger accepted.
 
-        Reverting to whatever was displayed when this request started would
-        clobber a concurrent request that has since been accepted - two
-        quick drags, or an automation racing the UI - and leave the slider
-        disagreeing with the charger, which is the thing this is meant to
-        prevent rather than cause.
-        """
-        # Whole-amp values, so equality is exact (native_step=1). A
-        # fractional step would need a tolerance here and in the
-        # superseded check above.
-        if self._attr_native_value == self._confirmed_value:
-            return
-        _LOGGER.debug(
-            "Reverting current limit display from %s to last accepted %s",
-            self._attr_native_value,
-            self._confirmed_value,
-        )
-        self._attr_native_value = self._confirmed_value
-        self.async_write_ha_state()
-
-
-class SessionCurrentLimitNumber(NumberEntity):
+class SessionCurrentLimitNumber(_CurrentLimitNumber):
     """Per-connector current limit bound to the transaction the connector displays.
 
     The thin shape agreed on #2142: availability comes from the connector's
@@ -488,25 +504,6 @@ class SessionCurrentLimitNumber(NumberEntity):
         # two requests reach the charger in order, and their replies would
         # otherwise interleave their updates of the confirmed value.
         self._operation_lock = asyncio.Lock()
-
-    async def async_added_to_hass(self) -> None:
-        """Follow the charger's metric refreshes like the other entities."""
-        await super().async_added_to_hass()
-
-        @callback
-        def _maybe_update(*args):
-            active_lookup = None
-            if args:
-                try:
-                    active_lookup = set(args[0])
-                except Exception:
-                    active_lookup = None
-            if active_lookup is None or self.entity_id in active_lookup:
-                self.async_schedule_update_ha_state(True)
-
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, DATA_UPDATED, _maybe_update)
-        )
 
     def _current_transaction(self) -> str | None:
         return self.central_system.session_transaction_id(self.cpid, self.connector_id)
@@ -615,12 +612,6 @@ class SessionCurrentLimitNumber(NumberEntity):
         return await self.central_system.set_session_charge_rate_amps(
             self.cpid, self.connector_id, target
         )
-
-    def _revert_to_confirmed(self) -> None:
-        if self._attr_native_value == self._confirmed_value:
-            return
-        self._attr_native_value = self._confirmed_value
-        self.async_write_ha_state()
 
 
 class SessionDefaultLimitNumber(SessionCurrentLimitNumber, RestoreNumber):
