@@ -193,3 +193,38 @@ data_transfer:
       required: false
       advanced: true
       example: "ABC"
+
+reconcile_report:
+  name: Reconcile a secondary OCPP report
+  description: Resume an uncertain or rejected report only after confirming receipt with the provider. A received StartTransaction requires the provider's actual transaction ID; never guess.
+  fields:
+    devid:
+      name: Charger identifier
+      description: Unique HA charger id (cpid), or unambiguous OCPP charger identity.
+      required: true
+      selector:
+        text:
+    event_id:
+      name: Reporting event ID
+      description: Event ID shown in the secondary reporting diagnostic sensor.
+      required: true
+      selector:
+        number:
+          min: 1
+          step: 1
+          mode: box
+    outcome:
+      name: Provider-confirmed outcome
+      required: true
+      selector:
+        select:
+          options:
+            - received
+            - not_received
+    provider_transaction_id:
+      name: Provider transaction ID
+      description: Required only for a StartTransaction confirmed received.
+      selector:
+        number:
+          step: 1
+          mode: box

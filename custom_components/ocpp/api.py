@@ -28,6 +28,7 @@ from .const import (
     OCPP_1_6,
     OCPP_2_0,
     OCPP_VERSION_AUTO,
+    CONF_REPORTING_ENABLED,
     ChargerSystemSettings,
     settings_from_config,
 )
@@ -38,6 +39,7 @@ from .enums import (
     Profiles as prof,
 )
 from .chargepoint import SetVariableResult
+from .reporting import ReportingSettings, ReportingTransport, SecondaryReporter
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 # Uncomment these when Debugging
@@ -224,6 +226,7 @@ class CentralSystem:
         # live (connection count, current entry data) diverges from what
         # setup actually did whenever state changed in between.
         self.platforms_forwarded = False
+        self.reporters: dict[str, SecondaryReporter] = {}
 
         # Service registration is performed globally by the integration setup
         # (custom_components/ocpp/__init__.py) so that multiple central system
@@ -262,6 +265,20 @@ class CentralSystem:
             ssl=self.ssl_context,
         )
         self._server = server
+        for group in self.settings.cpids:
+            for cp_id, values in group.items():
+                if not values.get(CONF_REPORTING_ENABLED):
+                    continue
+                settings = settings_from_config(ChargerSystemSettings, values)
+                reporter = SecondaryReporter(
+                    hass, entry.entry_id, cp_id, settings.cpid,
+                    ReportingSettings(
+                        settings.reporting_url, settings.reporting_username,
+                        settings.reporting_password, settings.reporting_queue_limit,
+                    ),
+                )
+                self.reporters[cp_id] = reporter
+                reporter.start()
         return self
 
     @staticmethod
@@ -353,6 +370,41 @@ class CentralSystem:
             cp_id, websocket, self.hass, self.entry, self.settings, cp_settings
         )
 
+    def _reporting_transport(self, cp_id: str, websocket: ServerConnection):
+        """Observe only 1.6 connections without changing disabled transports."""
+        reporter = self.reporters.get(cp_id)
+        if reporter is None:
+            return websocket
+        protocol = self._negotiated_ocpp_version(websocket)
+        if protocol != "1.6":
+            reporter.attach(None, protocol)
+            return websocket
+        return ReportingTransport(websocket, reporter)
+
+    async def close_reporting(self) -> None:
+        """Retire entry-owned reporting after real charger connections close."""
+        for reporter in self.reporters.values():
+            await reporter.close()
+        self.reporters.clear()
+
+    async def handle_reconcile_report(self, call) -> None:
+        """Reconcile only a provider-confirmed ambiguous reporting outcome."""
+        devid = call.data["devid"]
+        cp_id = next(
+            (key for key, value in self.reporters.items() if value.cpid == devid),
+            devid,
+        )
+        reporter = self.reporters.get(cp_id)
+        if reporter is None:
+            raise HomeAssistantError("Secondary reporting is not enabled for this charger")
+        try:
+            await reporter.reconcile(
+                call.data["event_id"], call.data["outcome"],
+                call.data.get("provider_transaction_id"),
+            )
+        except ValueError as error:
+            raise HomeAssistantError(str(error)) from error
+
     async def on_connect(self, websocket: ServerConnection):
         """Request handler executed for every new OCPP connection."""
         if websocket.subprotocol is not None:
@@ -377,7 +429,6 @@ class CentralSystem:
                         _LOGGER.info(
                             f"Charger match found for {cp_settings.cpid}:{cp_id}"
                         )
-                        _LOGGER.debug(f"Central settings: {self.settings}")
 
                 if not config_flow:
                     # discovery_info for flow
@@ -395,7 +446,8 @@ class CentralSystem:
                 _LOGGER.error(f"Failed to setup charger {cp_id}: {str(e)}")
                 return
 
-            charge_point = self._build_charge_point(cp_id, websocket, cp_settings)
+            transport = self._reporting_transport(cp_id, websocket)
+            charge_point = self._build_charge_point(cp_id, transport, cp_settings)
             self.charge_points[cp_id] = charge_point
             self.connections += 1
             _LOGGER.info(
@@ -443,7 +495,7 @@ class CentralSystem:
                     for task in getattr(charge_point, "tasks", None) or []:
                         task.cancel()
                 charge_point = self._build_charge_point(
-                    cp_id, websocket, charge_point.settings
+                    cp_id, self._reporting_transport(cp_id, websocket), charge_point.settings
                 )
                 self.charge_points[cp_id] = charge_point
                 await charge_point.start()
@@ -451,7 +503,7 @@ class CentralSystem:
                 _LOGGER.info(
                     f"Charger {cp_id} reconnected to {self.settings.host}:{self.settings.port}."
                 )
-                await charge_point.reconnect(websocket)
+                await charge_point.reconnect(self._reporting_transport(cp_id, websocket))
 
     def _get_metrics(self, id: str):
         """Return (cp_id, metrics mapping, cp instance, safe int num_connectors)."""

@@ -36,7 +36,12 @@
                     "session_limit_default_profile": "Send Session Current Limit as a default profile, settable at any time",
                     "stack_level_below_max": "Charger accepts only stack levels below its reported maximum (OCPP 1.6)",
                     "three_phase_supply": "Charger is fed three-phase",
-                    "enable_ha_notifications": "Enable Home Assistant notifications"
+                    "enable_ha_notifications": "Enable Home Assistant notifications",
+                    "reporting_enabled": "Enable secondary OCPP reporting (1.6 only)",
+                    "reporting_url": "Reporting WebSocket base URL (without charger ID)",
+                    "reporting_username": "Reporting username (blank uses charger ID)",
+                    "reporting_password": "Reporting password",
+                    "reporting_queue_limit": "Maximum pending reporting messages"
                 },
                 "data_description": {
                     "stack_level_below_max": "Send charging profiles one level below the ChargeProfileMaxStackLevel the charger reports. Enable it if the charger rejects profiles at the level it reports, as Timxon A0, Morek MEV11 and ABB Terra AC do.",
@@ -96,7 +101,10 @@
             "auth": "Username/Password is wrong.",
             "no_measurands_selected": "No measurand selected: please select at least one",
             "invalid_cpid": "Invalid charge point identity name: use only lower case letters, digits and _",
-            "duplicate_cpid": "This charge point identity is already used by another charge point. Choose a unique one."
+            "duplicate_cpid": "This charge point identity is already used by another charge point. Choose a unique one.",
+            "invalid_reporting_url": "Enter a ws:// or wss:// base URL without embedded credentials, query parameters, fragments, or the charger ID.",
+            "invalid_reporting_queue_limit": "Reporting queue limit must be between 1 and 100000.",
+            "reporting_requires_v16": "Secondary reporting supports OCPP 1.6 only. Change the central system protocol before enabling it."
         },
         "abort": {
             "single_instance_allowed": "Only a single instance is allowed",
@@ -156,7 +164,12 @@
                     "session_limit_default_profile": "Send Session Current Limit as a default profile, settable at any time",
                     "stack_level_below_max": "Charger accepts only stack levels below its reported maximum (OCPP 1.6)",
                     "three_phase_supply": "Charger is fed three-phase",
-                    "enable_ha_notifications": "Enable Home Assistant notifications"
+                    "enable_ha_notifications": "Enable Home Assistant notifications",
+                    "reporting_enabled": "Enable secondary OCPP reporting (1.6 only)",
+                    "reporting_url": "Reporting WebSocket base URL (without charger ID)",
+                    "reporting_username": "Reporting username (blank uses charger ID)",
+                    "reporting_password": "Reporting password",
+                    "reporting_queue_limit": "Maximum pending reporting messages"
                 },
                 "data_description": {
                     "stack_level_below_max": "Send charging profiles one level below the ChargeProfileMaxStackLevel the charger reports. Enable it if the charger rejects profiles at the level it reports, as Timxon A0, Morek MEV11 and ABB Terra AC do.",
@@ -193,10 +206,19 @@
             }
         },
         "error": {
-            "no_measurands_selected": "No measurand selected: please select at least one"
+            "no_measurands_selected": "No measurand selected: please select at least one",
+            "invalid_reporting_url": "Enter a ws:// or wss:// base URL without embedded credentials, query parameters, fragments, or the charger ID.",
+            "invalid_reporting_queue_limit": "Reporting queue limit must be between 1 and 100000.",
+            "reporting_requires_v16": "Secondary reporting supports OCPP 1.6 only. Change the central system protocol before enabling it."
         },
         "abort": {
             "no_charge_points": "No charge point has connected to this central system yet, so there is nothing to configure."
+        }
+    },
+    "issues": {
+        "secondary_reporting": {
+            "title": "Secondary OCPP reporting needs attention",
+            "description": "Reporting for {charger} needs attention: {reason}. Local charging control is independent. Check the reporting diagnostic sensors. Reconcile uncertain events with the provider before using the ocpp.reconcile_report action; never guess whether a transaction was received. See the integration user guide for recovery and queue-integrity errors."
         }
     }
 }

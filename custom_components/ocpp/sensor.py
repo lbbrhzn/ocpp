@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from datetime import UTC, datetime
 
 import homeassistant
 from homeassistant.components.sensor import (
@@ -35,6 +36,7 @@ from .const import (
     sensor_unique_id,
 )
 from .enums import HAChargerDetails, HAChargerSession, HAChargerStatuses
+from .reporting import REPORTING_UPDATED
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
@@ -203,6 +205,12 @@ async def async_setup_entry(hass, entry, async_add_devices):
                         connector_id=None,
                         charger_device_id=charger_device_id,
                     )
+                )
+        for reporter in central_system.reporters.values():
+            if reporter.cpid == cpid:
+                entities.extend(
+                    ReportingSensor(reporter, key)
+                    for key in ("status", "pending", "last_acknowledged")
                 )
 
     async_add_devices(entities, False)
@@ -400,3 +408,51 @@ class ChargePointMetric(RestoreSensor, SensorEntity):
         )
 
         self.async_schedule_update_ha_state(True)
+
+
+class ReportingSensor(SensorEntity):
+    """Reporting diagnostics remain readable while the charger is offline."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, reporter, key: str):
+        """Describe one per-charger reporting diagnostic."""
+        self.reporter = reporter
+        self.key = key
+        self._attr_unique_id = f"{DOMAIN}.{reporter.cpid}.reporting_{key}"
+        self._attr_name = {
+            "status": "Secondary reporting",
+            "pending": "Pending reports",
+            "last_acknowledged": "Last acknowledged report",
+        }[key]
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, reporter.cpid)})
+        if key == "last_acknowledged":
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    @property
+    def native_value(self):
+        """Return reporting health independently of charger availability."""
+        value = self.reporter.diagnostics()[self.key]
+        if self.key == "last_acknowledged" and value is not None:
+            return datetime.fromtimestamp(value, UTC)
+        return value
+
+    @property
+    def extra_state_attributes(self):
+        """Expose delivery metadata without raw reports or credentials."""
+        return self.reporter.diagnostics() if self.key == "status" else None
+
+    async def async_added_to_hass(self):
+        """Subscribe to the reporter's independent lifecycle signal."""
+        await super().async_added_to_hass()
+
+        @callback
+        def updated(cpid):
+            if cpid == self.reporter.cpid:
+                self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, REPORTING_UPDATED, updated)
+        )

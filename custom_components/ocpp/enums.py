@@ -20,6 +20,7 @@ class HAChargerServices(StrEnum):
     service_trigger_custom_message = "trigger_custom_message"
     service_clear_profile = "clear_profile"
     service_data_transfer = "data_transfer"
+    service_reconcile_report = "reconcile_report"
 
 
 class HAChargerStatuses(StrEnum):

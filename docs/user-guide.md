@@ -27,6 +27,40 @@ OCPP integration can automatically detect supported measurands. However, some ch
 
 For chargers with multiple connectors (outlets), the OCPP integration will create one device per connector, named `charger Connector 1`, `charger Connector 2` etc. All measurands and other entities (buttons, numbers, switches, diagnostics sensors) that are connector-specific per the OCPP standard will be found on these devices. Maximum Current is station-wide: every charger has one slider on the charger device, with default entity id `number.<cpid>_maximum_current`, regardless of its connector count. Session Current Limit is per connector: one on the charger device for a single-connector charger, one on each connector device otherwise. See the Maximum Current upgrade notes in the [charge automation guide](Charge_automation) for changes to existing entities and charger compatibility.
 
+## Optional secondary OCPP 1.6 reporting
+
+Home Assistant remains the only local charging controller. Secondary reporting is **off by default**, per charger, and available only for OCPP **1.6**; it does not forward OCPP 2.0.1/2.1 traffic. Configure the charger's provider connection through the integration's **Configure** (charger options) flow, preferably **between charging sessions**. Leave the charger connected to Home Assistant, not the provider. The provider receives accepted charger-originated reporting messages; it must not control charging. Only explicitly named, nonempty `GetConfiguration` keys on the safe capability/interval allowlist and limited read-only `TriggerMessage` requests are permitted; blank/all-key or secret-key requests, remote start/stop, profiles, configuration writes and other control requests are rejected.
+
+Enter the provider's WebSocket **base URL**, such as `wss://provider.example/ocpp`. The integration appends the charger's actual OCPP charge point ID (URL-encoded) once: `wss://provider.example/ocpp/<charge-point-id>`. Do not append it yourself. Credentials belong in the separate username/password fields, not in the URL; URL userinfo, query strings and fragments are rejected. If the provider requires HTTP Basic authentication, use those fields; when username is empty, the charger ID is used with the configured password. `wss://` verifies the server's TLS certificate. `ws://` is also supported but sends reporting traffic and Basic credentials **in cleartext**; use it only on a trusted private network. Verify the provider's terms, retention and consent requirements before sharing session data.
+
+Turning reporting off in the charger options removes its stored reporting URL and credentials. Do not disable or change destinations as a way to bypass unresolved provider outcomes.
+
+Reporting uses its **own provider transaction IDs**, independently of the local transaction IDs that Home Assistant sends to the charger. An ordered SQLite outbox in Home Assistant's `.storage` directory persists reports **once committed**; provider disconnection does not interrupt local control. Charger ingress is intentionally nonblocking: on abrupt shutdown, a message accepted locally but still in the in-memory buffer and **not yet committed** can be lost. A full queue, storage fault or reporting-integrity gap **blocks further reporting**, not local charging. Reconciliation handles ambiguous individual events only, not generic queue/storage gaps: consult provider records and arrange provider-supported audit/recovery; do not blindly erase a queue or delete reporting journal files. Changing the destination while unreported events or an active transaction remain is blocked to protect the journal; wait until the destination is genuinely settled before reconfiguring it.
+
+On each enabled charger's device, diagnostic sensors show **Secondary reporting** (status, including a blocked event ID in attributes), **Pending reports**, and **Last acknowledged report**. Check **Settings → System → Repairs** for reporting failures. Home Assistant's downloadable integration diagnostics include only safe health metadata, not destinations, credentials, charger IDs or meter/session payloads. If provider delivery is ambiguous (for example, the connection dropped after a send), reporting stops at that event: **there is no automatic retry and you must not guess whether it arrived**. Check the provider's records first, then invoke `ocpp.reconcile_report` with the blocked event ID from the status sensor. Use the charger's unique HA ID (`cpid`) for `devid`:
+
+```yaml
+action: ocpp.reconcile_report
+data:
+  devid: charger
+  event_id: 17
+  outcome: received
+  provider_transaction_id: 48219
+```
+
+`provider_transaction_id` is **required** when a `StartTransaction` report was received: enter the transaction ID confirmed by the provider, not the local charger transaction ID. For other received reports, omit it. Only after the provider confirms an event was **not** received should you allow the same report to be retried:
+
+```yaml
+action: ocpp.reconcile_report
+data:
+  devid: charger
+  event_id: 17
+  outcome: not_received
+```
+
+Provider integrations including IYILO and Club Roulez Électrique are prospective hardware/subsidy-test targets, **not verified or credited** by this integration. Confirm compatibility and any subsidy eligibility directly with the provider before relying on reporting.
+
+
 ## Removing a charge point
 
 If you decommission a charger — or it was added by mistake — you can remove its device from Home Assistant: **Settings → Devices**, select the charger's device, open the menu (⋮) and choose **Delete**.

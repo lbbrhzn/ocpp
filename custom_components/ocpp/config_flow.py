@@ -9,6 +9,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 import voluptuous as vol
 
 from .const import (
@@ -27,6 +28,11 @@ from .const import (
     CONF_NUM_CONNECTORS,
     CONF_OCPP_VERSION,
     CONF_PORT,
+    CONF_REPORTING_ENABLED,
+    CONF_REPORTING_URL,
+    CONF_REPORTING_USERNAME,
+    CONF_REPORTING_PASSWORD,
+    CONF_REPORTING_QUEUE_LIMIT,
     CONF_SESSION_LIMIT_DEFAULT_PROFILE,
     CONF_SKIP_SCHEMA_VALIDATION,
     CONF_SSL,
@@ -68,6 +74,43 @@ from .const import (
     MEASURANDS,
     OCPP_VERSIONS,
 )
+from .reporting import ReportingSettings
+
+_REPORTING_KEYS = {
+    CONF_REPORTING_ENABLED, CONF_REPORTING_URL, CONF_REPORTING_USERNAME,
+    CONF_REPORTING_PASSWORD, CONF_REPORTING_QUEUE_LIMIT,
+}
+
+
+def _reporting_schema(current: dict) -> dict:
+    """Expose optional per-charger reporting and separately stored credentials."""
+    return {
+        vol.Optional(CONF_REPORTING_ENABLED, default=current.get(CONF_REPORTING_ENABLED, False)): bool,
+        vol.Optional(CONF_REPORTING_URL, default=current.get(CONF_REPORTING_URL, "")): str,
+        vol.Optional(CONF_REPORTING_USERNAME, default=current.get(CONF_REPORTING_USERNAME, "")): str,
+        vol.Optional(CONF_REPORTING_PASSWORD, default=current.get(CONF_REPORTING_PASSWORD, "")): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        ),
+        vol.Optional(CONF_REPORTING_QUEUE_LIMIT, default=current.get(CONF_REPORTING_QUEUE_LIMIT, 10000)): vol.All(int, vol.Range(min=1, max=100000)),
+    }
+
+
+def _reporting_error(settings: dict, central: dict) -> str | None:
+    """Validate reporting without changing the local charger protocol."""
+    if not settings.get(CONF_REPORTING_ENABLED):
+        return None
+    if central.get(CONF_OCPP_VERSION, DEFAULT_OCPP_VERSION) not in (DEFAULT_OCPP_VERSION, "1.6"):
+        return "reporting_requires_v16"
+    try:
+        ReportingSettings(
+            settings.get(CONF_REPORTING_URL, ""),
+            settings.get(CONF_REPORTING_USERNAME, ""),
+            settings.get(CONF_REPORTING_PASSWORD, ""),
+            settings.get(CONF_REPORTING_QUEUE_LIMIT, 10000),
+        ).validate()
+    except ValueError as error:
+        return str(error)
+    return None
 
 STEP_USER_CS_DATA_SCHEMA = vol.Schema(
     {
@@ -126,6 +169,7 @@ STEP_USER_CP_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_ENABLE_HA_NOTIFICATIONS, default=DEFAULT_ENABLE_HA_NOTIFICATIONS
         ): bool,
+        **_reporting_schema({}),
     }
 )
 
@@ -156,6 +200,7 @@ def _store_only_when_on(settings: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in settings.items()
         if key not in _STORED_ONLY_WHEN_ON or value
+        if settings.get(CONF_REPORTING_ENABLED) or key not in _REPORTING_KEYS
     }
 
 
@@ -208,6 +253,16 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            for group in entry.data.get(CONF_CPIDS, []):
+                for settings in group.values():
+                    if error := _reporting_error(settings, user_input):
+                        return self.async_show_form(
+                            step_id="reconfigure",
+                            data_schema=self.add_suggested_values_to_schema(
+                                STEP_USER_CS_DATA_SCHEMA, {**entry.data, **user_input}
+                            ),
+                            errors={"base": error},
+                        )
             # Don't allow servers to use same websocket port (the entry being
             # reconfigured is excluded from the match).
             self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
@@ -295,6 +350,9 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 # integration-wide, not just within this central system.
                 if user_input[CONF_CPID] in self._other_cpids_in_use():
                     errors["base"] = "duplicate_cpid"
+            reporting_error = _reporting_error(user_input, self._data)
+            if reporting_error:
+                errors["base"] = reporting_error
 
             if not errors:
                 cp_data = _store_only_when_on(
@@ -452,6 +510,7 @@ class OCPPOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Edit the behavioural settings of the chosen charge point."""
         current = self._charge_points()[self._cp_id]
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             # Hold only what the form edited; _finalize overlays it onto the
@@ -461,10 +520,14 @@ class OCPPOptionsFlow(OptionsFlow):
             # holds what detection accepted, and rewriting it here would
             # create sensors for every measurand as a side effect of
             # editing an unrelated setting.
-            self._settings = dict(user_input)
-            if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
-                return self._finalize()
-            return await self.async_step_measurands()
+            reporting_error = _reporting_error({**current, **user_input}, self.config_entry.data)
+            if reporting_error:
+                errors["base"] = reporting_error
+            else:
+                self._settings = dict(user_input)
+                if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
+                    return self._finalize()
+                return await self.async_step_measurands()
 
         schema = vol.Schema(
             {
@@ -532,11 +595,13 @@ class OCPPOptionsFlow(OptionsFlow):
                         DEFAULT_ENABLE_HA_NOTIFICATIONS,
                     ),
                 ): bool,
+                **_reporting_schema(current),
             }
         )
         return self.async_show_form(
             step_id="cp_settings",
             data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "cp_id": self._cp_id,
                 "cpid": current.get(CONF_CPID, ""),

@@ -228,6 +228,19 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
     async def _route_get_diagnostics(call: ServiceCall) -> None:
         await _route("handle_get_diagnostics", call)
 
+    async def _route_reconcile_report(call: ServiceCall) -> None:
+        devid = call.data["devid"]
+        systems = list(_iter_central_systems(hass))
+        owners = [
+            cs for cs in systems
+            if any(reporter.cpid == devid for reporter in cs.reporters.values())
+        ]
+        if not owners:
+            owners = [cs for cs in systems if devid in cs.reporters]
+        if len(owners) != 1:
+            raise HomeAssistantError("Use the unique HA charger id of a configured reporting backend")
+        await owners[0].handle_reconcile_report(call)
+
     services = [
         csvcs.service_configure,
         csvcs.service_get_configuration,
@@ -237,6 +250,7 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         csvcs.service_set_charge_rate,
         csvcs.service_update_firmware,
         csvcs.service_get_diagnostics,
+        csvcs.service_reconcile_report,
     ]
 
     hass.services.async_register(
@@ -289,6 +303,15 @@ def _register_domain_services(hass: HomeAssistant) -> list[str]:
         _route_get_diagnostics,
         GDIAG_SERVICE_DATA_SCHEMA,
     )
+    hass.services.async_register(
+        DOMAIN, csvcs.service_reconcile_report, _route_reconcile_report,
+        vol.Schema({
+            vol.Required("devid"): cv.string,
+            vol.Required("event_id"): vol.All(int, vol.Range(min=1)),
+            vol.Required("outcome"): vol.In(["received", "not_received"]),
+            vol.Optional("provider_transaction_id"): int,
+        }),
+    )
 
     return services
 
@@ -297,7 +320,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up this integration from config entry."""
     if hass.data.get(DOMAIN) is None:
         hass.data.setdefault(DOMAIN, {})
-        _LOGGER.info(entry.data)
 
     central_sys = await CentralSystem.create(hass, entry)
 
@@ -498,6 +520,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             central_sys = hass.data[DOMAIN][entry.entry_id]
             central_sys._server.close()
             await central_sys._server.wait_closed()
+            await central_sys.close_reporting()
             # Unload the platforms if - and only if - setup forwarded them.
             # Deciding from the live connection count skipped the unload
             # whenever every configured charger happened to be offline, and

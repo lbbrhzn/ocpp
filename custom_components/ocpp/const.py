@@ -31,6 +31,11 @@ CONF_NUM_CONNECTORS = "num_connectors"
 CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
+CONF_REPORTING_ENABLED = "reporting_enabled"
+CONF_REPORTING_URL = "reporting_url"
+CONF_REPORTING_USERNAME = "reporting_username"
+CONF_REPORTING_PASSWORD = "reporting_password"
+CONF_REPORTING_QUEUE_LIMIT = "reporting_queue_limit"
 CONF_SESSION_LIMIT_DEFAULT_PROFILE = "session_limit_default_profile"
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
@@ -211,6 +216,11 @@ class ChargerSystemSettings:
     # Convert limits between amps and watts for three phases, whatever the
     # per-phase meter values show.
     three_phase_supply: bool = DEFAULT_THREE_PHASE_SUPPLY
+    reporting_enabled: bool = False
+    reporting_url: str = ""
+    reporting_username: str = field(default="", repr=False)
+    reporting_password: str = field(default="", repr=False)
+    reporting_queue_limit: int = 10000
 
 
 @dataclass
