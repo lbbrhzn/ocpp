@@ -645,50 +645,43 @@ class ChargePoint(cp):
         effective_csv: str = ""
 
         if autodetect_measurands:
-            if desired_csv:
-                _LOGGER.debug(
-                    "'%s' attempting CSV set for measurands: %s", self.id, desired_csv
+            # Read the list the charger is set to sample, and never write it.
+            # OCPP 1.6 has no way to ask which measurands a charger supports,
+            # and few accept them all. Asking for the stored list and falling
+            # back to the charger's own on refusal left the stored list unable
+            # to grow, and writing it back on each connect undid any change
+            # made on the charger or with ocpp.configure. Choosing measurands
+            # is what manual configuration is for.
+            chgr_csv = _filter_measurands(await self.get_configuration(key))
+            _LOGGER.debug("'%s' charger samples measurands: '%s'", self.id, chgr_csv)
+            if not chgr_csv:
+                # The key is unknown or empty, so there's nothing to go on.
+                # Keep the stored list rather than clear it, which would
+                # remove every measurand sensor.
+                _LOGGER.warning(
+                    "Could not read the measurands charger '%s' samples; "
+                    "keeping the configured measurands",
+                    self.id,
                 )
-                try:
-                    resp = await self.call(
-                        call.ChangeConfiguration(key=key, value=desired_csv)
-                    )
-                    if getattr(resp, "status", None) in cfg_ok:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV accepted with status=%s",
-                            self.id,
-                            resp.status,
-                        )
-                        effective_csv = desired_csv
-                    else:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration",
-                            self.id,
-                            getattr(resp, "status", None),
-                        )
-                except Exception as ex:
-                    _LOGGER.debug(
-                        "get_supported_measurands CSV set raised for '%s': %s",
-                        self.id,
-                        ex,
-                    )
-
-            # Read from charger and filter it using lenient logic
-            chgr_csv = await self.get_configuration(key)
-            chgr_csv = _filter_measurands(chgr_csv)
-
-            if not effective_csv:
-                _LOGGER.debug(
-                    "'%s' measurands not configurable by integration", self.id
+                return all_measurands
+            if chgr_csv == DEFAULT_MEASURAND:
+                # Many chargers sample only the energy register out of the
+                # box, even when they support more, and nothing else would
+                # show that the other measurands are there to be chosen.
+                _LOGGER.warning(
+                    "Automatic detection found only %s on charger '%s'. If the "
+                    "charger supports more measurands, turn off automatic "
+                    "detection in the integration's options and choose them",
+                    DEFAULT_MEASURAND,
+                    self.id,
                 )
-                _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
-                return chgr_csv
-
-            _LOGGER.debug(
-                "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
-            )
-            await self.configure(key, effective_csv)
-            return effective_csv
+                await self.notify_ha(
+                    f"Automatic detection found only {DEFAULT_MEASURAND} on "
+                    f"charger {self.id}. If the charger supports more "
+                    "measurands, turn off automatic detection in the "
+                    "integration's options and choose them."
+                )
+            return chgr_csv
 
         # Non-autodetect path:
         if desired_csv:

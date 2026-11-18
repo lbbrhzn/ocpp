@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 from datetime import datetime, UTC
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from ocpp.v16.enums import (
     ConfigurationStatus,
 )
 
+from custom_components.ocpp.const import DEFAULT_MEASURAND
 from custom_components.ocpp.enums import (
     HAChargerDetails as cdet,
     ConfigurationKey as ckey,
@@ -159,15 +161,19 @@ async def test_get_number_of_connectors_invalid_value_defaults(
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "setup_config_entry",
-    [{"port": 9312, "cp_id": "CP_cov_auto_exc", "cms": "cms_services"}],
+    [{"port": 9312, "cp_id": "CP_cov_auto_read", "cms": "cms_services"}],
     indirect=True,
 )
-@pytest.mark.parametrize("cp_id", ["CP_cov_auto_exc"])
+@pytest.mark.parametrize("cp_id", ["CP_cov_auto_read"])
 @pytest.mark.parametrize("port", [9312])
-async def test_autodetect_measurands_change_configuration_exception(
+async def test_autodetect_measurands_reads_without_writing(
     hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
 ):
-    """Test autodetect measurands when ChangeConfiguration raises and fallback occurs."""
+    """Test autodetect reads the charger's list and never writes one.
+
+    The stored list differs from the charger's, as after ocpp.configure
+    changed the charger. Writing the stored list back would undo that.
+    """
     cs = setup_config_entry
     async with websockets.connect(
         f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
@@ -179,23 +185,157 @@ async def test_autodetect_measurands_change_configuration_exception(
             await wait_ready(cs.charge_points[cp_id])
             srv = cs.charge_points[cp_id]
 
-            # Enable autodetect and set a desired CSV to trigger the path
             srv.settings.monitored_variables_autoconfig = True
-            srv.settings.monitored_variables = "Power.Active.Import,Voltage"
+            srv.settings.monitored_variables = "Energy.Active.Import.Register"
+            sent = []
 
             async def fake_call(req):
-                # Fail on ChangeConfiguration, so code reads back via GetConfiguration
-                if isinstance(req, call.ChangeConfiguration):
-                    raise TypeError("set failed")
+                sent.append(req)
                 if isinstance(req, call.GetConfiguration):
                     return SimpleNamespace(
-                        configuration_key=[{"value": "Voltage"}], unknown_key=None
+                        configuration_key=[
+                            {
+                                "value": "Energy.Active.Import.Register,"
+                                "Current.Import.L1,Voltage"
+                            }
+                        ],
+                        unknown_key=None,
                     )
                 return SimpleNamespace()
 
             monkeypatch.setattr(srv, "call", fake_call, raising=True)
             result = await srv.get_supported_measurands()
-            assert result == "Voltage"
+            assert result == "Energy.Active.Import.Register,Current.Import,Voltage"
+            assert [type(req) for req in sent] == [call.GetConfiguration]
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9334, "cp_id": "CP_cov_auto_energy", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_cov_auto_energy"])
+@pytest.mark.parametrize("port", [9334])
+async def test_autodetect_measurands_energy_only_warns(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch, caplog
+):
+    """Test autodetect warns when it finds only the energy register."""
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            srv.settings.monitored_variables_autoconfig = True
+            notes = []
+
+            async def fake_notify(msg, title="Ocpp integration"):
+                notes.append(msg)
+                return True
+
+            monkeypatch.setattr(srv, "notify_ha", fake_notify, raising=True)
+
+            for charger_csv, expected, warns in (
+                (DEFAULT_MEASURAND, DEFAULT_MEASURAND, True),
+                # Nothing recognisable falls back to the energy register
+                ("Garbage.L1", DEFAULT_MEASURAND, True),
+                (f"{DEFAULT_MEASURAND},Voltage", f"{DEFAULT_MEASURAND},Voltage", False),
+            ):
+
+                async def fake_call(req, charger_csv=charger_csv):
+                    if isinstance(req, call.GetConfiguration):
+                        return SimpleNamespace(
+                            configuration_key=[{"value": charger_csv}],
+                            unknown_key=None,
+                        )
+                    return SimpleNamespace()
+
+                monkeypatch.setattr(srv, "call", fake_call, raising=True)
+                notes.clear()
+                caplog.clear()
+                with caplog.at_level(logging.WARNING):
+                    result = await srv.get_supported_measurands()
+
+                assert result == expected
+                warnings = [
+                    r
+                    for r in caplog.records
+                    if r.levelno == logging.WARNING
+                    and "Automatic detection found only" in r.getMessage()
+                ]
+                assert bool(warnings) is warns, charger_csv
+                assert bool(notes) is warns, charger_csv
+                if warns:
+                    assert cp_id in notes[0]
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await ws.close()
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    "setup_config_entry",
+    [{"port": 9335, "cp_id": "CP_cov_auto_unread", "cms": "cms_services"}],
+    indirect=True,
+)
+@pytest.mark.parametrize("cp_id", ["CP_cov_auto_unread"])
+@pytest.mark.parametrize("port", [9335])
+async def test_autodetect_measurands_unreadable_keeps_stored_list(
+    hass, socket_enabled, cp_id, port, setup_config_entry, monkeypatch
+):
+    """Test autodetect keeps the stored list when the charger's can't be read.
+
+    Returning nothing would be stored, and the reload that follows would
+    create no measurand sensors at all.
+    """
+    cs = setup_config_entry
+    async with websockets.connect(
+        f"ws://127.0.0.1:{port}/{cp_id}", subprotocols=["ocpp1.6"]
+    ) as ws:
+        cp = ChargePoint(f"{cp_id}_client", ws)
+        task = asyncio.create_task(cp.start())
+        try:
+            await cp.send_boot_notification()
+            await wait_ready(cs.charge_points[cp_id])
+            srv = cs.charge_points[cp_id]
+            srv.settings.monitored_variables_autoconfig = True
+            srv.settings.monitored_variables = f"{DEFAULT_MEASURAND},Voltage"
+
+            for resp in (
+                # The charger doesn't know the key
+                SimpleNamespace(
+                    configuration_key=None,
+                    unknown_key=[ckey.meter_values_sampled_data.value],
+                ),
+                # The key is there but empty
+                SimpleNamespace(configuration_key=[{"value": ""}], unknown_key=None),
+                # Neither the key nor an unknown key comes back
+                SimpleNamespace(configuration_key=[], unknown_key=None),
+            ):
+                sent = []
+
+                async def fake_call(req, resp=resp, sent=sent):
+                    sent.append(req)
+                    if isinstance(req, call.GetConfiguration):
+                        return resp
+                    return SimpleNamespace()
+
+                monkeypatch.setattr(srv, "call", fake_call, raising=True)
+                result = await srv.get_supported_measurands()
+                assert result == f"{DEFAULT_MEASURAND},Voltage", resp
+                assert [type(req) for req in sent] == [call.GetConfiguration]
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
