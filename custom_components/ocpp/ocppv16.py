@@ -608,8 +608,14 @@ class ChargePoint(cp):
 
         def _filter_measurands(raw_csv: str) -> str:
             """Keep only compliant measurands found as tokens in the charger's string."""
-            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
-            if not raw_csv or raw_csv.strip().lower() == "unknown":
+            # Protect against empty lists, including ones of only blanks and
+            # commas, and the "Unknown" sentinel (checked by
+            # test_measurands_manual_set_rejected_returns_empty)
+            if (
+                not raw_csv
+                or raw_csv.strip().lower() == "unknown"
+                or not raw_csv.replace(",", "").strip()
+            ):
                 return ""
 
             matched = []

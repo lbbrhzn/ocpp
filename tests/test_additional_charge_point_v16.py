@@ -321,6 +321,9 @@ async def test_autodetect_measurands_unreadable_keeps_stored_list(
                 ),
                 # The key is there but empty
                 SimpleNamespace(configuration_key=[{"value": ""}], unknown_key=None),
+                # Only blanks, or only commas, which list nothing either
+                SimpleNamespace(configuration_key=[{"value": "   "}], unknown_key=None),
+                SimpleNamespace(configuration_key=[{"value": ", ,"}], unknown_key=None),
                 # Neither the key nor an unknown key comes back
                 SimpleNamespace(configuration_key=[], unknown_key=None),
             ):
