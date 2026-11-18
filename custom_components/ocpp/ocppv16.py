@@ -16,6 +16,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 import voluptuous as vol
 from websockets.asyncio.server import ServerConnection
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 
 from ocpp.routing import on
 from ocpp.v16 import call, call_result
@@ -61,6 +63,8 @@ from .enums import (
 from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
+    CONF_CPIDS,
+    CONF_MONITORED_VARIABLES,
     DEFAULT_MEASURAND,
     DEFAULT_MAX_CURRENT,
     DOMAIN,
@@ -606,12 +610,8 @@ class ChargePoint(cp):
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
 
-        def _filter_measurands(raw_csv: str) -> str:
-            """Keep only compliant measurands found as tokens in the charger's string."""
-            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
-            if not raw_csv or raw_csv.strip().lower() == "unknown":
-                return ""
-
+        def _match_measurands(raw_csv: str) -> list[str]:
+            """Return the compliant measurands found as tokens in the charger's string."""
             matched = []
             for token in raw_csv.split(","):
                 token = token.strip()
@@ -624,7 +624,15 @@ class ChargePoint(cp):
                         if m not in matched:
                             matched.append(m)
                         break  # Match found for this token, move to the next one
+            return matched
 
+        def _filter_measurands(raw_csv: str) -> str:
+            """Keep only compliant measurands found as tokens in the charger's string."""
+            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
+            if not raw_csv or raw_csv.strip().lower() == "unknown":
+                return ""
+
+            matched = _match_measurands(raw_csv)
             if not matched:
                 _LOGGER.debug(
                     "Charger '%s' returned no valid measurands; falling back to %s.",
@@ -645,50 +653,81 @@ class ChargePoint(cp):
         effective_csv: str = ""
 
         if autodetect_measurands:
-            if desired_csv:
-                _LOGGER.debug(
-                    "'%s' attempting CSV set for measurands: %s", self.id, desired_csv
+            # Read the list the charger is set to sample, and never write it.
+            # OCPP 1.6 has no way to ask which measurands a charger supports,
+            # and few accept them all. Asking for the stored list and falling
+            # back to the charger's own on refusal left the stored list unable
+            # to grow, and writing it back on each connect undid any change
+            # made on the charger or with ocpp.configure. Choosing measurands
+            # is what manual configuration is for.
+            connection = self._connection
+            try:
+                raw_csv = await self.get_configuration(key, match_key=True)
+                problem = f"it returned {raw_csv!r}"
+            except ConnectionClosed:
+                # Setup can't carry on without the connection
+                raise
+            except Exception as ex:
+                # A timeout, a refusal or a reply that can't be used. The
+                # read is optional, so connecting carries on without it.
+                raw_csv = None
+                problem = f"the read failed: {ex!r}"
+            if self._connection is not connection or (
+                connection.state is not State.OPEN
+            ):
+                # The connection dropped or was replaced during the read, which
+                # can show as a timeout or not at all. Setup stops, as for any
+                # other failed read, without storing what came back, and the
+                # new connection runs its own.
+                raise HomeAssistantError(
+                    f"Connection to charger '{self.id}' closed while reading "
+                    "its measurands"
+                )
+            matched = _match_measurands(raw_csv) if isinstance(raw_csv, str) else []
+            if not matched:
+                # The read failed or gave nothing usable: an unknown key, an
+                # empty value, or only names the integration doesn't know.
+                # Keep the stored list rather than clear it or fall back to
+                # the energy register, which would remove sensors.
+                _LOGGER.warning(
+                    "Could not read the measurands charger '%s' samples (%s); "
+                    "keeping the stored measurands",
+                    self.id,
+                    problem,
+                )
+                # Read it from the entry, which holds what an earlier connect
+                # found. self.settings only catches up when the entry reloads.
+                for record in self.entry.data.get(CONF_CPIDS, []):
+                    if self.id in record:
+                        return record[self.id].get(
+                            CONF_MONITORED_VARIABLES, all_measurands
+                        )
+                return all_measurands
+            chgr_csv = ",".join(matched)
+            _LOGGER.debug("'%s' charger samples measurands: '%s'", self.id, chgr_csv)
+            if chgr_csv == DEFAULT_MEASURAND:
+                # Many chargers sample only the energy register out of the
+                # box, even when they support more, and nothing else would
+                # show that the other measurands are there to be chosen.
+                _LOGGER.warning(
+                    "Automatic detection found only %s on charger '%s'. If the "
+                    "charger supports more measurands, turn off automatic "
+                    "detection in the integration's options and choose them",
+                    DEFAULT_MEASURAND,
+                    self.id,
                 )
                 try:
-                    resp = await self.call(
-                        call.ChangeConfiguration(key=key, value=desired_csv)
+                    await self.notify_ha(
+                        f"Automatic detection found only {DEFAULT_MEASURAND} on "
+                        f"charger {self.id}. If the charger supports more "
+                        "measurands, turn off automatic detection in the "
+                        "integration's options and choose them."
                     )
-                    if getattr(resp, "status", None) in cfg_ok:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV accepted with status=%s",
-                            self.id,
-                            resp.status,
-                        )
-                        effective_csv = desired_csv
-                    else:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration",
-                            self.id,
-                            getattr(resp, "status", None),
-                        )
                 except Exception as ex:
-                    _LOGGER.debug(
-                        "get_supported_measurands CSV set raised for '%s': %s",
-                        self.id,
-                        ex,
-                    )
-
-            # Read from charger and filter it using lenient logic
-            chgr_csv = await self.get_configuration(key)
-            chgr_csv = _filter_measurands(chgr_csv)
-
-            if not effective_csv:
-                _LOGGER.debug(
-                    "'%s' measurands not configurable by integration", self.id
-                )
-                _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
-                return chgr_csv
-
-            _LOGGER.debug(
-                "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
-            )
-            await self.configure(key, effective_csv)
-            return effective_csv
+                    # The warning above says the same, and a notification
+                    # mustn't stop setup
+                    _LOGGER.debug("Measurand notification failed: %r", ex)
+            return chgr_csv
 
         # Non-autodetect path:
         if desired_csv:
@@ -1533,32 +1572,50 @@ class ChargePoint(cp):
             )
             return False
 
-    async def get_configuration(self, key: str = "") -> str | dict | None:
+    async def get_configuration(
+        self, key: str = "", match_key: bool = False
+    ) -> str | dict | None:
         """Get Configuration of charger for supported keys.
 
         When key is empty, returns a dict of all configuration key-value pairs.
         When key is specified, returns the value as a string.
+
+        With match_key, the value comes from the row for the key asked for
+        rather than the first row, and a row without a value reads as "".
+        A reply without that row is treated as one without the key, and only
+        that key listed as unknown counts as unknown.
         """
         if key == "":
             req = call.GetConfiguration()
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
-        if resp.configuration_key:
+        rows = resp.configuration_key
+        if rows and key and match_key:
+            # Some chargers send other keys too, or first
+            rows = [
+                {**entry, om.value: entry.get(om.value, "")}
+                for entry in rows
+                if str(entry.get(om.key, "")).lower() == key.lower()
+            ][:1]
+        if rows:
             if key == "":
                 result = {}
-                for entry in resp.configuration_key:
+                for entry in rows:
                     entry_key = entry.get("key", "")
                     entry_value = entry.get(om.value, "")
                     result[entry_key] = entry_value
                 _LOGGER.debug("Get Configuration returned %d keys", len(result))
                 return result
-            value = resp.configuration_key[0][om.value]
+            value = rows[0][om.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             self._metrics[0][cdet.config_response].value = datetime.now(tz=UTC)
             self._metrics[0][cdet.config_response].extra_attr = {key: value}
             return value
-        if resp.unknown_key:
+        unknown = resp.unknown_key
+        if unknown and key and match_key:
+            unknown = [k for k in unknown if str(k).lower() == key.lower()]
+        if unknown:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return "Unknown"

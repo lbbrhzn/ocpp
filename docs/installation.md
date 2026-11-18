@@ -41,7 +41,9 @@ If you do not use HTTPS for your Home Assistant instance:
 
 ### Measurands
 - Most chargers only support a subset of all possible measurands. This depends most on the Feature profiles that are supported by the charger.
-- The integration will autodetect the supported measurands when the charger connects. This can be disabled for chargers that do not support autodetection.
+- On an OCPP 1.6 charger with _Automatic detection of OCPP Measurands_ on, the integration reads the measurands the charger is set to sample while setting the charger up, the first time it connects after the integration loads, and keeps those as the charger's measurands. If it can't read the list, or recognises nothing in it, it keeps the measurands it had. It doesn't change what the charger samples, so a list set on the charger, or with the `ocpp.configure` action, is left alone. Sensors are created from the stored measurands when the integration loads, so sensors for newly detected measurands appear at the next reload after detection.
+- Many 1.6 chargers sample only `Energy.Active.Import.Register` out of the box, even when they support more. If that's all automatic detection finds, the integration logs a warning, and with _Enable Home Assistant notifications_ on, shows a notification. To choose the measurands, turn off automatic detection and select them, and the integration sets them on the charger when it connects.
+- OCPP 2.0.1 chargers work differently: the integration takes the measurands from what the charger reports about itself, whether automatic detection is on or off.
 
 ## Add the entities to your Dashboard
 - On the OCPP integration, click on devices to navigate to your Charge Point device.
