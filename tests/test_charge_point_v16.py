@@ -22,7 +22,9 @@ from custom_components.ocpp.const import (
     DOMAIN as OCPP_DOMAIN,
     CONF_CPIDS,
     CONF_CPID,
+    CONF_MONITORED_VARIABLES,
     CONF_NUM_CONNECTORS,
+    DEFAULT_MEASURAND,
 )
 from custom_components.ocpp.enums import (
     ConfigurationKey as ckey,
@@ -3770,6 +3772,11 @@ async def test_post_connect_update_entry_raises_outer_caught(
             def boom_update_entry(entry, data=None):
                 raise RuntimeError("update failed")
 
+            # Only the energy register stored, so Voltage is new and saved:
+            # setup only updates the entry when it finds something new
+            monkeypatch.setitem(
+                srv_cp._charger_record(), CONF_MONITORED_VARIABLES, DEFAULT_MEASURAND
+            )
             monkeypatch.setattr(
                 srv_cp.hass.config_entries,
                 "async_update_entry",

@@ -303,9 +303,13 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_NUM_CONNECTORS: self._detected_num_connectors,
                     }
                 )
-                cpids_list = self._data.get(CONF_CPIDS, []).copy()
+                # Build on the entry as it is now, not as it was when the
+                # charger was discovered. A charger already set up may have
+                # stored its measurands or connector count since, and
+                # writing back the earlier copy would undo that.
+                cpids_list = list(self._entry.data.get(CONF_CPIDS, []))
                 cpids_list.append({self._cp_id: cp_data})
-                self._data = {**self._data, CONF_CPIDS: cpids_list}
+                self._data = {**self._entry.data, CONF_CPIDS: cpids_list}
 
                 if user_input[CONF_MONITORED_VARIABLES_AUTOCONFIG]:
                     self._data[CONF_CPIDS][-1][self._cp_id][
@@ -359,6 +363,15 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                         errors=errors,
                     )
 
+                # Again on the entry as it is now, for anything stored while
+                # the measurands were being chosen
+                self._data = {
+                    **self._entry.data,
+                    CONF_CPIDS: [
+                        *self._entry.data.get(CONF_CPIDS, []),
+                        self._data[CONF_CPIDS][-1],
+                    ],
+                }
                 self.hass.config_entries.async_update_entry(
                     self._entry, data=self._data
                 )

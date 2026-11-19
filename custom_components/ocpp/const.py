@@ -89,6 +89,8 @@ DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
 DOMAIN = "ocpp"
 CONFIG = "config"
+# Where the connector counts chargers reported are kept across reloads
+FOUND_CONNECTORS = "found_connectors"
 EVENT_AUTHORIZATION = f"{DOMAIN}_authorization"
 
 

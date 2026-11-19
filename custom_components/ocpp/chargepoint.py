@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 import logging
@@ -56,6 +57,7 @@ from .const import (
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
     CONF_CPIDS,
     CONFIG,
@@ -66,6 +68,7 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
     DOMAIN,
+    MEASURANDS,
     EVENT_AUTHORIZATION,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
@@ -93,6 +96,11 @@ _PHASE_KEY_GROUPS = (
 SESSION_ENERGY_DETECT_TOLERANCE = 0.01  # kWh
 
 SESSION_PROFILE_BASE_ID = 3000
+
+
+def _measurand_list(csv: str) -> list[str]:
+    """Return the measurands in a comma-separated list, as sensor setup reads it."""
+    return list(dict.fromkeys(m.strip() for m in str(csv).split(",") if m.strip()))
 
 
 def session_profile_id(connector_id: int) -> int:
@@ -346,6 +354,11 @@ class ChargePoint(cp):
         # completes and charging continues.
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+        # The connector count post_connect found, kept for the next load when
+        # the entry unloads (see CentralSystem.keep_found_connector_counts)
+        self.found_num_connectors: int | None = None
+        # Measurands seen in meter values, so each is checked once per load
+        self._received_measurands: set[str] = set()
         self.session_controller = None
         # Counts BootNotifications. A rebooted charger may reuse transaction
         # ids, so anything keyed on an id alone must also carry this number.
@@ -402,18 +415,16 @@ class ChargePoint(cp):
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
-            updated_entry = {**self.entry.data}
-            for i in range(len(updated_entry[CONF_CPIDS])):
-                if self.id in updated_entry[CONF_CPIDS][i]:
-                    s = updated_entry[CONF_CPIDS][i][self.id]
-                    if s.get(CONF_MONITORED_VARIABLES) != accepted_measurands or s.get(
-                        CONF_NUM_CONNECTORS
-                    ) != int(self.num_connectors):
-                        s[CONF_MONITORED_VARIABLES] = accepted_measurands
-                        s[CONF_NUM_CONNECTORS] = int(self.num_connectors)
-                    break
-            # if an entry differs this will unload/reload and stop/restart the central system/websocket
-            self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
+            new_measurands = self._store_new_measurands(accepted_measurands)
+            if new_measurands:
+                await self._warn_new_measurands(new_measurands)
+            # The connector count isn't saved: that would move a
+            # multi-connector charger's entities to a device per connector at
+            # the next load, with new entity ids, which needs its own change
+            # (#2268). It used to be changed in the entry's data in place,
+            # where any save of the entry would carry it, so it's kept here,
+            # and outside the entry for the next load.
+            self.found_num_connectors = int(self.num_connectors)
 
             await self.set_standard_configuration()
 
@@ -455,6 +466,117 @@ class ChargePoint(cp):
             raise
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
+
+    def _charger_record(self) -> dict | None:
+        """Return this charger's record in the config entry, as it is now."""
+        for item in self.entry.data.get(CONF_CPIDS, []):
+            if self.id in item:
+                return item[self.id]
+        return None
+
+    def _store_new_measurands(self, found: str) -> list[str]:
+        """Save measurands found that aren't stored yet, and return them.
+
+        With automatic detection on, the stored list only grows (#2258).
+        Values also arrive in clock-aligned data, so a measurand missing from
+        what setup found can still have a live sensor, and nothing stored is
+        removed. With it off, the stored selection is
+        left alone. The setting is read from the record as it is now, not as
+        it was when this setup started.
+
+        Sensors are created when the integration loads, so the new ones appear
+        at the next reload. The save doesn't reload the entry itself: that
+        would restart the central system and reconnect every charger on it.
+        """
+        record = self._charger_record()
+        if record is None or not found:
+            return []
+        if not record.get(
+            CONF_MONITORED_VARIABLES_AUTOCONFIG,
+            self.settings.monitored_variables_autoconfig,
+        ):
+            return []
+        stored = _measurand_list(record.get(CONF_MONITORED_VARIABLES, ""))
+        # Only names the integration knows, so the options can show them all
+        new = [m for m in _measurand_list(found) if m in MEASURANDS and m not in stored]
+        if not new:
+            return []
+        # Copy the records too. Changing them in place would change
+        # entry.data as well, so async_update_entry would see no difference
+        # and save nothing.
+        updated = deepcopy(dict(self.entry.data))
+        for item in updated.get(CONF_CPIDS, []):
+            if self.id in item:
+                item[self.id][CONF_MONITORED_VARIABLES] = ",".join(stored + new)
+                break
+        central = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if central is not None and self.entry.update_listeners:
+            # Tells the update listener this save needs no reload. Without a
+            # listener yet, nothing reloads anyway, and a marker left behind
+            # could make it skip a later change.
+            central.saved_by_setup = updated
+        self.hass.config_entries.async_update_entry(self.entry, data=updated)
+        return new
+
+    def _note_received_measurands(self, names: set[str]):
+        """Make sure measurands the charger sends aren't silently dropped (#2258).
+
+        Values can arrive for a measurand with no sensor, for example in
+        clock-aligned data. With automatic detection on, it's added like one
+        setup found, and with it off, a warning says it isn't selected. One
+        that can't be selected, like an OCPP 2.0.1-only measurand, gets a
+        warning too, unless it's stored, which gives it a sensor. Each is
+        checked once per load.
+        """
+        names = set(names) - self._received_measurands
+        if not names:
+            return
+        self._received_measurands |= names
+        record = self._charger_record()
+        if record is None:
+            return
+        stored = _measurand_list(record.get(CONF_MONITORED_VARIABLES, ""))
+        unsupported = sorted(n for n in names if n not in MEASURANDS + stored)
+        if unsupported:
+            _LOGGER.warning(
+                "Charger '%s' sends %s, which the integration has no sensors "
+                "for, so the values aren't shown",
+                self.id,
+                ", ".join(unsupported),
+            )
+        unsensored = [n for n in MEASURANDS if n in names and n not in stored]
+        if not unsensored:
+            return
+        new = self._store_new_measurands(",".join(unsensored))
+        if new:
+            self.hass.async_create_task(self._warn_new_measurands(new))
+        else:
+            _LOGGER.warning(
+                "Charger '%s' sends %s, which isn't among the chosen measurands, "
+                "so it has no sensor. Select it in the integration's options to "
+                "add one",
+                self.id,
+                ", ".join(unsensored),
+            )
+
+    async def _warn_new_measurands(self, new: list[str]):
+        """Say which measurands were added, and that a reload adds their sensors."""
+        names = ", ".join(new)
+        _LOGGER.warning(
+            "Charger '%s' reports %s, which had no sensors. They are now "
+            "stored, and reloading the integration adds their sensors",
+            self.id,
+            names,
+        )
+        try:
+            await self.notify_ha(
+                f"Charger {self.id} reports {names}, which had no sensors. "
+                "Reload the OCPP integration to add them."
+            )
+        except Exception as ex:
+            # The warning above says the same, and a notification mustn't
+            # stop setup
+            _LOGGER.debug("New measurand notification failed: %r", ex)
 
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
@@ -1451,6 +1573,19 @@ class ChargePoint(cp):
     ):
         """Process all values from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
 
+        # Only names that are strings, so a malformed one, which skipping
+        # schema validation lets through, can't make this check fail
+        self._note_received_measurands(
+            {
+                name
+                for bucket in meter_values
+                for sv in bucket
+                for name in [
+                    sv.measurand if sv.measurand is not None else DEFAULT_MEASURAND
+                ]
+                if isinstance(name, str)
+            }
+        )
         for bucket in meter_values:
             # --- Preselect best EAIR in this bucket (ignore Transaction.Begin) ---
             best_eair_idx = None
