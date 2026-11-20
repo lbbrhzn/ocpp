@@ -82,6 +82,7 @@ from .const import (
     DEFAULT_WEBSOCKET_PING_INTERVAL,
     DEFAULT_WEBSOCKET_PING_TIMEOUT,
     DOMAIN,
+    FOUND_CONNECTORS,
     PLATFORMS,
 )
 
@@ -574,6 +575,10 @@ async def async_remove_config_entry_device(
             hass.config_entries.async_update_entry(
                 entry, data={**entry.data, CONF_CPIDS: [c for c in new_cpids if c]}
             )
+            # A charger added later with this OCPP id mustn't inherit its count
+            hass.data.get(DOMAIN, {}).get(FOUND_CONNECTORS, {}).get(
+                entry.entry_id, {}
+            ).pop(cp_id, None)
             _LOGGER.info("Removed charge point %s from entry %s", cp_id, entry.title)
             return True
 
@@ -584,6 +589,25 @@ async def async_remove_config_entry_device(
     return False
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Forget the connector counts kept for a removed entry."""
+    hass.data.get(DOMAIN, {}).get(FOUND_CONNECTORS, {}).pop(entry.entry_id, None)
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
+    """Reload config entry, unless only a charger's setup saved to it."""
+    central_sys = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    saved = getattr(central_sys, "saved_by_setup", None)
+    if saved is not None:
+        # Used once. Home Assistant starts this listener inside the update, so
+        # this is the call for the setup's own save, and any later call
+        # reloads, including one for a preference change, which leaves the
+        # data as it is.
+        central_sys.saved_by_setup = None
+        if dict(entry.data) == saved:
+            # A charger's setup stored what it found. Reloading would restart
+            # the central system and reconnect every charger on it, and the
+            # sensors follow at the next load anyway. A change made anywhere
+            # else since makes the data differ, so it still reloads.
+            return
     await hass.config_entries.async_reload(entry.entry_id)

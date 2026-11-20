@@ -465,7 +465,7 @@ async def test_process_measurands_defaults_and_session_energy_v2x(hass, monkeypa
             entity_component=SimpleNamespace(async_update_entity=lambda eid: None)
         ),
     )
-    fake_entry = SimpleNamespace(entry_id="dummy")
+    fake_entry = SimpleNamespace(entry_id="dummy", data={})
     fake_central = SimpleNamespace(
         websocket_ping_interval=0,
         websocket_ping_timeout=0,
@@ -533,7 +533,7 @@ async def test_session_and_lifetime_eair_distinction(hass):
             entity_component=SimpleNamespace(async_update_entity=lambda eid: None)
         ),
     )
-    fake_entry = SimpleNamespace(entry_id="dummy")
+    fake_entry = SimpleNamespace(entry_id="dummy", data={})
     fake_central = SimpleNamespace(
         websocket_ping_interval=0,
         websocket_ping_timeout=0,

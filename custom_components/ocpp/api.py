@@ -25,6 +25,7 @@ from .ocppv201 import ChargePoint as ChargePointv201
 from .const import (
     CentralSystemSettings,
     DOMAIN,
+    FOUND_CONNECTORS,
     OCPP_1_6,
     OCPP_2_0,
     OCPP_VERSION_AUTO,
@@ -224,6 +225,19 @@ class CentralSystem:
         # live (connection count, current entry data) diverges from what
         # setup actually did whenever state changed in between.
         self.platforms_forwarded = False
+        # The entry data a charger's setup last saved, so the update listener
+        # can tell that save from a change that needs a reload
+        self.saved_by_setup: dict | None = None
+        # The connector counts chargers reported, by OCPP id, kept as soon as
+        # they're found. They're in hass.data, so the setup after a reload
+        # reads them, as it did when they were written into the entry's data.
+        # There, any save of the entry would store them, including a fallback
+        # after a failed read. Saving the count is #2268.
+        self.found_connectors: dict[str, int] = (
+            hass.data.setdefault(DOMAIN, {})
+            .setdefault(FOUND_CONNECTORS, {})
+            .setdefault(entry.entry_id, {})
+        )
 
         # Service registration is performed globally by the integration setup
         # (custom_components/ocpp/__init__.py) so that multiple central system
@@ -373,6 +387,9 @@ class CentralSystem:
                         config_flow = True
                         cp_settings = settings_from_config(
                             ChargerSystemSettings, list(cfg.values())[0]
+                        )
+                        cp_settings.num_connectors = self.found_connectors.get(
+                            cp_id, cp_settings.num_connectors
                         )
                         _LOGGER.info(
                             f"Charger match found for {cp_settings.cpid}:{cp_id}"

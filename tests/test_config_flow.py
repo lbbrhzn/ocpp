@@ -19,6 +19,7 @@ from custom_components.ocpp.const import (
 )
 
 from .const import (
+    CONF_MONITORED_VARIABLES,
     MOCK_CONFIG_CS,
     MOCK_CONFIG_CP,
     MOCK_CONFIG_FLOW,
@@ -159,6 +160,68 @@ async def test_successful_discovery_flow(hass, bypass_get_data):
     assert result_cp2["type"] == data_entry_flow.FlowResultType.ABORT
     # Check there are 2 cpid entries
     assert len(entry.data[CONF_CPIDS]) == 2
+
+
+async def test_discovery_flow_keeps_what_was_stored_since(hass, bypass_get_data):
+    """Test confirming a discovered charger keeps the other chargers' records.
+
+    The flow starts when the charger first connects and may be confirmed much
+    later. A charger already set up can store new measurands in between, and
+    writing back the entry as it was would undo that.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=deepcopy(MOCK_CONFIG_FLOW),
+        entry_id="test_cms_disc_fresh",
+        title="test_cms_disc_fresh",
+        version=2,
+        minor_version=0,
+    )
+    if hass.data.get(DOMAIN) is None:
+        hass.data.setdefault(DOMAIN, {})
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    def store(measurands):
+        """Store for the charger already set up, as its post_connect does."""
+        data = deepcopy(dict(config_entry.data))
+        data[CONF_CPIDS][0]["test_cp_id"][CONF_MONITORED_VARIABLES] = measurands
+        hass.config_entries.async_update_entry(config_entry, data=data)
+
+    def stored():
+        return config_entry.data[CONF_CPIDS][0]["test_cp_id"][CONF_MONITORED_VARIABLES]
+
+    for cp_id, cpid, autoconfig, measurands in (
+        ("auto_cp_id", "auto_cpid", True, "Energy.Active.Import.Register"),
+        ("manual_cp_id", "manual_cpid", False, "Voltage"),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+            data={"cp_id": cp_id, "entry": config_entry},
+        )
+        assert result["step_id"] == "cp_user"
+        store(measurands)
+
+        cp_input = MOCK_CONFIG_CP.copy()
+        cp_input[CONF_CPID] = cpid
+        cp_input[CONF_MONITORED_VARIABLES_AUTOCONFIG] = autoconfig
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=cp_input
+        )
+        if not autoconfig:
+            # Something stored while the measurands are being chosen
+            store(f"{measurands},Current.Import")
+            measurands = f"{measurands},Current.Import"
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                user_input={"Energy.Active.Import.Register": True},
+            )
+
+        assert result["type"] == data_entry_flow.FlowResultType.ABORT
+        assert stored() == measurands, cp_id
+        assert cp_id in config_entry.data[CONF_CPIDS][-1]
 
 
 async def test_duplicate_cpid_discovery_flow(hass, bypass_get_data):

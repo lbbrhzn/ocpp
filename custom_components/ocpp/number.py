@@ -83,7 +83,16 @@ async def async_setup_entry(hass, entry, async_add_devices):
         )
 
         try:
-            connector_count = max(1, int(cp_id_settings.get(CONF_NUM_CONNECTORS, 1)))
+            # A count the charger reported, kept outside the entry by its OCPP
+            # id (#2268)
+            connector_count = max(
+                1,
+                int(
+                    central_system.found_connectors.get(
+                        list(charger)[0], cp_id_settings.get(CONF_NUM_CONNECTORS, 1)
+                    )
+                ),
+            )
         except (TypeError, ValueError):
             connector_count = 1
 

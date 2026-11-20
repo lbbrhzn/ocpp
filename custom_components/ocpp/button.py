@@ -82,6 +82,11 @@ async def async_setup_entry(hass, entry, async_add_devices):
             else:
                 continue
             break
+        # A count the charger reported, kept outside the entry by its OCPP id
+        # (#2268)
+        num_connectors = int(
+            central_system.found_connectors.get(list(charger)[0], num_connectors)
+        )
 
         if num_connectors > 1:
             for desc in BUTTONS:
