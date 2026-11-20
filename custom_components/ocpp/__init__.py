@@ -599,6 +599,10 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     central_sys = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     saved = getattr(central_sys, "saved_by_setup", None)
     if saved is not None:
+        # Used once. Home Assistant starts this listener inside the update, so
+        # this is the call for the setup's own save, and any later call
+        # reloads, including one for a preference change, which leaves the
+        # data as it is.
         central_sys.saved_by_setup = None
         if dict(entry.data) == saved:
             # A charger's setup stored what it found. Reloading would restart

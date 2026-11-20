@@ -249,29 +249,31 @@ async def test_new_measurands_are_saved_without_a_reload(
             assert _record(entry, cp_id)[CONF_NUM_CONNECTORS] == 1
             assert _record(entry, "CP_other")[CONF_NUM_CONNECTORS] == 1
 
-            async def count_after_late_read(replace):
+            async def count_after_late_read(replace, meanwhile=4):
                 """Return the count kept when setup's charger changes mid-read."""
+                kept = []
                 with monkeypatch.context() as m:
 
                     async def probe():
                         replace(m)
                         # A count kept meanwhile, by a replacement or an
                         # earlier setup
-                        cs.found_connectors[cp_id] = 4
+                        if meanwhile is not None:
+                            cs.found_connectors[cp_id] = meanwhile
                         return 1
 
                     async def heartbeat():
-                        # Past the count, so put the live charger back for the
-                        # rest of setup
+                        # Past the count: note what's kept, then put the live
+                        # charger back for the rest of setup
+                        kept.append(cs.found_connectors.get(cp_id))
                         m.undo()
 
                     m.setattr(srv, "get_number_of_connectors", probe)
                     m.setattr(srv, "get_heartbeat_interval", heartbeat)
                     await srv.post_connect()
                     await _settle()
-                kept = cs.found_connectors[cp_id]
                 cs.found_connectors[cp_id] = 2
-                return kept
+                return kept[0]
 
             # A late result from a setup whose charger was rebuilt, say for
             # another OCPP version, or whose connection was replaced or
@@ -294,6 +296,17 @@ async def test_new_measurands_are_saved_without_a_reload(
                 )
                 == 4
             )
+
+            def remove_charger(m):
+                """Do what removing the charger's device does to its record."""
+                m.setattr(
+                    srv, "entry", SimpleNamespace(entry_id=entry.entry_id, data={})
+                )
+                m.delitem(cs.found_connectors, cp_id)
+
+            # Nor from a setup whose charger was removed meanwhile, so its
+            # count can't come back for another charger added with its OCPP id
+            assert await count_after_late_read(remove_charger, None) is None
 
             # Without an update listener yet, nothing reloads anyway, so no
             # marker is left behind to skip a later change
@@ -541,6 +554,40 @@ async def test_update_listener_skips_only_setups_own_save(hass, monkeypatch):
         await async_reload_entry(hass, entry)
         assert reloads == [entry.entry_id]
         assert central.saved_by_setup is None
+
+        # With the listener on the entry, a setup save doesn't reload, and a
+        # preference change after it, which leaves the data alone, does
+        entry.add_update_listener(async_reload_entry)
+        reloads.clear()
+        setup_saved = {CONF_CPIDS: [{"cp0": {}}]}
+        central.saved_by_setup = setup_saved
+        hass.config_entries.async_update_entry(entry, data=setup_saved)
+        await hass.async_block_till_done()
+        assert reloads == []
+        hass.config_entries.async_update_entry(entry, pref_disable_new_entities=True)
+        await hass.async_block_till_done()
+        assert reloads == [entry.entry_id]
+
+        # Home Assistant starts listeners inside the update today. If it ran
+        # them later, a change made elsewhere, then a setup save that carries
+        # it, would still reload.
+        reloads.clear()
+        real_create_task = hass.async_create_task
+        with monkeypatch.context() as m:
+            m.setattr(
+                hass,
+                "async_create_task",
+                lambda target, name=None, eager_start=True: real_create_task(
+                    target, name, eager_start=False
+                ),
+            )
+            changed = {**setup_saved, CONF_PORT: 9999}
+            hass.config_entries.async_update_entry(entry, data=changed)
+            setup_saved = {**changed, CONF_CPIDS: [{"cp0": {}}, {"cp1": {}}]}
+            central.saved_by_setup = setup_saved
+            hass.config_entries.async_update_entry(entry, data=setup_saved)
+            await hass.async_block_till_done()
+        assert entry.entry_id in reloads
     finally:
         hass.data[DOMAIN].pop(entry.entry_id, None)
 

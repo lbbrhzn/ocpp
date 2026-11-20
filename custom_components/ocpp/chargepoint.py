@@ -418,16 +418,19 @@ class ChargePoint(cp):
             # the entry would carry it. So it's kept outside the entry, as
             # soon as it's found, and the setup after a reload reads it there.
             # Only while this charger and connection are still the live ones,
-            # and the connection is still open: this setup isn't cancelled
-            # when they're replaced or the charger drops off, and a fallback
-            # from a read that never reached the charger mustn't overwrite a
-            # count it reported.
+            # the connection is still open, and the charger is still set up:
+            # this setup isn't cancelled when they're replaced, the charger
+            # drops off or its device is removed. A fallback from a read that
+            # never reached the charger mustn't overwrite a count it reported,
+            # and a removed charger's count mustn't come back for another one
+            # added with the same OCPP id.
             central = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
             if (
                 central is not None
                 and central.charge_points.get(self.id) is self
                 and self._connection is connection
                 and getattr(connection, "state", None) is State.OPEN
+                and self._charger_record() is not None
             ):
                 central.found_connectors[self.id] = int(self.num_connectors)
             await self.get_heartbeat_interval()
