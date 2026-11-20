@@ -354,9 +354,6 @@ class ChargePoint(cp):
         # completes and charging continues.
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
-        # The connector count post_connect found, kept for the next load when
-        # the entry unloads (see CentralSystem.keep_found_connector_counts)
-        self.found_num_connectors: int | None = None
         # Measurands seen in meter values, so each is checked once per load
         self._received_measurands: set[str] = set()
         self.session_controller = None
@@ -406,25 +403,39 @@ class ChargePoint(cp):
         """Logic to be executed right after a charger connects."""
         try:
             _LOGGER.debug("'%s' starting post connection setup", self.id)
+            # What this setup started on, so a late result can be told apart
+            connection = self._connection
             self.status = STATE_OK
             await self.fetch_supported_features()
             self.num_connectors = await self.get_number_of_connectors()
             for conn in range(1, self.num_connectors + 1):
                 self._init_connector_slots(conn)
             self._metrics[(0, cdet.connectors)].value = self.num_connectors
+            # The count isn't saved: that would move a multi-connector
+            # charger's entities to a device per connector at the next load,
+            # with new entity ids, which needs its own change (#2268). It used
+            # to be changed in the entry's data in place, where any save of
+            # the entry would carry it. So it's kept outside the entry, as
+            # soon as it's found, and the setup after a reload reads it there.
+            # Only while this charger and connection are still the live ones,
+            # and the connection is still open: this setup isn't cancelled
+            # when they're replaced or the charger drops off, and a fallback
+            # from a read that never reached the charger mustn't overwrite a
+            # count it reported.
+            central = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+            if (
+                central is not None
+                and central.charge_points.get(self.id) is self
+                and self._connection is connection
+                and getattr(connection, "state", None) is State.OPEN
+            ):
+                central.found_connectors[self.id] = int(self.num_connectors)
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
             new_measurands = self._store_new_measurands(accepted_measurands)
             if new_measurands:
                 await self._warn_new_measurands(new_measurands)
-            # The connector count isn't saved: that would move a
-            # multi-connector charger's entities to a device per connector at
-            # the next load, with new entity ids, which needs its own change
-            # (#2268). It used to be changed in the entry's data in place,
-            # where any save of the entry would carry it, so it's kept here,
-            # and outside the entry for the next load.
-            self.found_num_connectors = int(self.num_connectors)
 
             await self.set_standard_configuration()
 
@@ -526,7 +537,7 @@ class ChargePoint(cp):
         setup found, and with it off, a warning says it isn't selected. One
         that can't be selected, like an OCPP 2.0.1-only measurand, gets a
         warning too, unless it's stored, which gives it a sensor. Each is
-        checked once per load.
+        checked once per load, unless saving it fails.
         """
         names = set(names) - self._received_measurands
         if not names:
@@ -547,7 +558,16 @@ class ChargePoint(cp):
         unsensored = [n for n in MEASURANDS if n in names and n not in stored]
         if not unsensored:
             return
-        new = self._store_new_measurands(",".join(unsensored))
+        try:
+            new = self._store_new_measurands(",".join(unsensored))
+        except Exception as ex:
+            # The readings with them are still processed, and they're checked
+            # again with the next values
+            self._received_measurands -= set(unsensored)
+            _LOGGER.warning(
+                "Couldn't save the measurands charger '%s' sends: %s", self.id, ex
+            )
+            return
         if new:
             self.hass.async_create_task(self._warn_new_measurands(new))
         else:

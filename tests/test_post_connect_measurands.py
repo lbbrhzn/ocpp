@@ -21,6 +21,7 @@ from ocpp.routing import on
 from ocpp.v16 import call_result
 from ocpp.v16.enums import Action
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from websockets.protocol import State
 
 from custom_components.ocpp import (
     async_reload_entry,
@@ -216,10 +217,13 @@ async def test_new_measurands_are_saved_without_a_reload(
             # A name the integration doesn't know isn't stored
             assert await connect(f"{e_v_c},Energy.Active.Net") == (e_v_c, 0, [], 0, 0)
 
-            # A connector count found on connect stays with the charger
+            # A connector count found on connect is kept outside the entry
+            # straight away, so it's kept even if the charger is replaced
+            # before the entry unloads
             assert await connect(e_v_c, 2) == (e_v_c, 0, [], 0, 0)
             assert _record(entry, cp_id)[CONF_NUM_CONNECTORS] == 1
-            assert srv.found_num_connectors == 2
+            assert cs.found_connectors == {cp_id: 2}
+            assert hass.data[DOMAIN]["found_connectors"][entry.entry_id] == {cp_id: 2}
 
             # So a measurand save carries only stored counts, for this charger
             # and for another one with a different count found
@@ -229,11 +233,7 @@ async def test_new_measurands_are_saved_without_a_reload(
             data[CONF_CPIDS].append({"CP_other": other})
             real_update(entry, data=data)
             await _settle()
-            monkeypatch.setitem(
-                cs.charge_points,
-                "CP_other",
-                SimpleNamespace(found_num_connectors=3),
-            )
+            monkeypatch.setitem(cs.found_connectors, "CP_other", 3)
             e_v_c_f = f"{e_v_c},Frequency"
             assert await connect(e_v_c_f, 2) == (e_v_c_f, 1, [], 1, 1)
             saved = entry.as_dict()["data"]
@@ -243,16 +243,57 @@ async def test_new_measurands_are_saved_without_a_reload(
                 == 1
             )
 
-            # When the entry unloads, the counts found are kept outside it for
-            # the setup after a reload, and the entry still holds what's stored
-            cs.keep_found_connector_counts()
+            # The counts found stay outside the entry for the setup after a
+            # reload, and the entry still holds what's stored
             assert cs.found_connectors == {cp_id: 2, "CP_other": 3}
-            assert hass.data[DOMAIN]["found_connectors"][entry.entry_id] == {
-                cp_id: 2,
-                "CP_other": 3,
-            }
             assert _record(entry, cp_id)[CONF_NUM_CONNECTORS] == 1
             assert _record(entry, "CP_other")[CONF_NUM_CONNECTORS] == 1
+
+            async def count_after_late_read(replace):
+                """Return the count kept when setup's charger changes mid-read."""
+                with monkeypatch.context() as m:
+
+                    async def probe():
+                        replace(m)
+                        # A count kept meanwhile, by a replacement or an
+                        # earlier setup
+                        cs.found_connectors[cp_id] = 4
+                        return 1
+
+                    async def heartbeat():
+                        # Past the count, so put the live charger back for the
+                        # rest of setup
+                        m.undo()
+
+                    m.setattr(srv, "get_number_of_connectors", probe)
+                    m.setattr(srv, "get_heartbeat_interval", heartbeat)
+                    await srv.post_connect()
+                    await _settle()
+                kept = cs.found_connectors[cp_id]
+                cs.found_connectors[cp_id] = 2
+                return kept
+
+            # A late result from a setup whose charger was rebuilt, say for
+            # another OCPP version, or whose connection was replaced or
+            # closed, isn't kept: the count already kept stands
+            assert (
+                await count_after_late_read(
+                    lambda m: m.setitem(cs.charge_points, cp_id, SimpleNamespace())
+                )
+                == 4
+            )
+            assert (
+                await count_after_late_read(
+                    lambda m: m.setattr(srv, "_connection", object())
+                )
+                == 4
+            )
+            assert (
+                await count_after_late_read(
+                    lambda m: m.setattr(srv._connection.protocol, "state", State.CLOSED)
+                )
+                == 4
+            )
 
             # Without an update listener yet, nothing reloads anyway, so no
             # marker is left behind to skip a later change
@@ -405,18 +446,56 @@ async def test_measurands_sent_without_a_sensor_are_not_dropped(
             )
             assert srv._metrics[(1, "Voltage")].value == 230.0
 
+            # A save that fails doesn't stop the readings with it being
+            # processed, and the measurand is checked again with the next values
+            failed = []
+
+            def failing_update(entry, data=None):
+                failed.append(data)
+                raise RuntimeError("update failed")
+
+            start = len(caplog.records)
+            with monkeypatch.context() as m, caplog.at_level(logging.WARNING):
+                m.setattr(hass.config_entries, "async_update_entry", failing_update)
+                srv.process_measurands(
+                    [[MeasurandValue("Current.Import", 16.0, None, "A", None, None)]],
+                    False,
+                    1,
+                )
+                await _settle()
+            assert srv._metrics[(1, "Current.Import")].value == 16.0
+            assert len(failed) == 1
+            assert _record(SimpleNamespace(data=failed[0]), cp_id)[
+                CONF_MONITORED_VARIABLES
+            ] == (f"{ENERGY_AND_VOLTAGE},Current.Import")
+            assert [
+                r.getMessage()
+                for r in caplog.records[start:]
+                if "Couldn't save" in r.getMessage()
+            ] == [
+                f"Couldn't save the measurands charger '{cp_id}' sends: update failed"
+            ]
+            assert _record(entry, cp_id)[CONF_MONITORED_VARIABLES] == (
+                ENERGY_AND_VOLTAGE
+            )
+            e_v_c = f"{ENERGY_AND_VOLTAGE},Current.Import"
+            stored, reloaded, said, noted = await receive("Current.Import")
+            assert (stored, reloaded) == (e_v_c, [])
+            assert len(said) == 1 and "Current.Import" in said[0]
+            assert len(noted) == 1 and "Current.Import" in noted[0]
+
             # With automatic detection off, it's said once, and not saved
             _store(hass, entry, cp_id, **{CONF_MONITORED_VARIABLES_AUTOCONFIG: False})
             await _settle()
             stored, reloaded, said, noted = await receive("Frequency")
-            assert stored == ENERGY_AND_VOLTAGE
+            assert stored == e_v_c
             assert len(said) == 1 and "isn't among the chosen" in said[0]
             assert "Frequency" in said[0] and noted == []
-            assert await receive("Frequency") == (ENERGY_AND_VOLTAGE, [], [], [])
+            assert await receive("Frequency") == (e_v_c, [], [], [])
 
             # One that can't be selected but is stored has a sensor, so
             # nothing is said
-            apparent = f"{ENERGY_AND_VOLTAGE},Energy.Apparent.Import.Register"
+            apparent = f"{e_v_c},Energy.Apparent.Import.Register"
             _store(hass, entry, cp_id, **{CONF_MONITORED_VARIABLES: apparent})
             await _settle()
             assert await receive("Energy.Apparent.Import.Register") == (

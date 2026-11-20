@@ -497,7 +497,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry.entry_id in hass.data[DOMAIN]:
             # Close server
             central_sys = hass.data[DOMAIN][entry.entry_id]
-            central_sys.keep_found_connector_counts()
             central_sys._server.close()
             await central_sys._server.wait_closed()
             # Unload the platforms if - and only if - setup forwarded them.

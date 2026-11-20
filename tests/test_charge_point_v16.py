@@ -3769,7 +3769,10 @@ async def test_post_connect_update_entry_raises_outer_caught(
                 await asyncio.sleep(0.02)
             srv_cp = cs.charge_points[cp_id]
 
+            attempted = []
+
             def boom_update_entry(entry, data=None):
+                attempted.append(data)
                 raise RuntimeError("update failed")
 
             # Only the energy register stored, so Voltage is new and saved:
@@ -3786,6 +3789,10 @@ async def test_post_connect_update_entry_raises_outer_caught(
 
             await srv_cp.post_connect()
             assert getattr(srv_cp, "post_connect_success", False) is not True
+            # It got as far as saving Voltage, rather than stopping earlier
+            assert len(attempted) == 1
+            record = next(r[cp_id] for r in attempted[0][CONF_CPIDS] if cp_id in r)
+            assert record[CONF_MONITORED_VARIABLES] == (f"{DEFAULT_MEASURAND},Voltage")
         finally:
             task.cancel()
 
