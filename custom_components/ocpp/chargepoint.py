@@ -104,12 +104,7 @@ def _measurand_list(csv: str) -> list[str]:
 
 
 def session_profile_id(connector_id: int) -> int:
-    """Return the profile id a connector's session limit uses on both protocols.
-
-    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
-    TxProfile leg, so a connector has one session limit whichever way it is
-    set.
-    """
+    """Return the profile id a connector's session limit uses on both protocols."""
     return SESSION_PROFILE_BASE_ID + int(connector_id)
 
 
@@ -117,12 +112,7 @@ SESSION_DEFAULT_PROFILE_BASE_ID = 2000
 
 
 def session_default_profile_id(connector_id: int) -> int:
-    """Return the profile id a connector's default session limit uses on both protocols.
-
-    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
-    TxDefaultProfile leg, so on 1.6 the slider and the action write one
-    profile.
-    """
+    """Return the profile id a connector's default session limit uses on both protocols."""
     return SESSION_DEFAULT_PROFILE_BASE_ID + int(connector_id)
 
 
@@ -280,6 +270,10 @@ class MeasurandValue:
 class ChargePoint(cp):
     """Server side representation of a charger."""
 
+    # Whether the charger may reuse a transaction id after it restarts, so an
+    # id is only unique together with charger_generation.
+    transaction_ids_reused: bool = True
+
     def __init__(
         self,
         id,  # is charger cp_id not HA cpid
@@ -357,8 +351,8 @@ class ChargePoint(cp):
         # Measurands seen in meter values, so each is checked once per load
         self._received_measurands: set[str] = set()
         self.session_controller = None
-        # Counts BootNotifications. A rebooted charger may reuse transaction
-        # ids, so anything keyed on an id alone must also carry this number.
+        # Counts BootNotifications. Where transaction_ids_reused, anything
+        # keyed on a transaction id must also carry this number.
         self.charger_generation: int = 0
 
     def _init_connector_slots(self, conn_id: int) -> None:
@@ -625,7 +619,12 @@ class ChargePoint(cp):
         """
         pass
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
         raise NotImplementedError
 
@@ -684,11 +683,12 @@ class ChargePoint(cp):
     ) -> bool:
         """Set a TxDefaultProfile on the connector, with or without a transaction.
 
-        For chargers that refuse both the station ceiling and a TxProfile but
-        accept a connector default, which they also apply to the running
-        transaction. Returns True only for an Accepted reply; anything else
-        raises a HomeAssistantError, as set_session_limit does. The profile
-        stays on the charger until it is replaced; nothing is cleared.
+        The Default Current Limit: the limit for the connector's transactions
+        that have no TxProfile of their own. Returns True only for an Accepted
+        reply; anything else raises a HomeAssistantError, as set_session_limit
+        does. The profile stays on the charger until it is replaced; nothing
+        is cleared, so a lower-level default left on the charger cannot take
+        over.
         """
         conn = int(connector_id)
         prepared = await self.prepare_session_limit(conn, float(limit_amps))

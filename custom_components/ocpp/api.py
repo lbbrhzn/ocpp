@@ -773,6 +773,17 @@ class CentralSystem:
         _cp_id, _m, cp, _n = self._get_metrics(id)
         return int(getattr(cp, "charger_generation", 0) or 0) if cp else 0
 
+    def transaction_generation(self, id: str) -> int:
+        """Return the generation that makes the charger's transaction ids unique.
+
+        0 when the charger never reuses an id (1.6), so a boot does not
+        detach a value from its transaction.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
+        if cp is None or not getattr(cp, "transaction_ids_reused", True):
+            return 0
+        return int(getattr(cp, "charger_generation", 0) or 0)
+
     def session_limit_available(self, id: str, connector_id: int) -> bool:
         """Whether a connector's session limit can be set right now.
 
@@ -978,11 +989,22 @@ class CentralSystem:
         custom_profile = call.data.get("custom_profile", None)
         if custom_profile is not None:
             profile = _parse_custom_profile(custom_profile, cp.id)
-            await cp.set_charge_rate(profile=profile, conn_id=conn_id)
+            ok = await cp.set_charge_rate(profile=profile, conn_id=conn_id)
         elif watts is not None:
-            await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)
+            ok = await cp.set_charge_rate(limit_watts=watts, conn_id=conn_id)
         elif amps is not None:
-            await cp.set_charge_rate(limit_amps=amps, conn_id=conn_id)
+            ok = await cp.set_charge_rate(limit_amps=amps, conn_id=conn_id)
+        else:
+            return
+        # A refusal must reach the automation that asked, not only the log.
+        if ok is False:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": "the charger did not accept the request"
+                },
+            )
 
     @check_charger_available
     async def handle_configure(self, call, cp) -> ServiceResponse:
