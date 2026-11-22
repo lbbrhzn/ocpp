@@ -94,7 +94,7 @@ async def test_the_charger_s_own_reason_is_preserved(hass):
     """
     refusal = HomeAssistantError(
         translation_domain=DOMAIN,
-        translation_key="set_variables_error",
+        translation_key="set_charge_rate_error",
         translation_placeholders={"message": "Rejected: over site limit"},
     )
     entity = _mk_number(hass, error=refusal)

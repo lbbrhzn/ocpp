@@ -65,7 +65,7 @@ On a local network no TLS setup is needed - a plain `ws://<home-assistant-ip>:90
 
 ### Station-wide maximum current (`number.<cpid>_maximum_current`) is rejected
 
-The MaxiCharger rejects the `ChargePointMaxProfile` that the integration normally sends to enforce a whole-station charging ceiling (e.g. from `number.<cpid>_maximum_current` or the `set_charge_rate` service without a connector) because that profile is `Relative` by default, and Autel's firmware does not honour a relative schedule there - see [Issue #1565](https://github.com/lbbrhzn/ocpp/issues/1565).
+The MaxiCharger rejects the `ChargePointMaxProfile` that the integration normally sends to enforce a whole-station charging ceiling (e.g. from `number.<cpid>_maximum_current` or the `set_charge_rate` action) because that profile is `Relative` by default, and Autel's firmware does not honour a relative schedule there - see [Issue #1565](https://github.com/lbbrhzn/ocpp/issues/1565).
 
 Enable **Send the station charging limit as an absolute schedule** in the charge point's options (Settings -> Devices & Services -> OCPP -> configure the charger) to work around this. It makes the integration send that same profile as an `Absolute` schedule anchored at a fixed, arbitrary past timestamp instead, which the MaxiCharger accepts. Per-connector limits (`TxDefaultProfile`/`TxProfile`, used while a session is active) are unaffected either way.
 

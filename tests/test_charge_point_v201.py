@@ -1085,7 +1085,7 @@ async def _test_charge_profiles(
 
     error = await _set_charge_rate_service(hass, {"devid": cpid, "limit_amps": 5})
     assert error is not None
-    assert str(error).startswith("Failed to set variable: Rejected")
+    assert str(error).startswith("Failed to set charging current limit: Rejected")
 
     assert len(cp.charge_profiles_cleared) == 0
     await set_number(hass, cpid, "maximum_current", 32)

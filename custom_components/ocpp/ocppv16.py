@@ -1113,9 +1113,7 @@ class ChargePoint(cp):
     ):
         """Build a Relative TxDefaultProfile for one connector.
 
-        The id and the stack level are the ones the set_charge_rate action
-        uses for its TxDefaultProfile leg, so the two address one profile. It
-        is the shape 0.11.4 sent after a refused station ceiling, which
+        It is the shape 0.11.4 sent after a refused station ceiling, which
         chargers in #2158 apply.
         """
         return call.SetChargingProfile(
@@ -1134,31 +1132,49 @@ class ChargePoint(cp):
             },
         )
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
-        """Set only a station ceiling; transaction defaults cannot replace one."""
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
+        """Set only a station ceiling; transaction defaults cannot replace one.
+
+        conn_id only picks the connector whose measurements convert between
+        amps and watts; the profile is always on connector 0.
+        """
         try:
             if not (int(self.supported_features or 0) & prof.SMART):
                 raise HomeAssistantError(
                     "Smart charging is not supported by this charger"
                 )
             units, limit, stack_level = await self._resolve_charge_rate(
-                limit_amps, None, 0
+                limit_amps, limit_watts, conn_id
             )
             req = self._station_charge_rate_request(units, limit, stack_level)
             # _get_specific_response already raises CALLERRORs. Be explicit
             # here so preserving the charger's reason does not rely on it.
             resp = await self.call(req, suppress=False)
             status = resp.status
+        except TimeoutError as ex:
+            # The library's text carries the whole outgoing frame.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": "the charger did not answer the station limit"
+                },
+            ) from ex
         except Exception as ex:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={"message": str(ex)},
             ) from ex
         if status != ChargingProfileStatus.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={
                     "message": f"ChargePointMaxProfile: {status}"
                     f"{self._stack_level_hint(stack_level, status)}"
@@ -1176,140 +1192,41 @@ class ChargePoint(cp):
     ) -> bool:
         """Set charge rate."""
         if profile is not None:
+            # A refusal raises with the charger's status, as on 2.0.1 and the
+            # managed path, so the action's caller sees why.
             try:
                 req = call.SetChargingProfile(
                     connector_id=int(conn_id), cs_charging_profiles=profile
                 )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    return True
-                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
-            except Exception as ex:
-                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
-                await self.notify_ha(
-                    "Warning: Set charging profile failed with response Exception"
-                )
-            return False
-
-        if not (int(self.supported_features or 0) & prof.SMART):
-            _LOGGER.info("Smart charging is not supported by this charger")
-            return False
-
-        units_value, limit_value, stack_level = await self._resolve_charge_rate(
-            limit_amps, limit_watts, conn_id
-        )
-
-        # Helper to build a simple relative schedule with one period
-        def _mk_schedule(_units: str, _limit: float) -> dict:
-            return {
-                om.charging_rate_unit: _units,
-                om.charging_schedule_period: [{om.start_period: 0, om.limit: _limit}],
-            }
-
-        # Helper to generate a unique, stable chargingProfileId per purpose+connector
-        def _profile_id(purpose: str, cid: int) -> int:
-            base = {
-                ChargingProfilePurposeType.charge_point_max_profile.value: 1000,
-                ChargingProfilePurposeType.tx_default_profile.value: 2000,
-                ChargingProfilePurposeType.tx_profile.value: 3000,
-            }.get(purpose, 9000)
-            try:
-                n = int(cid or 0)
-            except Exception:
-                n = 0
-            return base + max(0, n)
-
-        # Try ChargePointMaxProfile (connectorId = 0)
-        try:
-            req = self._station_charge_rate_request(
-                units_value, limit_value, stack_level
-            )
-            resp = await self.call(req)
-            if resp.status == ChargingProfileStatus.accepted:
-                self._note_accepted_stack_level(stack_level)
-                return True
-            _LOGGER.debug(
-                "ChargePointMaxProfile not accepted (%s)%s; will continue.",
-                resp.status,
-                self._stack_level_hint(stack_level, resp.status),
-            )
-        except Exception as ex:
-            _LOGGER.debug("ChargePointMaxProfile call raised: %s", ex)
-
-        # Target connector (default 1 if unspecified/0)
-        target_cid = int(conn_id) if conn_id and int(conn_id) > 0 else 1
-
-        # Read active transaction on this connector. A held connector's id may
-        # belong to a transaction that has already ended, so no profile is
-        # bound to it until the charger settles the connector.
-        try:
-            active_tx_id = int(self._active_tx.get(target_cid, 0) or 0)
-        except Exception:
-            active_tx_id = 0
-        if target_cid in self._tx_indeterminate:
-            active_tx_id = 0
-
-        txp_ok = False
-        txd_ok = False
-
-        # If an active transaction exists on this connector, try TxProfile first (affects ongoing charging)
-        if active_tx_id > 0:
-            try:
-                req = call.SetChargingProfile(
-                    connector_id=target_cid,
-                    cs_charging_profiles={
-                        om.charging_profile_id: _profile_id(
-                            ChargingProfilePurposeType.tx_profile.value, target_cid
-                        ),
-                        om.stack_level: stack_level,
-                        om.charging_profile_kind: ChargingProfileKindType.relative.value,
-                        om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
-                        om.charging_schedule: _mk_schedule(units_value, limit_value),
-                        # Bind to the ongoing transaction
-                        om.transaction_id: active_tx_id,
+                resp = await self.call(req, suppress=False)
+                status = resp.status
+            except TimeoutError as ex:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={
+                        "message": "the charger did not answer the custom profile"
                     },
-                )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    txp_ok = True
-                    self._note_accepted_stack_level(stack_level)
-                else:
-                    _LOGGER.debug("TxProfile not accepted (%s).", resp.status)
+                ) from ex
             except Exception as ex:
-                _LOGGER.debug("TxProfile call raised: %s.", ex)
-
-        # Always attempt TxDefaultProfile as well (for future sessions)
-        try:
-            req = call.SetChargingProfile(
-                connector_id=target_cid,
-                cs_charging_profiles={
-                    om.charging_profile_id: _profile_id(
-                        ChargingProfilePurposeType.tx_default_profile.value, target_cid
-                    ),
-                    om.stack_level: stack_level,
-                    om.charging_profile_kind: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
-                    om.charging_schedule: _mk_schedule(units_value, limit_value),
-                },
-            )
-            resp = await self.call(req)
-            if resp.status == ChargingProfileStatus.accepted:
-                txd_ok = True
-                self._note_accepted_stack_level(stack_level)
-            else:
-                _LOGGER.debug("Set TxDefaultProfile rejected: %s", resp.status)
-                if txp_ok:
-                    _LOGGER.debug(
-                        f"Note: Active TxProfile applied, but TxDefaultProfile was rejected ({resp.status})."
-                    )
-        except Exception as ex:
-            _LOGGER.debug("Set TxDefaultProfile failed: %s", ex)
-            if txp_ok:
-                _LOGGER.debug(
-                    f"Note: Active TxProfile applied, but TxDefaultProfile failed: {ex}"
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={"message": f"custom profile: {ex}"},
+                ) from ex
+            if status != ChargingProfileStatus.accepted:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={"message": f"custom profile: {status}"},
                 )
+            return True
 
-        return bool(txp_ok or txd_ok)
+        # The managed limit is the station ceiling only, the profile Maximum
+        # Current writes. Per-connector limits have their own entity, Session
+        # Current Limit, so a refused ceiling is an error rather than a
+        # fallback onto the profiles that entity owns.
+        return await self.set_station_charge_rate(limit_amps, limit_watts, conn_id)
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""

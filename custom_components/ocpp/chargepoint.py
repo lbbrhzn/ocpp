@@ -104,12 +104,7 @@ def _measurand_list(csv: str) -> list[str]:
 
 
 def session_profile_id(connector_id: int) -> int:
-    """Return the profile id a connector's session limit uses on both protocols.
-
-    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
-    TxProfile leg, so a connector has one session limit whichever way it is
-    set.
-    """
+    """Return the profile id a connector's session limit uses on both protocols."""
     return SESSION_PROFILE_BASE_ID + int(connector_id)
 
 
@@ -117,12 +112,7 @@ SESSION_DEFAULT_PROFILE_BASE_ID = 2000
 
 
 def session_default_profile_id(connector_id: int) -> int:
-    """Return the profile id a connector's default session limit uses on both protocols.
-
-    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
-    TxDefaultProfile leg, so on 1.6 the slider and the action write one
-    profile.
-    """
+    """Return the profile id a connector's default session limit uses on both protocols."""
     return SESSION_DEFAULT_PROFILE_BASE_ID + int(connector_id)
 
 
@@ -625,7 +615,12 @@ class ChargePoint(cp):
         """
         pass
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
         raise NotImplementedError
 
