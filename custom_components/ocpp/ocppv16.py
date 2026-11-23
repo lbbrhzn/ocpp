@@ -45,6 +45,7 @@ from ocpp.v16.enums import (
 )
 
 from .chargepoint import (
+    FEATURES_RECHECK_INTERVAL,
     OcppVersion,
     MeasurandValue,
     SetVariableResult,
@@ -786,6 +787,11 @@ class ChargePoint(cp):
         try:
             resp = await self.call(req)
         except TimeoutError:
+            if self._features_assumed:
+                # Already on Core from an earlier timeout, a recheck stays quiet
+                raise
+            self._features_assumed = True
+            self._features_recheck_at = time.monotonic() + FEATURES_RECHECK_INTERVAL
             _LOGGER.warning(
                 "No response to GetConfiguration for SupportedFeatureProfiles, "
                 "defaulting to Core"
@@ -796,6 +802,7 @@ class ChargePoint(cp):
             )
             feature_list = [om.feature_profile_core]
         else:
+            self._features_assumed = False
             try:
                 feature_list = (resp.configuration_key[0][om.value]).split(",")
             except (IndexError, KeyError, TypeError):
