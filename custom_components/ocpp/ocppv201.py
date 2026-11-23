@@ -770,28 +770,21 @@ class ChargePoint(cp):
                     "No response to GetCompositeSchedule probe, assuming no SMART"
                 )
 
-        fw_req = call.UpdateFirmware(
-            1,
-            {
-                "location": "dummy://dummy",
-                "retrieveDateTime": datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "signature": "☺",
-            },
-        )
+        # OCPP 2.0.1 defines FirmwareManagement as part of the standard message
+        # set. Assume it instead of probing with a real UpdateFirmware call:
+        # some chargers (e.g. KEBA) accept a dummy UpdateFirmware, raise an
+        # internal FirmwareUpdateOnIdleRequestedEvent, and set idle connectors
+        # Unavailable - which blocks charging until that pending state clears.
+        # Profiles.FW is informational on 2.0.1 (features sensor); the probe
+        # was not worth the side effect. See #2248.
+        features |= Profiles.FW
+
         # A probe that goes unanswered has to cost only its own profile. The
         # ocpp library raises asyncio.TimeoutError rather than an OCPPError
         # when a charger never replies, so catching OCPPError alone let that
         # escape get_supported_features, past the assignment in
         # fetch_supported_features, into post_connect's bare handler - leaving
         # every profile off, including SMART, and no feature metric at all.
-        try:
-            await self.call(fw_req)
-            features |= Profiles.FW
-        except OCPPError as e:
-            _LOGGER.info("Firmware update not supported: %s", e)
-        except TimeoutError:
-            _LOGGER.warning("No response to UpdateFirmware probe, assuming no FW")
-
         trigger_req = call.TriggerMessage("StatusNotification")
         try:
             await self.call(trigger_req)
