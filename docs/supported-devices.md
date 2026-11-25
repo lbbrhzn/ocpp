@@ -99,6 +99,90 @@ See CTEK Chargestorm Connected 2 below for getting started instructions.
 ## [CTEK Chargestorm Connected 2](https://www.ctek.com/uk/ev-charging/chargestorm%C2%AE-connected-2)
 [Jonas Karlsson](https://github.com/jonasbkarlsson) has written a [getting started guide](https://github.com/jonasbkarlsson/ocpp/wiki/CTEK-Chargestorm-Connected-2) for connecting CTEK Chargestorm Connected 2.
 
+## [Delta AC MAX](https://www.deltaww.com/en-US/products/EV-Charging/ALL/) (also sold as GM Energy PowerUp 2)
+
+Tested on a North American unit sold by GM Energy as the PowerUp 2. It reports vendor `Delta`,
+model `EIAW-U11KSSU7E01`, firmware `1.10.0`, OCPP 1.6J, with feature profiles Core,
+FirmwareManagement, LocalAuthListManagement, Reservation, SmartCharging and RemoteTrigger.
+GM has not locked OCPP on this unit.
+
+### Setup
+
+1. Skip registration in the GM Energy app. The charger has a single OCPP server setting,
+   so registering probably points it back at GM's backend (not verified).
+2. Join the charger's own Wi-Fi network (`Delta-<serial>`) and open `http://192.168.5.1`.
+   Log in as `admin`. The password is printed on the back of the manual, and the same password
+   joins the charger's Wi-Fi network. This page is only reachable on the charger's own network,
+   not from the home network.
+3. Choose **Operating with OCPP Central System**. Set the Server URL to
+   `ws://<home-assistant-ip>:9000/` (keep the trailing slash), OCPP 1.6J, and your 2.4 GHz Wi-Fi.
+   Plug-and-charge for both online and offline lets it charge without Home Assistant.
+4. The charger connects on the path `/<serial>`, whatever you put in the Charge Box ID field.
+   Accept the discovery prompt in Home Assistant and choose your own charge point id.
+5. If the charger connects after discovery but never sends a BootNotification and ignores
+   every request, reload the OCPP integration once.
+
+The internal DIP switches set the hardware maximum current. The web page's
+**Max Charging Current** must not exceed it. A unit configured before installation can come up
+solid red with that field stuck at the old value. A factory reset from the web page clears this,
+but you then have to re-enter the OCPP settings. `GetConfiguration` reports the DIP setting
+as `DipSwitchMaxCurrentAssignment`.
+
+### Readings
+
+The charger allows at most five measurands (`MeterValuesSampledDataMaxLength` is 5) and already
+sends all five: `Current.Import`, `Energy.Active.Import.Register`, `Power.Active.Import`, `Voltage`
+and `Temperature` (location `Outlet`), so requests to add more are rejected. Readings arrive every
+60 s while charging and every 15 minutes while idle.
+
+The charger's readings are correct. On a 240 V split-phase supply it labels voltage and current
+with phase `L1-L2`. The integration treats `L1-L2` as part of a three-phase supply, so two sensor
+states differ from what the charger sent:
+
+- Voltage: the integration converts line-to-line voltage to line-to-neutral by dividing by √3,
+  so the state of `sensor.<cpid>_voltage` is about 140 V. The charger's reading (about 240 V) is in
+  the sensor's `L1-L2` attribute.
+- Current: the integration only combines currents labelled `L1`/`L2`/`L3` or `L1-N`/`L2-N`/`L3-N`,
+  so the state of `sensor.<cpid>_current_import` stays at 0. The charger's reading (for example
+  39.3 A at a 40 A limit) is in the sensor's `L1-L2` attribute.
+- Power and energy are not affected.
+
+Template sensors that read the attributes:
+
+```yaml
+template:
+  - sensor:
+      - name: "<cpid> line voltage"
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.<cpid>_voltage', 'L1-L2') }}"
+      - name: "<cpid> charging current"
+        unit_of_measurement: A
+        device_class: current
+        state_class: measurement
+        state: >-
+          {{ state_attr('sensor.<cpid>_current_import', 'L1-L2') | float(0)
+             if is_state('sensor.<cpid>_status_connector', 'Charging') else 0 }}
+```
+
+During a session the charger sends a new current sample every 60 s, including 0 A while paused,
+so the attribute is at most a minute old. The current template shows 0 outside `Charging`, so it
+never shows the last sample as live current after a session ends. Gating on the `current_import`
+state does not work here, because the integration never sets that state for this charger.
+
+### Control
+
+- `number.<cpid>_maximum_current` works. A Ford Mach-E was charging at 40 A. Setting the limit to
+  0 A moved the connector to `SuspendedEVSE` within 5 s. Raising it again resumed charging
+  without unplugging. Use 0 A to pause and resume instead of remote stop and start.
+- When the charger lost power, `sensor.<cpid>_status_connector` kept showing its last status
+  (`Available`). The integration's latency (ping) sensor showed the drop.
+- `DataTransfer` returned `UnknownVendorId` for every vendor id tried (`Delta`, `DELTA`,
+  `DeltaElectronics`, `deltaww`, `com.deltaww`, `GM`), so no vendor-specific commands were found.
+- No public firmware exists for this line. Delta's public AC MAX files (01.26.xx) are a separate
+  firmware family for other regions. Don't cross-flash.
+
 ## [EN+ Caro Series Home Wallbox](https://www.en-plustech.com/product/caro-series-wallbox/)
 This charger is often white-labelled by other vendors, including [cord](https://www.cord-ev.com/cord-one.html) and [EV Switch](https://www.evswitchstore.com.au/pages/ev-charger-range).
 
@@ -344,6 +428,24 @@ Grizzl-E has now locked OCPP support behind a $200 paywall https://grizzl-e.com/
 ## [Wallbox Pulsar & Copper SB](https://wallbox.com/en_uk/wallbox-pulsar)
 The Wallbox Pulsar and Copper SB have been verified.
 In the OCPP-config, leave the password field empty.
+
+Tested on a Wallbox Pulsar Plus (firmware 6.13.6 and 6.14.7), with OCPP enabled in the myWallbox app:
+
+- **Pause by setting `number.<cpid>_maximum_current` to 0 A, not with remote stop.** A remote stop
+  works, but the following remote start was answered `Accepted` and the connector stayed
+  in `Finishing` until the cable was unplugged (3 of 3 tries). With 0 A the charger suspended in
+  about 4 s and resumed by itself in about 25 s after the limit was raised.
+- Pause and resume from the myWallbox app or cloud API are refused while OCPP is enabled.
+- With automatic measurand detection on, power and current readings stopped after an integration
+  reload. Turn detection off and choose `Energy.Active.Import.Register`, `Power.Active.Import`,
+  `Current.Import`, `Current.Offered` and `Voltage` by hand.
+- The charger stops sending readings between sessions, so power, current and offered current keep
+  showing the last session's values. Use them only while `sensor.<cpid>_status_connector` is `Charging`.
+- The energy register dropped by about 1.7 kWh after the 6.13.6 to 6.14.7 firmware update.
+  Utility meters fed by it should use `periodically_resetting: false` and keep `net_consumption`
+  at its default (`false`), so the drop is ignored instead of being counted as a reset or subtracted.
+- The charger keeps charging if Home Assistant goes offline, and a new plug-in starts a session
+  without it. A 0 A limit set before Home Assistant went down stays in place until it reconnects.
 
 ## [ZJ Beny BCP-A2N-P](https://ultipower.com.au/products/zj-beny-home-charging-station-ac-7kw-32a-type-2-ocpp)
 Note that there are different models with similar model names, some of which support OCPP and some with other features.
