@@ -72,6 +72,7 @@ from .const import (
     EVENT_AUTHORIZATION,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
+    POWER_MEASURANDS_DEFAULT_W,
     UNITS_OCCP_TO_HA,
     sensor_unique_id,
 )
@@ -1468,6 +1469,9 @@ class ChargePoint(cp):
             if measurand not in measurand_data:
                 measurand_data[measurand] = {}
 
+            if unit is None and measurand in POWER_MEASURANDS_DEFAULT_W:
+                unit = DEFAULT_POWER_UNIT
+
             if unit is not None:
                 measurand_data[measurand][om.unit] = unit
                 self._metrics[(target_cid, measurand)].unit = unit
@@ -1682,6 +1686,11 @@ class ChargePoint(cp):
 
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
+
+                # Power without a unit is in W; without this it was kept
+                # as W but published under the kW device-class default
+                if measurand in POWER_MEASURANDS_DEFAULT_W and unit is None:
+                    unit = DEFAULT_POWER_UNIT
 
                 # Normalize units
                 if unit == DEFAULT_ENERGY_UNIT:

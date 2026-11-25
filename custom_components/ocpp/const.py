@@ -156,6 +156,12 @@ DEFAULT_ENERGY_UNIT = UnitOfMeasure.wh.value
 DEFAULT_POWER_UNIT = UnitOfMeasure.w.value
 HA_ENERGY_UNIT = UnitOfMeasure.kwh.value
 HA_POWER_UNIT = UnitOfMeasure.kw.value
+# Power measurands whose value is in W when the charger leaves the unit out
+POWER_MEASURANDS_DEFAULT_W = {
+    Measurand.power_active_export.value,
+    Measurand.power_active_import.value,
+    Measurand.power_offered.value,
+}
 
 # Where a HA unit does not exist use Ocpp unit
 UNITS_OCCP_TO_HA = {
