@@ -5638,8 +5638,12 @@ class ChargePoint(cpclass):
         self.last_update_firmware: dict | None = None
 
     @on(Action.get_configuration)
-    def on_get_configuration(self, key, **kwargs):
+    def on_get_configuration(self, key=None, **kwargs):
         """Handle a get configuration requests."""
+        if not key:
+            # GetConfiguration without keys asks for every key; this
+            # simulated charger reports none.
+            return call_result.GetConfiguration(configuration_key=[])
         if key[0] == ckey.supported_feature_profiles:
             if self.accept is True:
                 return call_result.GetConfiguration(

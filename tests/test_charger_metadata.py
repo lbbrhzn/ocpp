@@ -618,7 +618,9 @@ async def test_sensors_end_to_end(hass, socket_enabled):
                     "ClockAlignedDataInterval",
                     "NumberOfConnectors",
                 ]
-                assert keys.attributes["measurands_configurable"] is True
+                # Automatic detection only reads the measurands now, so
+                # whether the charger accepts a write stays unknown.
+                assert "measurands_configurable" not in keys.attributes
 
                 boot = hass.states.get(f"sensor.{cpid}_boot_notification")
                 assert boot.attributes[ATTR_DEVICE_CLASS] == SensorDeviceClass.TIMESTAMP
