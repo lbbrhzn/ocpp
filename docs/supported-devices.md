@@ -161,8 +161,15 @@ template:
         unit_of_measurement: A
         device_class: current
         state_class: measurement
-        state: "{{ state_attr('sensor.<cpid>_current_import', 'L1-L2') }}"
+        state: >-
+          {{ state_attr('sensor.<cpid>_current_import', 'L1-L2') | float(0)
+             if is_state('sensor.<cpid>_status_connector', 'Charging') else 0 }}
 ```
+
+During a session the charger sends a new current sample every 60 s, including 0 A while paused,
+so the attribute is at most a minute old. The current template shows 0 outside `Charging`, so it
+never shows the last sample as live current after a session ends. Gating on the `current_import`
+state does not work here, because the integration never sets that state for this charger.
 
 ### Control
 
