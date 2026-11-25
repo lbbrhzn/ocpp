@@ -272,6 +272,41 @@ def test_process_phases_voltage_and_current_branches(hass):
     assert cp._metrics[(2, "Power.Active.Import")].unit == HA_POWER_UNIT
 
 
+@pytest.mark.parametrize(
+    "measurand", ["Power.Active.Import", "Power.Active.Export", "Power.Offered"]
+)
+def test_power_without_unit_is_watts(hass, measurand):
+    """Power sent without a unit is W and is published in kW (#1989)."""
+    cp = _mk_cp(hass)
+
+    cp.process_measurands(
+        [[_mv(measurand, 10088.0)]], is_transaction=False, connector_id=1
+    )
+    assert cp._metrics[(1, measurand)].value == pytest.approx(10.088)
+    assert cp._metrics[(1, measurand)].unit == HA_POWER_UNIT
+
+    bucket = [
+        _mv(measurand, 3353.0, phase="L1"),
+        _mv(measurand, 3382.0, phase="L2"),
+        _mv(measurand, 3319.0, phase="L3"),
+    ]
+    cp.process_phases(bucket, connector_id=2)
+    assert cp._metrics[(2, measurand)].value == pytest.approx(10.054)
+    assert cp._metrics[(2, measurand)].unit == HA_POWER_UNIT
+
+
+def test_power_with_explicit_kw_unit_unchanged(hass):
+    """A charger that sends kW keeps its value."""
+    cp = _mk_cp(hass)
+    cp.process_measurands(
+        [[_mv("Power.Active.Import", 10.0, unit="kW")]],
+        is_transaction=False,
+        connector_id=1,
+    )
+    assert cp._metrics[(1, "Power.Active.Import")].value == 10.0
+    assert cp._metrics[(1, "Power.Active.Import")].unit == HA_POWER_UNIT
+
+
 def test_get_energy_kwh_and_session_derive(hass):
     """Test get_energy_kwh + process_measurands path (EAIR Wh → kWh, derive Energy.Session)."""
     cp = _mk_cp(hass, version=OcppVersion.V201)  # != 1.6 to enable session derive
