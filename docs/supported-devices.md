@@ -110,9 +110,10 @@ GM has not locked OCPP on this unit.
 
 1. Skip registration in the GM Energy app. The charger has a single OCPP server setting,
    so registering probably points it back at GM's backend (not verified).
-2. Join the charger's own Wi-Fi network (`Delta-<serial>`) and open `http://192.168.5.1`
-   (user `admin`). This page is only reachable on the charger's own network, not from the
-   home network.
+2. Join the charger's own Wi-Fi network (`Delta-<serial>`) and open `http://192.168.5.1`.
+   Log in as `admin`. The password is printed on the back of the manual, and the same password
+   joins the charger's Wi-Fi network. This page is only reachable on the charger's own network,
+   not from the home network.
 3. Choose **Operating with OCPP Central System**. Set the Server URL to
    `ws://<home-assistant-ip>:9000/` (keep the trailing slash), OCPP 1.6J, and your 2.4 GHz Wi-Fi.
    Plug-and-charge for both online and offline lets it charge without Home Assistant.
@@ -129,18 +130,24 @@ as `DipSwitchMaxCurrentAssignment`.
 
 ### Readings
 
-The measurand list is fixed at five values and changes are rejected:
-`Current.Import`, `Energy.Active.Import.Register`, `Power.Active.Import`, `Voltage` and `Temperature`
-(location `Outlet`). Readings arrive every 60 s while charging.
+The charger allows at most five measurands (`MeterValuesSampledDataMaxLength` is 5) and already
+sends all five: `Current.Import`, `Energy.Active.Import.Register`, `Power.Active.Import`, `Voltage`
+and `Temperature` (location `Outlet`), so requests to add more are rejected. Readings arrive every
+60 s while charging and every 15 minutes while idle.
 
-On a 240 V split-phase supply the values are reported against phase `L1-L2`:
+The charger's readings are correct. On a 240 V split-phase supply it labels voltage and current
+with phase `L1-L2`. The integration treats `L1-L2` as part of a three-phase supply, so two sensor
+states differ from what the charger sent:
 
-- `sensor.<cpid>_voltage` shows about 140 V, because it is divided by √3 as if it were a three-phase supply.
-  The real line voltage (about 240 V) is in its `L1-L2` attribute.
-- `sensor.<cpid>_current_import` reads 0. The real charging current is in its `L1-L2` attribute.
-- Power and energy are correct.
+- Voltage: the integration converts line-to-line voltage to line-to-neutral by dividing by √3,
+  so the state of `sensor.<cpid>_voltage` is about 140 V. The charger's reading (about 240 V) is in
+  the sensor's `L1-L2` attribute.
+- Current: the integration only combines currents labelled `L1`/`L2`/`L3` or `L1-N`/`L2-N`/`L3-N`,
+  so the state of `sensor.<cpid>_current_import` stays at 0. The charger's reading (for example
+  39.3 A at a 40 A limit) is in the sensor's `L1-L2` attribute.
+- Power and energy are not affected.
 
-A template sensor fixes the voltage. Current works the same way:
+Template sensors that read the attributes:
 
 ```yaml
 template:
@@ -148,7 +155,13 @@ template:
       - name: "<cpid> line voltage"
         unit_of_measurement: V
         device_class: voltage
+        state_class: measurement
         state: "{{ state_attr('sensor.<cpid>_voltage', 'L1-L2') }}"
+      - name: "<cpid> charging current"
+        unit_of_measurement: A
+        device_class: current
+        state_class: measurement
+        state: "{{ state_attr('sensor.<cpid>_current_import', 'L1-L2') }}"
 ```
 
 ### Control
@@ -156,10 +169,8 @@ template:
 - `number.<cpid>_maximum_current` works. A Ford Mach-E was charging at 40 A. Setting the limit to
   0 A moved the connector to `SuspendedEVSE` within 5 s. Raising it again resumed charging
   without unplugging. Use 0 A to pause and resume instead of remote stop and start.
-- The limit you set stays on the charger after the session ends, so reset it after unplugging
-  if you lower it during a session.
-- After the charger loses power, `sensor.<cpid>_status_connector` can keep showing `Available`.
-  The integration's latency (ping) sensor shows the drop sooner.
+- When the charger lost power, `sensor.<cpid>_status_connector` kept showing its last status
+  (`Available`). The integration's latency (ping) sensor showed the drop.
 - `DataTransfer` returned `UnknownVendorId` for every vendor id tried (`Delta`, `DELTA`,
   `DeltaElectronics`, `deltaww`, `com.deltaww`, `GM`), so no vendor-specific commands were found.
 - No public firmware exists for this line. Delta's public AC MAX files (01.26.xx) are a separate
@@ -421,8 +432,8 @@ Tested on a Wallbox Pulsar Plus (firmware 6.13.6 and 6.14.7), with OCPP enabled 
 - With automatic measurand detection on, power and current readings stopped after an integration
   reload. Turn detection off and choose `Energy.Active.Import.Register`, `Power.Active.Import`,
   `Current.Import`, `Current.Offered` and `Voltage` by hand.
-- Power, current and offered current keep their last values after a session ends. Use them only
-  while `sensor.<cpid>_status_connector` is `Charging`.
+- The charger stops sending readings between sessions, so power, current and offered current keep
+  showing the last session's values. Use them only while `sensor.<cpid>_status_connector` is `Charging`.
 - The energy register dropped by about 1.7 kWh after the 6.13.6 to 6.14.7 firmware update.
   Utility meters fed by it should use `periodically_resetting: false`, so a drop is not counted
   as a reset.
