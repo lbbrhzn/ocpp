@@ -435,8 +435,8 @@ Tested on a Wallbox Pulsar Plus (firmware 6.13.6 and 6.14.7), with OCPP enabled 
 - The charger stops sending readings between sessions, so power, current and offered current keep
   showing the last session's values. Use them only while `sensor.<cpid>_status_connector` is `Charging`.
 - The energy register dropped by about 1.7 kWh after the 6.13.6 to 6.14.7 firmware update.
-  Utility meters fed by it should use `periodically_resetting: false`, so a drop is not counted
-  as a reset.
+  Utility meters fed by it should use `periodically_resetting: false` and keep `net_consumption`
+  at its default (`false`), so the drop is ignored instead of being counted as a reset or subtracted.
 - The charger keeps charging if Home Assistant goes offline, and a new plug-in starts a session
   without it. A 0 A limit set before Home Assistant went down stays in place until it reconnects.
 
