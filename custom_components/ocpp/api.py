@@ -25,10 +25,12 @@ from .ocppv201 import ChargePoint as ChargePointv201
 from .const import (
     CentralSystemSettings,
     DOMAIN,
+    FOUND_CONNECTORS,
     OCPP_1_6,
     OCPP_2_0,
     OCPP_VERSION_AUTO,
     ChargerSystemSettings,
+    settings_from_config,
 )
 from .enums import (
     HAChargerServices as csvcs,
@@ -95,9 +97,41 @@ CUSTMSG_SERVICE_DATA_SCHEMA = vol.Schema(
         vol.Required("requested_message"): cv.string,
     }
 )
+
+
+def _connector_id(value) -> int:
+    """Validate an integral, positive connector ID.
+
+    ``vol.Coerce(int)`` would silently truncate fractional values
+    (``1.9`` -> ``1``), changing the meaning of the request. Reject
+    those instead.
+    """
+    if isinstance(value, bool):
+        raise vol.Invalid("conn_id must be an integer")
+    if isinstance(value, int):
+        as_int = value
+    elif isinstance(value, float):
+        # float() rounding must not turn a fraction into a valid id, and
+        # inf/nan must not reach int()
+        if not value.is_integer():
+            raise vol.Invalid("conn_id must be an integer, not a fraction")
+        as_int = int(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+            raise vol.Invalid("conn_id must be an integer")
+        as_int = int(text)
+    else:
+        raise vol.Invalid("conn_id must be an integer")
+    if as_int < 1:
+        raise vol.Invalid("conn_id must be a positive integer")
+    return as_int
+
+
 CLEAR_PROFILE_SERVICE_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional("devid"): cv.string,
+        vol.Optional("conn_id"): _connector_id,
     }
 )
 
@@ -179,7 +213,7 @@ class CentralSystem:
         """Instantiate instance of a CentralSystem."""
         self.hass = hass
         self.entry = entry
-        self.settings = CentralSystemSettings(**entry.data)
+        self.settings = settings_from_config(CentralSystemSettings, entry.data)
         self.subprotocols = self._resolve_subprotocols(self.settings)
         self._server = None
         self.id = self.settings.csid
@@ -191,6 +225,19 @@ class CentralSystem:
         # live (connection count, current entry data) diverges from what
         # setup actually did whenever state changed in between.
         self.platforms_forwarded = False
+        # The entry data a charger's setup last saved, so the update listener
+        # can tell that save from a change that needs a reload
+        self.saved_by_setup: dict | None = None
+        # The connector counts chargers reported, by OCPP id, kept as soon as
+        # they're found. They're in hass.data, so the setup after a reload
+        # reads them, as it did when they were written into the entry's data.
+        # There, any save of the entry would store them, including a fallback
+        # after a failed read. Saving the count is #2268.
+        self.found_connectors: dict[str, int] = (
+            hass.data.setdefault(DOMAIN, {})
+            .setdefault(FOUND_CONNECTORS, {})
+            .setdefault(entry.entry_id, {})
+        )
 
         # Service registration is performed globally by the integration setup
         # (custom_components/ocpp/__init__.py) so that multiple central system
@@ -338,7 +385,12 @@ class CentralSystem:
                 for cfg in self.settings.cpids:
                     if cfg.get(cp_id):
                         config_flow = True
-                        cp_settings = ChargerSystemSettings(**list(cfg.values())[0])
+                        cp_settings = settings_from_config(
+                            ChargerSystemSettings, list(cfg.values())[0]
+                        )
+                        cp_settings.num_connectors = self.found_connectors.get(
+                            cp_id, cp_settings.num_connectors
+                        )
                         _LOGGER.info(
                             f"Charger match found for {cp_settings.cpid}:{cp_id}"
                         )
@@ -682,49 +734,18 @@ class CentralSystem:
         return None
 
     def get_available(self, id: str, connector_id: int | None = None):
-        """Return whether the charger (or a specific connector) is available."""
-        cp_id, m, cp, n_connectors = self._get_metrics(id)
+        """Return whether the charger is connected.
+
+        Only a lost connection makes entities unavailable, whatever connector_id
+        is. A connector's status, Faulted included, is something to show, not a
+        reason to hide it.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
 
         if cp is None:
             return None
 
-        if self._norm_conn(connector_id) == 0:
-            return cp.status == STATE_OK
-
-        status_val = None
-        with contextlib.suppress(Exception):
-            status_val = m[
-                (self._norm_conn(connector_id), cstat.status_connector)
-            ].value
-
-        if not status_val:
-            try:
-                flat = m[cstat.status_connector]
-                if hasattr(flat, "extra_attr"):
-                    status_val = flat.extra_attr.get(
-                        self._norm_conn(connector_id)
-                    ) or getattr(flat, "value", None)
-            except Exception:
-                pass
-
-        if not status_val:
-            return cp.status == STATE_OK
-
-        ok_statuses_norm = {
-            "available",
-            "preparing",
-            "charging",
-            "suspendedev",
-            "suspendedevse",
-            "finishing",
-            "occupied",
-            "reserved",
-            "unavailable",  # do NOT make HA entities unavailable for this OCPP state
-        }
-
-        ret = _norm(status_val) in ok_statuses_norm
-        # If backend/WS is down, entity should be unavailable regardless.
-        return ret and (cp.status == STATE_OK)
+        return cp.status == STATE_OK
 
     def get_supported_features(self, id: str):
         """Return what profiles the charger supports."""
@@ -799,6 +820,38 @@ class CentralSystem:
                 translation_placeholders={"message": id},
             )
         return await cp.set_session_limit(int(connector_id), float(value))
+
+    def session_default_limit_available(self, id: str, connector_id: int) -> bool:
+        """Whether a connector's default session limit can be set right now.
+
+        The charger must be up with SmartCharging and have said where the
+        connector's profile goes. A TxDefaultProfile needs no transaction, so
+        the connector's status does not matter. The charge point checks the
+        target again before sending.
+        """
+        _cp_id, _m, cp, _n = self._get_metrics(id)
+        if cp is None or cp.status != STATE_OK:
+            return False
+        if not bool(cp.supported_features & prof.SMART):
+            return False
+        return bool(cp.session_default_target_known(self._norm_conn(connector_id)))
+
+    async def set_session_default_charge_rate_amps(
+        self,
+        id: str,
+        connector_id: int,
+        value: float,
+    ) -> bool:
+        """Set a connector's default session limit."""
+        cp_id = self.cpids.get(id, id)
+        cp = self.charge_points.get(cp_id)
+        if cp is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unavailable",
+                translation_placeholders={"message": id},
+            )
+        return await cp.set_session_default_limit(int(connector_id), float(value))
 
     async def set_max_charge_rate_amps(
         self, id: str, value: float, connector_id: int = 0
@@ -892,7 +945,8 @@ class CentralSystem:
     @check_charger_available
     async def handle_clear_profile(self, call, cp):
         """Handle the clear profile service call."""
-        await cp.clear_profile()
+        conn_id = call.data.get("conn_id")
+        await cp.clear_profile(conn_id=conn_id)
 
     @check_charger_available
     async def handle_update_firmware(self, call, cp):

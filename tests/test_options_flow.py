@@ -23,6 +23,9 @@ from custom_components.ocpp.const import (
     CONF_CPID,
     CONF_CPIDS,
     CONF_ENABLE_HA_NOTIFICATIONS,
+    CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+    CONF_STACK_LEVEL_BELOW_MAX,
+    CONF_THREE_PHASE_SUPPLY,
     CONF_FORCE_SMART_CHARGING,
     CONF_IDLE_INTERVAL,
     CONF_MAX_CURRENT,
@@ -169,6 +172,55 @@ async def test_editing_absolute_charge_point_max_profile(hass):
     )
 
     assert _stored(entry, "CP_1")[CONF_CHARGE_POINT_MAX_PROFILE_ABSOLUTE] is True
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        CONF_SESSION_LIMIT_DEFAULT_PROFILE,
+        CONF_STACK_LEVEL_BELOW_MAX,
+        CONF_THREE_PHASE_SUPPLY,
+    ],
+)
+async def test_editing_an_option_stored_only_when_on(hass, option):
+    """The toggle round-trips through the options flow and is dropped when off."""
+    entry = _entry(hass, [{"CP_1": _cp_settings()}])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 32,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+            option: True,
+        },
+    )
+
+    assert _stored(entry, "CP_1")[option] is True
+
+    # The form shows it on, so saving another change doesn't turn it off.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = {str(key): key.default() for key in result["data_schema"].schema}
+    assert defaults[option] is True
+
+    # Off again: the key leaves the record, so a rollback can still load it.
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAX_CURRENT: 32,
+            CONF_MONITORED_VARIABLES_AUTOCONFIG: True,
+            CONF_METER_INTERVAL: 60,
+            CONF_IDLE_INTERVAL: 900,
+            CONF_SKIP_SCHEMA_VALIDATION: False,
+            CONF_FORCE_SMART_CHARGING: True,
+            option: False,
+        },
+    )
+    assert option not in _stored(entry, "CP_1")
 
 
 async def test_the_entry_is_updated_exactly_once(hass):

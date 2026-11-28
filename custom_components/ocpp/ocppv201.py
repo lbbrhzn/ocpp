@@ -410,6 +410,8 @@ class ChargePoint(cp):
         )
         if not downgrades_live_charge:
             self._metrics[(global_idx, cstat.status_connector)].value = translated.value
+        if translated == ChargePointStatusv16.faulted:
+            self._zero_flow_measurands(global_idx)
 
         evse_status = self._aggregate_evse_status(evse_id)
         if evse_status is not None:
@@ -815,8 +817,12 @@ class ChargePoint(cp):
                 )
                 await self.call(req)
 
-    async def clear_profile(self) -> bool:
+    async def clear_profile(self, conn_id: int | None = None) -> bool:
         """Clear all charging profiles.
+
+        conn_id is accepted for protocol-agnostic callers but is ignored here:
+        OCPP 2.0.1 clears station-wide profiles and does not filter by
+        connector.
 
         Returns True when the charger accepted, or reported it had nothing to
         clear - Unknown means the end state we wanted already holds. Mirrors
@@ -910,9 +916,51 @@ class ChargePoint(cp):
         }
         return call.SetChargingProfile(int(prepared["evse_id"]), profile)
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
-        """Use the managed station limit for the Maximum Current entity."""
-        return await self.set_charge_rate(limit_amps=limit_amps, conn_id=0)
+    def session_default_target_known(self, connector_id: int) -> bool:
+        """Only a reported mapping; _global_to_pair would guess EVSE n."""
+        return (
+            self._ensure_connector_map() and int(connector_id) in self._global_to_evse
+        )
+
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative 2.0.1 TxDefaultProfile on the connector's EVSE.
+
+        The same shape as 1.6: the stack level of the session TxProfile.
+        """
+        schedule = {
+            "id": 1,
+            "charging_rate_unit": prepared["unit"],
+            "charging_schedule_period": [
+                {"start_period": 0, "limit": prepared["value"]}
+            ],
+        }
+        profile = {
+            "id": int(profile_id),
+            "stack_level": int(prepared["stack_level"]),
+            "charging_profile_purpose": ChargingProfilePurposeEnumType.tx_default_profile.value,
+            "charging_profile_kind": ChargingProfileKindEnumType.relative.value,
+            "charging_schedule": [schedule],
+        }
+        return call.SetChargingProfile(int(prepared["evse_id"]), profile)
+
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
+        """Use the managed station limit for the Maximum Current entity.
+
+        The station profile is always on evse_id 0, so conn_id is unused.
+        """
+        return await self.set_charge_rate(
+            limit_amps=limit_amps, limit_watts=limit_watts, conn_id=0
+        )
 
     async def set_charge_rate(
         self,
@@ -953,7 +1001,7 @@ class ChargePoint(cp):
             if resp.status != ChargingProfileStatusEnumType.accepted:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
-                    translation_key="set_variables_error",
+                    translation_key="set_charge_rate_error",
                     translation_placeholders={
                         "message": f"{str(resp.status)}: {str(resp.status_info)}"
                     },
@@ -1041,7 +1089,7 @@ class ChargePoint(cp):
         if resp.status != ChargingProfileStatusEnumType.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={
                     "message": f"{str(resp.status)}: {str(resp.status_info)}"
                 },
@@ -1309,9 +1357,19 @@ class ChargePoint(cp):
 
     @on(Action.status_notification)
     def on_status_notification(
-        self, timestamp: str, connector_status: str, evse_id: int, connector_id: int
+        self,
+        timestamp: str,
+        connector_status: str,
+        evse_id: int,
+        connector_id: int,
+        **kwargs,
     ):
-        """Perform OCPP callback."""
+        """Perform OCPP callback.
+
+        ``**kwargs`` absorbs optional OCPP fields such as ``custom_data``
+        (e.g. KEBA sends ``customData: {vendorId: ...}``). Without it the
+        ocpp library raises TypeError and the CSMS replies InternalError.
+        """
         # Station-level (0, 0) and malformed ids never route through the
         # connector map, so they are applied immediately: buffering them on a
         # charger whose inventory yields no map would strand them - and the
@@ -1546,6 +1604,8 @@ class ChargePoint(cp):
             or (token_type == IdTokenEnumType.central)
         ):
             status = self.get_authorization_status(token)
+        else:
+            self.fire_authorization_event(token, status)
         return call_result.Authorize(id_token_info={"status": status})
 
     def _set_meter_values(

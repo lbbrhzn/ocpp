@@ -341,6 +341,26 @@ async def test_watt_only_station_receives_converted_amp_limit(hass):
 
 
 @pytest.mark.asyncio
+async def test_three_phase_option_reaches_the_2_0_1_conversion(hass):
+    """The option sets the phase count on 2.0.1 too."""
+    cp = _mk_cp(hass)
+    cp.settings.three_phase_supply = True
+    cp._inventory = InventoryReport(
+        evse_count=1, connector_count=[1], charging_rate_units=frozenset({"W"})
+    )
+    cp._build_connector_map()
+
+    assert await cp.set_charge_rate(limit_amps=16) is True
+    prepared = await cp.prepare_session_limit(1, 16)
+
+    period = cp.sent[0].charging_profile["charging_schedule"][0][
+        "charging_schedule_period"
+    ][0]
+    assert period["limit"] == 11040
+    assert (prepared["value"], prepared["conversion_phases"]) == (11040, 3)
+
+
+@pytest.mark.asyncio
 async def test_amp_only_station_receives_converted_watt_limit(hass):
     """RateUnit=A turns a managed watt request into the equivalent current."""
     cp = _mk_cp(hass)
@@ -663,3 +683,62 @@ async def test_set_session_limit_v201_aborts_when_the_transaction_changes(hass):
     with pytest.raises(HomeAssistantError, match="changed while"):
         await cp.set_session_limit(1, 10)
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_session_default_limit_targets_the_connectors_evse(hass):
+    """A Relative TxDefaultProfile on the EVSE, no transaction, at the maximum."""
+    cp = _mk_cp(hass)
+    cp._inventory = InventoryReport(
+        evse_count=2,
+        connector_count=[1, 1],
+        charging_rate_units=frozenset({"A"}),
+        profile_stack_level=5,
+    )
+    cp._build_connector_map()
+    sent = []
+
+    async def accept(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    cp.call = accept
+    assert await cp.set_session_default_limit(2, 10) is True
+    assert sent[-1].evse_id == 2
+    profile = sent[-1].charging_profile
+    assert profile["id"] == 2002
+    assert profile["stack_level"] == 5
+    assert profile["charging_profile_purpose"] == "TxDefaultProfile"
+    assert profile["charging_profile_kind"] == "Relative"
+    assert "transaction_id" not in profile
+    assert profile["charging_schedule"][0]["charging_rate_unit"] == "A"
+    assert profile["charging_schedule"][0]["charging_schedule_period"] == [
+        {"start_period": 0, "limit": 10.0}
+    ]
+
+    async def reject(_request):
+        return SimpleNamespace(status="Rejected")
+
+    cp.call = reject
+    with pytest.raises(HomeAssistantError, match=r"rejected .*\(Rejected\)"):
+        await cp.set_session_default_limit(1, 10)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_session_limit_names_the_level_without_the_16_option(hass):
+    """2.0.1 defines ProfileStackLevel as the maximum value: no 1.6 advice."""
+    from custom_components.ocpp.enums import HAChargerSession as csess
+
+    cp = _mk_cp(hass, status=ChargingProfileStatusEnumType.rejected)
+    cp._inventory = InventoryReport(
+        evse_count=1,
+        connector_count=[1],
+        charging_rate_units=frozenset({"A"}),
+        profile_stack_level=5,
+    )
+    cp._build_connector_map()
+    cp._metrics[(1, csess.transaction_id)].value = "tx-abc"
+
+    with pytest.raises(HomeAssistantError, match="stackLevel 5") as err:
+        await cp.set_session_limit(1, 10)
+    assert "below its reported maximum" not in str(err.value)

@@ -31,7 +31,7 @@ If your charger reports more than one connector, the sensors below are created p
 When the OCPP integration is added to your Home Assistant, you get a slider to control the maximum charge current named:
 `number.<cpid>_maximum_current`
 
-The slider sets a ceiling for the entire charging station. On **OCPP 1.6** it sends only a `ChargePointMaxProfile` on connector 0. On **OCPP 2.0.1** it sends a `ChargingStationMaxProfile` on EVSE 0; at or above the configured maximum it clears profiles of that purpose instead. On 1.6, setting the slider to its maximum still sends a profile. A refused request is shown as an error and the slider returns to its last confirmed value, or unknown if there is none. There is no transaction-profile fallback in the slider. Chargers that reject the station profile can still use the `ocpp.set_charge_rate` action and its fallback chain, described below. For per-connector session control, use the action's `custom_profile` option as described below.
+The slider sets a ceiling for the entire charging station. On **OCPP 1.6** it sends only a `ChargePointMaxProfile` on connector 0. On **OCPP 2.0.1** it sends a `ChargingStationMaxProfile` on EVSE 0; at or above the configured maximum it clears profiles of that purpose instead. On 1.6, setting the slider to its maximum still sends a profile. A refused request is shown as an error and the slider returns to its last confirmed value, or unknown if there is none. There is no transaction-profile fallback. On chargers that reject the station profile, limit each connector with [Session Current Limit](#session-current-limit) instead, or with its [default profile option](#session-current-limit-as-a-default-profile) on chargers that accept only a connector `TxDefaultProfile`.
 
 While using this entity in an automation might seem logical, do not assume it is safe to update at control-loop frequency.
 OCPP defines the profile's behaviour, but not where a charger stores it. Some charger firmware persists station-wide profiles in non-volatile memory; other firmware does not. If a charger writes every update to EEPROM or flash, a fast control loop can wear that storage. There is no universal safe update rate or lifetime estimate: confirm the implementation and supported update frequency with the charger manufacturer.
@@ -42,7 +42,7 @@ OCPP defines the profile's behaviour, but not where a charger stores it. Some ch
 
 This is a breaking change for multi-connector chargers: the old `number.<cpid>_connector_N_maximum_current` entities are removed, including renamed or disabled entries, and replaced by one station-wide master. Update dashboards, scripts and automations that reference the old entities. Existing flat Maximum Current entities keep their registry identity, customisations and restored values. A newly created master starts at the configured maximum without treating a removed entity's value as confirmed; that initial display is not evidence of the charger's current limit.
 
-The slider-side fallback is also removed on **single-connector OCPP 1.6 chargers**. A charger that rejects `ChargePointMaxProfile` now reports an error on slider changes, even if a transaction profile previously worked. The `ocpp.set_charge_rate` action retains its existing behaviour.
+The slider-side fallback is also removed on **single-connector OCPP 1.6 chargers**. A charger that rejects `ChargePointMaxProfile` now reports an error on slider changes, even if a transaction profile previously worked. The `ocpp.set_charge_rate` action no longer falls back either; see [its upgrade note](#what-ocppset_charge_rate-does-with-limit_amps).
 
 The upgrade does not clear stored charging profiles. Moving the master updates only the station maximum; existing transaction or default profiles may continue imposing lower limits. On 1.6, `ocpp.clear_profile` clears **all charging profiles, including custom profiles**. On 2.0.1 it clears **all profiles with purpose `ChargingStationMaxProfile`**, including any custom profiles of that purpose, and leaves transaction/default profiles in place.
 
@@ -54,15 +54,47 @@ For session-scoped control, use a profile that is active exclusively during the 
 
 `Session Current Limit` is a number per connector that limits only the transaction the connector is running. It is available while the charger is connected with SmartCharging, the connector reads Charging or Suspended, and a transaction id is displayed for it; on OCPP 1.6 it is also withheld for the few seconds after a StopTransaction the integration could not attribute (#2128), until the charger's next report settles the connector. Its value is the last limit the charger accepted for the displayed transaction and nothing else: it starts unknown, it is not restored across a restart, and it goes back to unknown when the transaction id changes, because the charger discards a `TxProfile` when its transaction ends.
 
-Moving the slider sends one `SetChargingProfile`: a `TxProfile` of kind `Relative` bound to the displayed transaction id, at the stack level the charger reports as its maximum (`ChargeProfileMaxStackLevel` on 1.6, `SmartChargingCtrlr/ProfileStackLevel` on 2.0.1), in amps or, on a watt-only station, in watts using the voltage and phase count described below. It uses profile id `3000+n`, where `n` is the connector, the same id the `ocpp.set_charge_rate` action uses for its TxProfile leg on 1.6, so a connector has one session limit whichever way it is set. The maximum is a limit like any other: the same profile is sent with the maximum current, and nothing is cleared, because the charger discards the profile when the transaction ends. The slider moves while the request is in flight and returns to the last accepted value on anything but an Accepted reply, with the charger's status in the error.
+Moving the slider sends one `SetChargingProfile`: a `TxProfile` of kind `Relative` bound to the displayed transaction id, at the stack level the charger reports as its maximum (`ChargeProfileMaxStackLevel` on 1.6, `SmartChargingCtrlr/ProfileStackLevel` on 2.0.1; see [Charging profile stack level](#charging-profile-stack-level)), in amps or, on a watt-only station, in watts using the voltage and phase count described below. It uses profile id `3000+n`, where `n` is the connector. The maximum is a limit like any other: the same profile is sent with the maximum current, and nothing is cleared, because the charger discards the profile when the transaction ends. The slider moves while the request is in flight and returns to the last accepted value on anything but an Accepted reply, with the charger's status in the error.
 
 What this control does not do, so that automations do not assume it:
 
 * It trusts the displayed transaction id. A compliant charger rejects a `TxProfile` whose transaction id no longer matches, which is the safety net; a charger that does not validate the id could apply the profile to its next transaction.
 * A request that times out but was applied by the charger leaves the slider showing the previous value until it is moved again. Use the current or power sensors, not the slider, when an automation needs the delivered current.
 * After a restart the slider is available for the running transaction but cannot know about a profile set before the restart.
-* Once moved, the slider's profile stays on the charger until the transaction ends; the slider cannot remove it. At the maximum it still takes precedence over a `TxDefaultProfile` or a `TxProfile` at a lower stack level rather than handing control back to it. On a watt-only station the maximum is converted to watts like any other value, so if fewer phases are counted than the supply has, it caps the session below what it could draw.
-* A custom `TxProfile` sent with the same stack level and connector replaces the slider's profile under the SetChargingProfile replacement rule, and the slider does not learn of it. When creating custom profiles, avoid the stack level the session slider uses, which is the charger's reported maximum, and its profile id. The slider and the 1.6 action's TxProfile leg share one profile id, so they overwrite each other. `ChargePointMaxProfile` remains a ceiling over everything regardless of stack level, so the station and session sliders never compete: the applied limit is the lower of the two.
+* Once moved, the slider's profile stays on the charger until the transaction ends; the slider cannot remove it. At the maximum it still takes precedence over a `TxDefaultProfile` or a `TxProfile` at a lower stack level rather than handing control back to it. On a watt-only station the maximum is converted to watts like any other value, so if fewer phases are counted than the supply has, it caps the session below what it could draw. Phases are counted from the per-phase meter values, and the count is one until any arrive, as after a restart. With **Charger is fed three-phase** on in the charger options, the count is always three.
+* A custom `TxProfile` sent with the same stack level and connector replaces the slider's profile under the SetChargingProfile replacement rule, and the slider does not learn of it. When creating custom profiles, avoid the stack level the session slider uses, which is the charger's reported maximum (one below it with the [stack level option](#charging-profile-stack-level) on 1.6), and its profile id. `ChargePointMaxProfile` remains a ceiling over everything regardless of stack level, so the station and session sliders never compete: the applied limit is the lower of the two.
+
+### Charging profile stack level
+
+Every charging profile the integration manages (the station-wide maximum, `TxProfile` and `TxDefaultProfile`) is sent at the maximum stack level the charger reports: `ChargeProfileMaxStackLevel` on 1.6, `SmartChargingCtrlr/ProfileStackLevel` on 2.0.1. The 2.0.1 `ChargingStationMaxProfile` is the exception and uses level 0. Profiles passed to `ocpp.set_charge_rate` as `custom_profile` keep their own stack level. On 1.6 a new profile replaces any existing one with the same purpose and stack level, so a custom `TxDefaultProfile` at the level the integration uses is overwritten when the integration sets a default limit on that connector; put custom profiles at a lower level.
+
+OCPP 1.6 describes `ChargeProfileMaxStackLevel` both as the highest level and as the number of levels. Some chargers take it as the number, so they reject every profile at the value they report (Timxon A0 and Morek MEV11 report 5 and accept up to 4; ABB Terra AC reports 3 and accepts up to 2). For those, enable **Charger accepts only stack levels below its reported maximum** in the charge point's options (Settings -> Devices & Services -> OCPP -> configure the charger). Every managed profile is then sent one level lower, never below 0. OCPP 2.0.1 defines the value unambiguously, so the option has no effect there.
+
+When the charger refuses a profile, the error names the stack level that was sent. On 1.6, while the option is off, a `Rejected` or `NotSupported` reply also mentions the option, unless the charger has already accepted a profile at that level since Home Assistant started.
+
+On 1.6 the integration reads `ChargeProfileMaxStackLevel` and `ChargingScheduleAllowedChargingRateUnit` when it first sets a managed limit, then keeps them:
+
+* They are read again only after Home Assistant restarts or the integration reloads. Reload it after a firmware update that changes them.
+* A read that fails, or a stack level answer without a value, fails that limit. The next limit reads again.
+* A charger that answers that it does not know `ChargeProfileMaxStackLevel` is sent level 1, as earlier releases did, or 0 with the stack level option. OCPP 1.6 requires the key for smart charging, so a warning is logged.
+* Any other stack level that is not a number fails every managed limit, instead of a guessed level: a profile below one the charger already holds would be accepted without effect.
+* A charger that does not report the rate unit is sent amps.
+
+Upgrade notes:
+
+* Earlier releases sent the 1.6 `TxDefaultProfile`, and the default-profile session limit below, one level below the reported maximum. That happened to work around the chargers above. Now every managed profile uses the same level, so on those chargers enable the option.
+* After enabling or disabling the option, set each limit once. The managed profiles keep their ids (`1000`, `2000+n`, `3000+n`), so each new profile replaces the one left at the old level. There is no need for `ocpp.clear_profile`, which on 1.6 also removes custom and vendor profiles.
+* Disable the option before installing release 0.12.0 or older. Those releases fail to start a charger whose configuration has a setting they do not know. Release 0.12.1 and later ignore it. The option is stored only while it is enabled, so a charger that never used it is unaffected.
+
+### Session Current Limit as a default profile
+
+Some chargers refuse both the station-wide `ChargePointMaxProfile` and a transaction-bound `TxProfile`, but accept a `TxDefaultProfile` on the connector and apply it to the running transaction too (#2158: Timxon A0, ABB Terra AC, Morek MEV11). Those three reject profiles at their reported maximum stack level, so try the [stack level option](#charging-profile-stack-level) first. For chargers that still need it, enable **Send Session Current Limit as a default profile** in the charge point's options. The option changes only how `Session Current Limit` works:
+
+* Moving the slider sends one `SetChargingProfile`: a `TxDefaultProfile` of kind `Relative` with no transaction id, on the slider's connector (1.6) or on that connector's EVSE (2.0.1). It uses profile id `2000+n`, where `n` is the connector, at the same stack level as the `TxProfile` (see [Charging profile stack level](#charging-profile-stack-level)).
+* The slider is available whenever the charger is connected with SmartCharging, whether or not a transaction is running. On 2.0.1 it also waits until the charger has reported which EVSE the connector is on, so a profile that outlives the request is never sent to a guessed EVSE. Its value is the last limit the charger accepted for the connector. It is kept across transactions and restored after a restart, because the charger keeps the profile. A value left over from before the option was enabled is not restored.
+* The profile stays on the charger after the option is turned off. To lift it, set the slider to the maximum before turning the option off. On 1.6, `ocpp.clear_profile` also removes it, together with every other profile on the charger. On 2.0.1 it does not: that action clears only the station-wide `ChargingStationMaxProfile`, so raise the slider first.
+* On a 2.0.1 charger with more than one connector on an EVSE, the connectors' sliders target the same EVSE with different profile ids at the same stack level. OCPP 2.0.1 forbids that combination (K01.FR.06), so expect the charger to reject the second connector's limit. One connector per EVSE, the usual layout, is unaffected.
+* Turn the option off before installing an older release of the integration. Releases before it do not know the setting, and fail to start a charger whose configuration has it switched on. A charger that never had it on stores nothing, so it is unaffected.
 
 Essentially, the slider in your GUI maintains control over the absolute maximum current the charger can utilize.
 
@@ -70,11 +102,18 @@ Essentially, the slider in your GUI maintains control over the absolute maximum 
 
 Before writing a profile by hand it is worth knowing what the built-in action does, because it is not simply a session-scoped limit.
 
-On **OCPP 1.6** it first tries a station-wide `ChargePointMaxProfile` on connector 0, the same profile purpose the slider writes. **If the charger accepts it, that is the end of the call.** Only if the charger *rejects* it does the action fall back to a `TxProfile` bound to the running transaction, plus a `TxDefaultProfile` on that connector. Which of those happened depends on your charger, and the action reports success either way.
+On **OCPP 1.6** it sends a station-wide `ChargePointMaxProfile` on connector 0, the same profile the Maximum Current slider writes, and nothing else. If the charger refuses it, the action fails with the charger's status. `conn_id` only selects the connector whose voltage and phases convert between amps and watts. The Maximum Current slider does not learn of a value the action set.
 
 So on a charger that accepts the station-wide profile, calling this on a short interval repeatedly exercises whatever storage path that firmware uses, and the limit can outlive the transaction rather than being session-scoped.
 
-On **OCPP 2.0.1** a limit below the maximum writes a `ChargingStationMaxProfile` to EVSE 0, as the specification requires for a station-wide profile. A limit at or above the configured maximum current, or 22 kW for a watt limit, or a call with no limit at all, clears that profile instead of sending one. There is no TxProfile fallback, and `conn_id` is not used for this managed limit — it only selects the EVSE for a `custom_profile`.
+On **OCPP 2.0.1** a limit below the maximum writes a `ChargingStationMaxProfile` to EVSE 0, as the specification requires for a station-wide profile. A limit at or above the configured maximum current, or 22 kW for a watt limit, clears that profile instead of sending one. A call with no limit and no `custom_profile` sends nothing. There is no TxProfile fallback. The profile always goes to EVSE 0: `conn_id` only selects the connector whose voltage and phases convert between amps and watts, and the EVSE for a `custom_profile`.
+
+Upgrade note: earlier releases fell back on 1.6 to a `TxProfile` on the running transaction plus a `TxDefaultProfile` on the connector when the charger refused the station profile, and reported success either way. The action now fails instead, and so does any request the charger does not accept, including a rejected `custom_profile`. A request that times out also fails the action, although the charger may still have applied it. If an automation relied on the fallback, replace it according to what it limited:
+
+* **The running session:** call `number.set_value` on the connector's [Session Current Limit](#session-current-limit), which sends a `TxProfile` and shows what the charger accepted. If the charger refuses it, enable the [stack level option](#charging-profile-stack-level). The slider is available only while a transaction is shown for the connector, and Home Assistant skips an unavailable entity without an error, so check that it is available first or the call does nothing.
+* **Future sessions:** enable the [default profile option](#session-current-limit-as-a-default-profile), which makes Session Current Limit send a `TxDefaultProfile` and keeps it available between sessions, or send your own `TxDefaultProfile` with `custom_profile` as described in [Limiting future sessions](#limiting-future-sessions).
+
+If the fallback ever ran on your charger, because the station profile was refused or timed out, it may have left a `TxDefaultProfile` (id `2000+n`) that keeps capping new sessions below the limit you set. In that case run `ocpp.clear_profile` once, then set the limits you use again.
 
 ```yaml
 - action: ocpp.set_charge_rate
@@ -96,7 +135,7 @@ That escape hatch hands you three things the managed path was handling:
 * **The stack level.** Among overlapping profiles of the same purpose, a higher supported level takes precedence. A profile can therefore be accepted but have no effect when another profile is above it. Do not assume that level 2 is valid or sufficient. On OCPP 1.6, query `ChargeProfileMaxStackLevel`; on 2.0.1, inspect the charger's smart-charging device-model variables. Coordinate the chosen level with every other system that writes profiles, and keep it within the maximum the charger reports.
 * **The rate unit and phase count.** See below.
 
-The examples take the ids and stack level as variables. The placeholders below are deliberately non-numeric, so an unedited snippet is rejected by schema validation instead of silently installing a colliding default. Replace them with integer values chosen for your charger. On OCPP 1.6, remember that the resulting rejection is visible only in the integration log and notification because the action itself still returns normally.
+The examples take the ids and stack level as variables. The placeholders below are deliberately non-numeric, so an unedited snippet is rejected by schema validation instead of silently installing a colliding default. Replace them with integer values chosen for your charger. A rejected profile fails the action on both protocols.
 
 ```yaml
 variables:
@@ -188,7 +227,7 @@ Say the phase count in the profile as well, with `"numberPhases": 1` (or 3) in t
 
 A `TxProfile` is bound to the running transaction. If the transaction sensor is `unknown` or `unavailable` — which happens around restarts and telemetry hiccups — there is nothing to bind to, and a profile sent anyway is rejected by the charger.
 
-That failure is quiet: on OCPP 1.6 the integration logs the rejection, but the action still returns normally, so an automation cannot tell that its limit was refused. Check for a transaction before sending, rather than letting a template substitute a placeholder value.
+The action then fails, so the automation stops at that step unless it continues on error. Check for a transaction before sending, rather than letting a template substitute a placeholder value.
 
 On **OCPP 1.6** transaction ids are numbers and the integration writes `0` when a transaction ends, so zero means "no session":
 
@@ -339,7 +378,7 @@ The pieces above are deliberately building blocks rather than a finished control
 
 * **Clamp to what the installation allows.** Most chargers refuse to charge below about 6 A, so a calculated 4 A is not a gentle reduction — it is a rejected profile and the previous limit staying in force. Cap the upper end at the supply's per-phase rating too, and decide explicitly whether "below the minimum" means suspend the session or leave it at the minimum.
 
-* **A rejected profile is not visible on OCPP 1.6.** The integration logs it, but the action returns normally, so your automation cannot tell. Treat a sent profile as a request, not a confirmation. Watching `sensor.<cpid>_current_import` afterwards can tell you a limit is being *exceeded*, but it cannot confirm one was accepted: a car that is tapering, paused, or simply charging slowly sits below the limit whether or not the charger ever installed it.
+* **An accepted profile is a request, not a confirmation.** A rejected profile fails the action, but an accepted one may still have no effect, for example under a profile at a higher stack level. Watching `sensor.<cpid>_current_import` afterwards can tell you a limit is being *exceeded*, but it cannot confirm one is in effect: a car that is tapering, paused, or simply charging slowly sits below the limit whether or not the charger ever installed it.
 
 * **Match the protocol version.** The two profile shapes above are not interchangeable, and neither is the transaction id's type.
 

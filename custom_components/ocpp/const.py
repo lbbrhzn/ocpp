@@ -2,7 +2,7 @@
 
 import pathlib
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import homeassistant.components.input_number as input_number
 from homeassistant.components.sensor import SensorDeviceClass
 import homeassistant.const as ha
@@ -31,13 +31,16 @@ CONF_NUM_CONNECTORS = "num_connectors"
 CONF_OCPP_VERSION = "ocpp_version"
 CONF_PASSWORD = ha.CONF_PASSWORD
 CONF_PORT = ha.CONF_PORT
+CONF_SESSION_LIMIT_DEFAULT_PROFILE = "session_limit_default_profile"
 CONF_SKIP_SCHEMA_VALIDATION = "skip_schema_validation"
 CONF_FORCE_SMART_CHARGING = "force_smart_charging"
 CONF_SSL = "ssl"
 CONF_SSL_CERTFILE_PATH = "ssl_certfile_path"
 CONF_SSL_KEYFILE_PATH = "ssl_keyfile_path"
+CONF_STACK_LEVEL_BELOW_MAX = "stack_level_below_max"
 CONF_STEP = input_number.CONF_STEP
 CONF_SUBPROTOCOL = "subprotocol"
+CONF_THREE_PHASE_SUPPLY = "three_phase_supply"
 CONF_UNIT_OF_MEASUREMENT = ha.CONF_UNIT_OF_MEASUREMENT
 CONF_USERNAME = ha.CONF_USERNAME
 CONF_WEBSOCKET_CLOSE_TIMEOUT = "websocket_close_timeout"
@@ -55,10 +58,13 @@ DEFAULT_NUM_CONNECTORS = 1
 DEFAULT_PORT = 9000
 DEFAULT_SKIP_SCHEMA_VALIDATION = False
 DEFAULT_FORCE_SMART_CHARGING = False
+DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE = False
 DEFAULT_SSL = False
 DEFAULT_SSL_CERTFILE_PATH = pathlib.Path.cwd().joinpath("fullchain.pem")
 DEFAULT_SSL_KEYFILE_PATH = pathlib.Path.cwd().joinpath("privkey.pem")
+DEFAULT_STACK_LEVEL_BELOW_MAX = False
 DEFAULT_SUBPROTOCOLS = ["ocpp1.6", "ocpp2.0.1", "ocpp2.1"]
+DEFAULT_THREE_PHASE_SUPPLY = False
 # Anchor used when the station ceiling (ChargePointMaxProfile / 1.6,
 # ChargingStationMaxProfile / 2.0.1+) is sent as an absolute schedule
 # (charge_point_max_profile_absolute). Any fixed past instant works, since
@@ -83,6 +89,9 @@ DEFAULT_WEBSOCKET_PING_INTERVAL = 20
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 20
 DOMAIN = "ocpp"
 CONFIG = "config"
+# Where the connector counts chargers reported are kept across reloads
+FOUND_CONNECTORS = "found_connectors"
+EVENT_AUTHORIZATION = f"{DOMAIN}_authorization"
 
 
 def sensor_unique_id(cpid: str, metric: str, connector_id: int | None = None) -> str:
@@ -197,6 +206,13 @@ class ChargerSystemSettings:
     connection: int | None = None  # number of this connection in central server
     num_connectors: int = DEFAULT_NUM_CONNECTORS
     charge_point_max_profile_absolute: bool = DEFAULT_CHARGE_POINT_MAX_PROFILE_ABSOLUTE
+    session_limit_default_profile: bool = DEFAULT_SESSION_LIMIT_DEFAULT_PROFILE
+    # OCPP 1.6: send managed profiles one level below the reported
+    # ChargeProfileMaxStackLevel, for chargers that read it as a count.
+    stack_level_below_max: bool = DEFAULT_STACK_LEVEL_BELOW_MAX
+    # Convert limits between amps and watts for three phases, whatever the
+    # per-phase meter values show.
+    three_phase_supply: bool = DEFAULT_THREE_PHASE_SUPPLY
 
 
 @dataclass
@@ -223,3 +239,14 @@ class CentralSystemSettings:
     #     for id in self.cpids:
     #        self.cpids[i] = ChargerSystemSettings(**id)
     #        i =+ 1
+
+
+def settings_from_config(cls, data: dict):
+    """Build a settings dataclass from a stored config, ignoring unknown keys.
+
+    A key added by a later release is not a field here. Ignoring it lets
+    this release still load an entry after a rollback, instead of failing
+    every charger with an unexpected keyword argument.
+    """
+    known = {f.name for f in fields(cls)}
+    return cls(**{key: value for key, value in data.items() if key in known})

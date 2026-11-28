@@ -51,7 +51,7 @@ For OCPP 1.6, the sensor can show these values:
 * **Finishing** – Charging has stopped, but the session isn’t fully closed yet (typically waiting for the cable to be unplugged).
 * **Reserved** – The connector is reserved (via ReserveNow); only the intended user/ID may start. This is not supported by the OCPP integration yet.
 * **Unavailable** – Intentionally set out of service (e.g., ChangeAvailability(Inoperative)) or temporarily not usable. (Entities remain available in Home Assistant.)
-* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details.
+* **Faulted** – A fault prevents charging (e.g., ground fault, over-temp, lock error). Check the sensor errorCode for details. (Entities remain available in Home Assistant.)
 
 Note
 In OCPP 1.6, `connectorId = 0` (station level) only uses Available, Unavailable, or Faulted.<br>
@@ -75,6 +75,29 @@ If your integration shows extra attributes on the connector status sensor like a
 ## Power readings
 
 Home Assistant shows active import, active export, and offered power in kilowatts. When a charger omits the unit for one of these readings, the integration assumes watts. This also applies to readings for individual phases. For example, a unitless reading of 500 on L1 and a reading of 0.75 kW on L2 contribute a total of 1.25 kW.
+
+## Authorization events
+
+Every authorization decision fires an `ocpp_authorization` event, so automations can react to accepted and rejected tags, for example to notify you when an unknown card is presented. With OCPP 1.6 this includes tags the charger accepts from its own list, which skip Authorize and only arrive with StartTransaction.
+
+The event data contains:
+
+* `charge_point_id`: the id the charger connects with
+* `connector_id`: the connector for an OCPP 1.6 StartTransaction, otherwise `null`, since Authorize carries no connector
+* `id_tag`: the presented tag
+* `authorization_status`: the answer sent to the charger, for example `Accepted`, `Blocked` or `Invalid`. OCPP 2.0.1 token types other than ISO14443, ISO15693 and Central are answered `Unknown`.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: ocpp_authorization
+    event_data:
+      authorization_status: Invalid
+actions:
+  - action: notify.notify
+    data:
+      message: "Rejected tag {{ trigger.event.data.id_tag }} at {{ trigger.event.data.charge_point_id }}"
+```
 
 ## Useful Entities for Wallbox Pulsar Plus
 

@@ -1,5 +1,6 @@
 """Representation of a OCPP 1.6 charging station."""
 
+import asyncio
 from datetime import datetime, timedelta, UTC
 import hashlib
 import logging
@@ -15,6 +16,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 import voluptuous as vol
 from websockets.asyncio.server import ServerConnection
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 
 from ocpp.routing import on
 from ocpp.v16 import call, call_result
@@ -31,7 +34,6 @@ from ocpp.v16.enums import (
     ClearChargingProfileStatus,
     ConfigurationStatus,
     DataTransferStatus,
-    Measurand,
     MessageTrigger,
     ReadingContext,
     RegistrationStatus,
@@ -61,6 +63,8 @@ from .enums import (
 from .const import (
     CentralSystemSettings,
     ChargerSystemSettings,
+    CONF_CPIDS,
+    CONF_MONITORED_VARIABLES,
     DEFAULT_MEASURAND,
     DEFAULT_MAX_CURRENT,
     DOMAIN,
@@ -201,6 +205,16 @@ class ChargePoint(cp):
             hass, _TX_STORE_VERSION, tx_store_key(entry.entry_id, id)
         )
         self._tx_store_load = None
+        # Smart Charging configuration keys the managed limits need (both
+        # required by OCPP 1.6 section 9.4), read on first use (#2148) and
+        # kept for the lifetime of this object, like the feature profiles and
+        # connector count read in post_connect. None means not read yet.
+        self._rate_units: tuple[bool, bool] | None = None  # (amps, watts)
+        # An int, or the charger's answer when it is not a number.
+        self._max_stack_level: int | str | None = None
+        # The library sends one request at a time, but two first limits would
+        # both read; the second waits for the first one's answer instead.
+        self._smart_charging_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Transaction identity, timing and containment (#2123)
@@ -417,6 +431,12 @@ class ChargePoint(cp):
             session_kwh = int(meter_stop) / 1000.0 - float(self._metrics[ms_key].value)
         except Exception:
             session_kwh = 0.0
+        # A stop below the start value can't be told apart from a
+        # session-relative meter, a meter replacement, a reset or a rollover,
+        # so keep the session value already derived instead of publishing a
+        # negative or the raw register.
+        if session_kwh < 0:
+            return
         self._metrics[(connector_id, csess.session_energy)].value = session_kwh
 
     def _forget_stop_candidate(self, connector_id: int) -> None:
@@ -590,12 +610,8 @@ class ChargePoint(cp):
     async def get_supported_measurands(self) -> str:
         """Get comma-separated list of measurands supported by the charger."""
 
-        def _filter_measurands(raw_csv: str) -> str:
-            """Keep only compliant measurands found as tokens in the charger's string."""
-            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
-            if not raw_csv or raw_csv.strip().lower() == "unknown":
-                return ""
-
+        def _match_measurands(raw_csv: str) -> list[str]:
+            """Return the compliant measurands found as tokens in the charger's string."""
             matched = []
             for token in raw_csv.split(","):
                 token = token.strip()
@@ -608,7 +624,15 @@ class ChargePoint(cp):
                         if m not in matched:
                             matched.append(m)
                         break  # Match found for this token, move to the next one
+            return matched
 
+        def _filter_measurands(raw_csv: str) -> str:
+            """Keep only compliant measurands found as tokens in the charger's string."""
+            # Protect against empty lists and the "Unknown" sentinel (checked by test_measurands_manual_set_rejected_returns_empty)
+            if not raw_csv or raw_csv.strip().lower() == "unknown":
+                return ""
+
+            matched = _match_measurands(raw_csv)
             if not matched:
                 _LOGGER.debug(
                     "Charger '%s' returned no valid measurands; falling back to %s.",
@@ -629,50 +653,81 @@ class ChargePoint(cp):
         effective_csv: str = ""
 
         if autodetect_measurands:
-            if desired_csv:
-                _LOGGER.debug(
-                    "'%s' attempting CSV set for measurands: %s", self.id, desired_csv
+            # Read the list the charger is set to sample, and never write it.
+            # OCPP 1.6 has no way to ask which measurands a charger supports,
+            # and few accept them all. Asking for the stored list and falling
+            # back to the charger's own on refusal left the stored list unable
+            # to grow, and writing it back on each connect undid any change
+            # made on the charger or with ocpp.configure. Choosing measurands
+            # is what manual configuration is for.
+            connection = self._connection
+            try:
+                raw_csv = await self.get_configuration(key, match_key=True)
+                problem = f"it returned {raw_csv!r}"
+            except ConnectionClosed:
+                # Setup can't carry on without the connection
+                raise
+            except Exception as ex:
+                # A timeout, a refusal or a reply that can't be used. The
+                # read is optional, so connecting carries on without it.
+                raw_csv = None
+                problem = f"the read failed: {ex!r}"
+            if self._connection is not connection or (
+                connection.state is not State.OPEN
+            ):
+                # The connection dropped or was replaced during the read, which
+                # can show as a timeout or not at all. Setup stops, as for any
+                # other failed read, without storing what came back, and the
+                # new connection runs its own.
+                raise HomeAssistantError(
+                    f"Connection to charger '{self.id}' closed while reading "
+                    "its measurands"
+                )
+            matched = _match_measurands(raw_csv) if isinstance(raw_csv, str) else []
+            if not matched:
+                # The read failed or gave nothing usable: an unknown key, an
+                # empty value, or only names the integration doesn't know.
+                # Keep the stored list rather than clear it or fall back to
+                # the energy register, which would remove sensors.
+                _LOGGER.warning(
+                    "Could not read the measurands charger '%s' samples (%s); "
+                    "keeping the stored measurands",
+                    self.id,
+                    problem,
+                )
+                # Read it from the entry, which holds what an earlier connect
+                # found. self.settings only catches up when the entry reloads.
+                for record in self.entry.data.get(CONF_CPIDS, []):
+                    if self.id in record:
+                        return record[self.id].get(
+                            CONF_MONITORED_VARIABLES, all_measurands
+                        )
+                return all_measurands
+            chgr_csv = ",".join(matched)
+            _LOGGER.debug("'%s' charger samples measurands: '%s'", self.id, chgr_csv)
+            if chgr_csv == DEFAULT_MEASURAND:
+                # Many chargers sample only the energy register out of the
+                # box, even when they support more, and nothing else would
+                # show that the other measurands are there to be chosen.
+                _LOGGER.warning(
+                    "Automatic detection found only %s on charger '%s'. If the "
+                    "charger supports more measurands, turn off automatic "
+                    "detection in the integration's options and choose them",
+                    DEFAULT_MEASURAND,
+                    self.id,
                 )
                 try:
-                    resp = await self.call(
-                        call.ChangeConfiguration(key=key, value=desired_csv)
+                    await self.notify_ha(
+                        f"Automatic detection found only {DEFAULT_MEASURAND} on "
+                        f"charger {self.id}. If the charger supports more "
+                        "measurands, turn off automatic detection in the "
+                        "integration's options and choose them."
                     )
-                    if getattr(resp, "status", None) in cfg_ok:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV accepted with status=%s",
-                            self.id,
-                            resp.status,
-                        )
-                        effective_csv = desired_csv
-                    else:
-                        _LOGGER.debug(
-                            "'%s' measurands CSV rejected with status=%s; falling back to GetConfiguration",
-                            self.id,
-                            getattr(resp, "status", None),
-                        )
                 except Exception as ex:
-                    _LOGGER.debug(
-                        "get_supported_measurands CSV set raised for '%s': %s",
-                        self.id,
-                        ex,
-                    )
-
-            # Read from charger and filter it using lenient logic
-            chgr_csv = await self.get_configuration(key)
-            chgr_csv = _filter_measurands(chgr_csv)
-
-            if not effective_csv:
-                _LOGGER.debug(
-                    "'%s' measurands not configurable by integration", self.id
-                )
-                _LOGGER.debug("'%s' allowed measurands: '%s'", self.id, chgr_csv)
-                return chgr_csv
-
-            _LOGGER.debug(
-                "Returning accepted measurands for '%s': '%s'", self.id, effective_csv
-            )
-            await self.configure(key, effective_csv)
-            return effective_csv
+                    # The warning above says the same, and a notification
+                    # mustn't stop setup
+                    _LOGGER.debug("Measurand notification failed: %r", ex)
+            return chgr_csv
 
         # Non-autodetect path:
         if desired_csv:
@@ -728,11 +783,23 @@ class ChargePoint(cp):
         """Get features supported by the charger."""
         features = prof.NONE
         req = call.GetConfiguration(key=[ckey.supported_feature_profiles])
-        resp = await self.call(req)
         try:
-            feature_list = (resp.configuration_key[0][om.value]).split(",")
-        except (IndexError, KeyError, TypeError):
-            feature_list = [""]
+            resp = await self.call(req)
+        except TimeoutError:
+            _LOGGER.warning(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            await self.notify_ha(
+                "No response to GetConfiguration for SupportedFeatureProfiles, "
+                "defaulting to Core"
+            )
+            feature_list = [om.feature_profile_core]
+        else:
+            try:
+                feature_list = (resp.configuration_key[0][om.value]).split(",")
+            except (IndexError, KeyError, TypeError):
+                feature_list = [""]
         if feature_list[0] == "":
             _LOGGER.warning("No feature profiles detected, defaulting to Core")
             await self.notify_ha("No feature profiles detected, defaulting to Core")
@@ -846,6 +913,65 @@ class ChargePoint(cp):
             _LOGGER.debug("ClearChargingProfile raised %s (ignored)", ex)
             return False
 
+    async def _read_config_key(self, key: str) -> str | None:
+        """Read a configuration key: its value, or None without one.
+
+        A failed read raises, naming the key.
+        """
+        try:
+            value = await self.get_configuration(key)
+        except Exception as ex:
+            raise HomeAssistantError(f"Could not read {key} ({ex!r})") from ex
+        return value if isinstance(value, str) and value else None
+
+    async def _smart_charging_config(self) -> tuple[tuple[bool, bool], int]:
+        """Return the accepted rate units and the reported maximum stack level.
+
+        Each is read once. A failed read, or an answer without a value, keeps
+        nothing, so the next limit reads again. There is no fallback stack
+        level: one below a profile the charger already holds would be
+        accepted without effect.
+        """
+        async with self._smart_charging_lock:
+            rate_units = self._rate_units
+            if rate_units is None:
+                units = await self._read_config_key(
+                    ckey.charging_schedule_allowed_charging_rate_unit
+                )
+                # No answer, "Unknown" or no known unit: Amps, as before.
+                rate_units = _allowed_charging_rate_units(units)
+                if units is not None:
+                    self._rate_units = rate_units
+            if self._max_stack_level is None:
+                level = await self._read_config_key(ckey.charge_profile_max_stack_level)
+                if level is None:
+                    raise HomeAssistantError(
+                        f"Charger returned no {ckey.charge_profile_max_stack_level}"
+                    )
+                if level == "Unknown":
+                    # get_configuration's answer for a key the charger lists
+                    # as unknown. Level 1 is what releases up to 0.12.x sent
+                    # such a charger, so profiles they left are replaced, and
+                    # stack_level_below_max still brings it down to 0.
+                    _LOGGER.warning(
+                        "Charger does not support %s; using stack level 1",
+                        ckey.charge_profile_max_stack_level,
+                    )
+                    self._max_stack_level = 1
+                else:
+                    try:
+                        self._max_stack_level = int(level)
+                    except ValueError:
+                        self._max_stack_level = level
+            max_stack_level = self._max_stack_level
+        if not isinstance(max_stack_level, int):
+            raise HomeAssistantError(
+                f"Charger reported {ckey.charge_profile_max_stack_level}"
+                f" {max_stack_level!r}; OCPP 1.6 requires a number for smart"
+                " charging"
+            )
+        return rate_units, max_stack_level
+
     async def _resolve_charge_rate(
         self,
         limit_amps: int | float | None,
@@ -853,14 +979,8 @@ class ChargePoint(cp):
         conn_id: int,
     ) -> tuple[str, float, int]:
         """Resolve units, electrical conversion and stack level for managed limits."""
-        # Determine allowed unit (default to Amps if not reported)
-        units_resp = await self.get_configuration(
-            ckey.charging_schedule_allowed_charging_rate_unit
-        )
-        if not units_resp:
-            _LOGGER.debug("Charging rate unit not reported; assuming Amps")
-
-        supports_amps, supports_watts = _allowed_charging_rate_units(units_resp)
+        rate_units, stack_level = await self._smart_charging_config()
+        supports_amps, supports_watts = rate_units
         # Watt-only chargers (Huawei FusionCharge reports "Power") must not
         # fall back to the old limit_watts=22000 default when the HA number
         # entity passes only limit_amps.
@@ -896,13 +1016,11 @@ class ChargePoint(cp):
             else ChargingRateUnitType.watts.value
         )
 
-        try:
-            stack_level_resp = await self.get_configuration(
-                ckey.charge_profile_max_stack_level
-            )
-            stack_level = int(stack_level_resp)
-        except Exception:
-            stack_level = 1
+        # The 1.6 spec reads as both a maximum value and a count; some
+        # chargers (Timxon A0, Morek MEV11, ABB Terra AC) take it as a count.
+        if self.settings.stack_level_below_max:
+            stack_level -= 1
+        stack_level = max(0, stack_level)
 
         return units_value, limit_value, stack_level
 
@@ -956,7 +1074,7 @@ class ChargePoint(cp):
                 if source_watts is not None
                 else float(limit_amps)
             ),
-            "stack_level": max(0, int(stack_level)),
+            "stack_level": int(stack_level),
             "target": connector_id,
             "conversion_voltage": voltage if converted else None,
             "conversion_phases": phases if converted else None,
@@ -987,35 +1105,82 @@ class ChargePoint(cp):
             },
         )
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
-        """Set only a station ceiling; transaction defaults cannot replace one."""
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build a Relative TxDefaultProfile for one connector.
+
+        It is the shape 0.11.4 sent after a refused station ceiling, which
+        chargers in #2158 apply.
+        """
+        return call.SetChargingProfile(
+            connector_id=int(connector_id),
+            cs_charging_profiles={
+                om.charging_profile_id: int(profile_id),
+                om.stack_level: int(prepared["stack_level"]),
+                om.charging_profile_kind: ChargingProfileKindType.relative.value,
+                om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
+                om.charging_schedule: {
+                    om.charging_rate_unit: prepared["unit"],
+                    om.charging_schedule_period: [
+                        {om.start_period: 0, om.limit: prepared["value"]}
+                    ],
+                },
+            },
+        )
+
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
+        """Set only a station ceiling; transaction defaults cannot replace one.
+
+        conn_id only picks the connector whose measurements convert between
+        amps and watts; the profile is always on connector 0.
+        """
         try:
             if not (int(self.supported_features or 0) & prof.SMART):
                 raise HomeAssistantError(
                     "Smart charging is not supported by this charger"
                 )
             units, limit, stack_level = await self._resolve_charge_rate(
-                limit_amps, None, 0
+                limit_amps, limit_watts, conn_id
             )
             req = self._station_charge_rate_request(units, limit, stack_level)
             # _get_specific_response already raises CALLERRORs. Be explicit
             # here so preserving the charger's reason does not rely on it.
             resp = await self.call(req, suppress=False)
             status = resp.status
+        except TimeoutError as ex:
+            # The library's text carries the whole outgoing frame.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_charge_rate_error",
+                translation_placeholders={
+                    "message": "the charger did not answer the station limit"
+                },
+            ) from ex
         except Exception as ex:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={"message": str(ex)},
             ) from ex
         if status != ChargingProfileStatus.accepted:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="set_variables_error",
+                translation_key="set_charge_rate_error",
                 translation_placeholders={
                     "message": f"ChargePointMaxProfile: {status}"
+                    f"{self._stack_level_hint(stack_level, status)}"
                 },
             )
+        self._note_accepted_stack_level(stack_level)
         return True
 
     async def set_charge_rate(
@@ -1027,140 +1192,41 @@ class ChargePoint(cp):
     ) -> bool:
         """Set charge rate."""
         if profile is not None:
+            # A refusal raises with the charger's status, as on 2.0.1 and the
+            # managed path, so the action's caller sees why.
             try:
                 req = call.SetChargingProfile(
                     connector_id=int(conn_id), cs_charging_profiles=profile
                 )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    return True
-                _LOGGER.warning("Custom SetChargingProfile rejected: %s", resp.status)
-            except Exception as ex:
-                _LOGGER.warning("Custom SetChargingProfile failed: %s", ex)
-                await self.notify_ha(
-                    "Warning: Set charging profile failed with response Exception"
-                )
-            return False
-
-        if not (int(self.supported_features or 0) & prof.SMART):
-            _LOGGER.info("Smart charging is not supported by this charger")
-            return False
-
-        units_value, limit_value, stack_level = await self._resolve_charge_rate(
-            limit_amps, limit_watts, conn_id
-        )
-
-        # Helper to build a simple relative schedule with one period
-        def _mk_schedule(_units: str, _limit: float) -> dict:
-            return {
-                om.charging_rate_unit: _units,
-                om.charging_schedule_period: [{om.start_period: 0, om.limit: _limit}],
-            }
-
-        # Helper to generate a unique, stable chargingProfileId per purpose+connector
-        def _profile_id(purpose: str, cid: int) -> int:
-            base = {
-                ChargingProfilePurposeType.charge_point_max_profile.value: 1000,
-                ChargingProfilePurposeType.tx_default_profile.value: 2000,
-                ChargingProfilePurposeType.tx_profile.value: 3000,
-            }.get(purpose, 9000)
-            try:
-                n = int(cid or 0)
-            except Exception:
-                n = 0
-            return base + max(0, n)
-
-        # Try ChargePointMaxProfile (connectorId = 0)
-        try:
-            req = self._station_charge_rate_request(
-                units_value, limit_value, stack_level
-            )
-            resp = await self.call(req)
-            if resp.status == ChargingProfileStatus.accepted:
-                return True
-            _LOGGER.debug(
-                "ChargePointMaxProfile not accepted (%s); will continue.",
-                resp.status,
-            )
-        except Exception as ex:
-            _LOGGER.debug("ChargePointMaxProfile call raised: %s", ex)
-
-        # Target connector (default 1 if unspecified/0)
-        target_cid = int(conn_id) if conn_id and int(conn_id) > 0 else 1
-
-        # Read active transaction on this connector. A held connector's id may
-        # belong to a transaction that has already ended, so no profile is
-        # bound to it until the charger settles the connector.
-        try:
-            active_tx_id = int(self._active_tx.get(target_cid, 0) or 0)
-        except Exception:
-            active_tx_id = 0
-        if target_cid in self._tx_indeterminate:
-            active_tx_id = 0
-
-        txp_ok = False
-        txd_ok = False
-
-        # If an active transaction exists on this connector, try TxProfile first (affects ongoing charging)
-        if active_tx_id > 0:
-            try:
-                txp_stack = max(1, stack_level)  # keep same or higher than defaults
-                req = call.SetChargingProfile(
-                    connector_id=target_cid,
-                    cs_charging_profiles={
-                        om.charging_profile_id: _profile_id(
-                            ChargingProfilePurposeType.tx_profile.value, target_cid
-                        ),
-                        om.stack_level: txp_stack,
-                        om.charging_profile_kind: ChargingProfileKindType.relative.value,
-                        om.charging_profile_purpose: ChargingProfilePurposeType.tx_profile.value,
-                        om.charging_schedule: _mk_schedule(units_value, limit_value),
-                        # Bind to the ongoing transaction
-                        om.transaction_id: active_tx_id,
+                resp = await self.call(req, suppress=False)
+                status = resp.status
+            except TimeoutError as ex:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={
+                        "message": "the charger did not answer the custom profile"
                     },
-                )
-                resp = await self.call(req)
-                if resp.status == ChargingProfileStatus.accepted:
-                    txp_ok = True
-                else:
-                    _LOGGER.debug("TxProfile not accepted (%s).", resp.status)
+                ) from ex
             except Exception as ex:
-                _LOGGER.debug("TxProfile call raised: %s.", ex)
-
-        # Always attempt TxDefaultProfile as well (for future sessions)
-        try:
-            tx_stack = max(
-                1, stack_level - 1
-            )  # slightly lower to avoid overriding TxProfile
-            req = call.SetChargingProfile(
-                connector_id=target_cid,
-                cs_charging_profiles={
-                    om.charging_profile_id: _profile_id(
-                        ChargingProfilePurposeType.tx_default_profile.value, target_cid
-                    ),
-                    om.stack_level: tx_stack,
-                    om.charging_profile_kind: ChargingProfileKindType.relative.value,
-                    om.charging_profile_purpose: ChargingProfilePurposeType.tx_default_profile.value,
-                    om.charging_schedule: _mk_schedule(units_value, limit_value),
-                },
-            )
-            resp = await self.call(req)
-            if resp.status == ChargingProfileStatus.accepted:
-                txd_ok = True
-            else:
-                _LOGGER.debug("Set TxDefaultProfile rejected: %s", resp.status)
-                if txp_ok:
-                    _LOGGER.debug(
-                        f"Note: Active TxProfile applied, but TxDefaultProfile was rejected ({resp.status})."
-                    )
-        except Exception as ex:
-            _LOGGER.debug("Set TxDefaultProfile failed: %s", ex)
-            if txp_ok:
-                _LOGGER.debug(
-                    f"Note: Active TxProfile applied, but TxDefaultProfile failed: {ex}"
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={"message": f"custom profile: {ex}"},
+                ) from ex
+            if status != ChargingProfileStatus.accepted:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="set_charge_rate_error",
+                    translation_placeholders={"message": f"custom profile: {status}"},
                 )
+            return True
 
-        return bool(txp_ok or txd_ok)
+        # The managed limit is the station ceiling only, the profile Maximum
+        # Current writes. Per-connector limits have their own entity, Session
+        # Current Limit, so a refused ceiling is an error rather than a
+        # fallback onto the profiles that entity owns.
+        return await self.set_station_charge_rate(limit_amps, limit_watts, conn_id)
 
     async def set_availability(self, state: bool = True, connector_id: int | None = 0):
         """Change availability."""
@@ -1423,32 +1489,50 @@ class ChargePoint(cp):
             )
             return False
 
-    async def get_configuration(self, key: str = "") -> str | dict | None:
+    async def get_configuration(
+        self, key: str = "", match_key: bool = False
+    ) -> str | dict | None:
         """Get Configuration of charger for supported keys.
 
         When key is empty, returns a dict of all configuration key-value pairs.
         When key is specified, returns the value as a string.
+
+        With match_key, the value comes from the row for the key asked for
+        rather than the first row, and a row without a value reads as "".
+        A reply without that row is treated as one without the key, and only
+        that key listed as unknown counts as unknown.
         """
         if key == "":
             req = call.GetConfiguration()
         else:
             req = call.GetConfiguration(key=[key])
         resp = await self.call(req)
-        if resp.configuration_key:
+        rows = resp.configuration_key
+        if rows and key and match_key:
+            # Some chargers send other keys too, or first
+            rows = [
+                {**entry, om.value: entry.get(om.value, "")}
+                for entry in rows
+                if str(entry.get(om.key, "")).lower() == key.lower()
+            ][:1]
+        if rows:
             if key == "":
                 result = {}
-                for entry in resp.configuration_key:
+                for entry in rows:
                     entry_key = entry.get("key", "")
                     entry_value = entry.get(om.value, "")
                     result[entry_key] = entry_value
                 _LOGGER.debug("Get Configuration returned %d keys", len(result))
                 return result
-            value = resp.configuration_key[0][om.value]
+            value = rows[0][om.value]
             _LOGGER.debug("Get Configuration for %s: %s", key, value)
             self._metrics[0][cdet.config_response].value = datetime.now(tz=UTC)
             self._metrics[0][cdet.config_response].extra_attr = {key: value}
             return value
-        if resp.unknown_key:
+        unknown = resp.unknown_key
+        if unknown and key and match_key:
+            unknown = [k for k in unknown if str(k).lower() == key.lower()]
+        if unknown:
             _LOGGER.warning("Get Configuration returned unknown key for: %s", key)
             await self.notify_ha(f"Warning: charger reports {key} is unknown")
             return "Unknown"
@@ -1520,11 +1604,17 @@ class ChargePoint(cp):
 
         self._ensure_tx_store_loaded()
         transaction_id: int = int(kwargs.get(om.transaction_id.name, 0) or 0)
-        tx_has_id: bool = transaction_id not in (None, 0)
-        if tx_has_id:
+        if transaction_id:
             # Seeing an id, including on closing values, is enough to keep a
             # later allocation clear of it; it does not make the id live.
             self._note_transaction_id(transaction_id)
+        if connector_id == 0:
+            # Connector 0 is the charge point itself and never runs a
+            # transaction. A charger may still tag its station meter with the
+            # running session's id; adopting it would record that id on two
+            # connectors, and the StopTransaction could then not be attributed.
+            transaction_id = 0
+        tx_has_id: bool = transaction_id not in (None, 0)
         tx_end_context = any(
             sampled_value.get(om.context) == ReadingContext.transaction_end.value
             for bucket in meter_value
@@ -1553,6 +1643,12 @@ class ChargePoint(cp):
                 except (ValueError, TypeError):
                     value = None
             self._metrics[ms_key].value = value
+
+        if connector_id == 0 and self._metrics[tx_key].value is None:
+            # Nor may connector 0 restore one: its HA fallback is the flattened
+            # sensor, which on a single-connector charger shows connector 1's
+            # session.
+            self._metrics[tx_key].value = 0
 
         if self._metrics[tx_key].value is None:
             value = self.get_ha_metric(csess.transaction_id, connector_id)
@@ -1748,6 +1844,7 @@ class ChargePoint(cp):
             if status in (
                 ChargePointStatus.suspended_ev.value,
                 ChargePointStatus.suspended_evse.value,
+                ChargePointStatus.faulted.value,
             ):
                 self._zero_flow_measurands(connector_id)
 
@@ -1806,7 +1903,7 @@ class ChargePoint(cp):
         """Handle a Start Transaction request."""
 
         self._ensure_tx_store_loaded()
-        auth_status = self.get_authorization_status(id_tag)
+        auth_status = self.get_authorization_status(id_tag, connector_id)
         if auth_status == AuthorizationStatus.accepted.value:
             tx_id = self._allocate_transaction_id()
             self._ended_tx.pop(connector_id, None)
@@ -1834,6 +1931,18 @@ class ChargePoint(cp):
                 meter_start_kwh = 0.0
             self._metrics[(connector_id, csess.meter_start)].value = meter_start_kwh
             self._metrics[(connector_id, csess.meter_start)].unit = HA_ENERGY_UNIT
+            # The energy reporting mode is detected from MeterValues, so a
+            # detection made in an earlier transaction must not decide how
+            # this one is read. The flag is charger-wide, so it is kept while a
+            # transaction is still running on another connector: that session
+            # may be the one it was detected on. Connector 0 is the main meter
+            # and never holds a transaction of its own.
+            if not any(
+                tx
+                for conn, tx in self._active_tx.items()
+                if conn not in (0, connector_id)
+            ):
+                self._charger_reports_session_energy = False
 
             self._metrics[(connector_id, csess.session_time)].value = 0
             self._metrics[(connector_id, csess.session_time)].unit = UnitOfTime.MINUTES
@@ -1933,17 +2042,3 @@ class ChargePoint(cp):
         self._metrics[0][cstat.heartbeat].value = now
         self._async_refresh_metric_entities([cstat.heartbeat])
         return call_result.Heartbeat(current_time=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
-
-    def _zero_flow_measurands(self, connector_id: int) -> None:
-        """Clear the readings that only have meaning while current is flowing."""
-        for meas in [
-            Measurand.current_import.value,
-            Measurand.power_active_import.value,
-            Measurand.power_reactive_import.value,
-            Measurand.current_export.value,
-            Measurand.power_active_export.value,
-            Measurand.power_reactive_export.value,
-        ]:
-            key = (connector_id, meas)
-            if key in self._metrics:
-                self._metrics[key].value = 0

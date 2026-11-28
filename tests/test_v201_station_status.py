@@ -108,3 +108,25 @@ async def test_malformed_ids_are_dropped_not_crashed_or_misattributed(
     assert cp._pending_status_notifications == []
     assert cp._metrics[(0, cstat.status)].value is None
     assert cp._connector_status == []
+
+
+@pytest.mark.asyncio
+async def test_status_notification_tolerates_custom_data(hass):
+    """Optional customData must not raise TypeError (KEBA / OCPP customData).
+
+    The ocpp library snake_cases customData to custom_data and passes it as a
+    keyword. Without **kwargs the handler crashes and the CSMS replies
+    InternalError instead of StatusNotification.conf.
+    """
+    cp = _mk_cp(hass)
+
+    resp = cp.on_status_notification(
+        timestamp="2026-01-01T00:00:00Z",
+        connector_status="Available",
+        evse_id=0,
+        connector_id=0,
+        custom_data={"vendor_id": "Keba AG"},
+    )
+
+    assert resp is not None
+    assert cp._metrics[(0, cstat.status)].value == "Available"

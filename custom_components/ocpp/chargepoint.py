@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
 import logging
@@ -20,6 +21,7 @@ from homeassistant.const import UnitOfTime
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import slugify
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import WebSocketException
 from websockets.protocol import State
@@ -55,6 +57,7 @@ from .const import (
     CONF_DEFAULT_AUTH_STATUS,
     CONF_ID_TAG,
     CONF_MONITORED_VARIABLES,
+    CONF_MONITORED_VARIABLES_AUTOCONFIG,
     CONF_NUM_CONNECTORS,
     CONF_CPIDS,
     CONFIG,
@@ -65,6 +68,8 @@ from .const import (
     DEFAULT_POWER_UNIT,
     DEFAULT_MEASURAND,
     DOMAIN,
+    MEASURANDS,
+    EVENT_AUTHORIZATION,
     HA_ENERGY_UNIT,
     HA_POWER_UNIT,
     UNITS_OCCP_TO_HA,
@@ -87,17 +92,28 @@ _PHASE_KEY_GROUPS = (
 )
 
 
+# Allow 10 Wh quantization in EAIR samples versus meterStart reported in Wh.
+SESSION_ENERGY_DETECT_TOLERANCE = 0.01  # kWh
+
 SESSION_PROFILE_BASE_ID = 3000
 
 
-def session_profile_id(connector_id: int) -> int:
-    """Return the profile id a connector's session limit uses on both protocols.
+def _measurand_list(csv: str) -> list[str]:
+    """Return the measurands in a comma-separated list, as sensor setup reads it."""
+    return list(dict.fromkeys(m.strip() for m in str(csv).split(",") if m.strip()))
 
-    It is the id the 1.6 ``ocpp.set_charge_rate`` action already uses for its
-    TxProfile leg, so a connector has one session limit whichever way it is
-    set.
-    """
+
+def session_profile_id(connector_id: int) -> int:
+    """Return the profile id a connector's session limit uses on both protocols."""
     return SESSION_PROFILE_BASE_ID + int(connector_id)
+
+
+SESSION_DEFAULT_PROFILE_BASE_ID = 2000
+
+
+def session_default_profile_id(connector_id: int) -> int:
+    """Return the profile id a connector's default session limit uses on both protocols."""
+    return SESSION_DEFAULT_PROFILE_BASE_ID + int(connector_id)
 
 
 class Metric:
@@ -293,6 +309,10 @@ class ChargePoint(cp):
         # Indicates if the charger requires a reboot to apply new
         # configuration.
         self._requires_reboot = False
+        # Stack levels at which the charger has accepted a profile since
+        # Home Assistant started. A charger that accepted one at a level does
+        # not refuse that level, so a later refusal there has another cause.
+        self._accepted_stack_levels: set[int] = set()
         self.preparing = asyncio.Event()
         self.active_transaction_id: int = 0
         self.triggered_boot_notification = False
@@ -324,6 +344,8 @@ class ChargePoint(cp):
         # completes and charging continues.
         self._remote_id_tag = "".join(secrets.choice(alphabet) for i in range(16))
         self.num_connectors: int = DEFAULT_NUM_CONNECTORS
+        # Measurands seen in meter values, so each is checked once per load
+        self._received_measurands: set[str] = set()
         self.session_controller = None
         # Counts BootNotifications. A rebooted charger may reuse transaction
         # ids, so anything keyed on an id alone must also carry this number.
@@ -371,27 +393,42 @@ class ChargePoint(cp):
         """Logic to be executed right after a charger connects."""
         try:
             _LOGGER.debug("'%s' starting post connection setup", self.id)
+            # What this setup started on, so a late result can be told apart
+            connection = self._connection
             self.status = STATE_OK
             await self.fetch_supported_features()
             self.num_connectors = await self.get_number_of_connectors()
             for conn in range(1, self.num_connectors + 1):
                 self._init_connector_slots(conn)
             self._metrics[(0, cdet.connectors)].value = self.num_connectors
+            # The count isn't saved: that would move a multi-connector
+            # charger's entities to a device per connector at the next load,
+            # with new entity ids, which needs its own change (#2268). It used
+            # to be changed in the entry's data in place, where any save of
+            # the entry would carry it. So it's kept outside the entry, as
+            # soon as it's found, and the setup after a reload reads it there.
+            # Only while this charger and connection are still the live ones,
+            # the connection is still open, and the charger is still set up:
+            # this setup isn't cancelled when they're replaced, the charger
+            # drops off or its device is removed. A fallback from a read that
+            # never reached the charger mustn't overwrite a count it reported,
+            # and a removed charger's count mustn't come back for another one
+            # added with the same OCPP id.
+            central = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+            if (
+                central is not None
+                and central.charge_points.get(self.id) is self
+                and self._connection is connection
+                and getattr(connection, "state", None) is State.OPEN
+                and self._charger_record() is not None
+            ):
+                central.found_connectors[self.id] = int(self.num_connectors)
             await self.get_heartbeat_interval()
 
             accepted_measurands: str = await self.get_supported_measurands()
-            updated_entry = {**self.entry.data}
-            for i in range(len(updated_entry[CONF_CPIDS])):
-                if self.id in updated_entry[CONF_CPIDS][i]:
-                    s = updated_entry[CONF_CPIDS][i][self.id]
-                    if s.get(CONF_MONITORED_VARIABLES) != accepted_measurands or s.get(
-                        CONF_NUM_CONNECTORS
-                    ) != int(self.num_connectors):
-                        s[CONF_MONITORED_VARIABLES] = accepted_measurands
-                        s[CONF_NUM_CONNECTORS] = int(self.num_connectors)
-                    break
-            # if an entry differs this will unload/reload and stop/restart the central system/websocket
-            self.hass.config_entries.async_update_entry(self.entry, data=updated_entry)
+            new_measurands = self._store_new_measurands(accepted_measurands)
+            if new_measurands:
+                await self._warn_new_measurands(new_measurands)
 
             await self.set_standard_configuration()
 
@@ -434,6 +471,126 @@ class ChargePoint(cp):
         except Exception as e:
             _LOGGER.debug("post_connect aborted non-fatally: %s", e)
 
+    def _charger_record(self) -> dict | None:
+        """Return this charger's record in the config entry, as it is now."""
+        for item in self.entry.data.get(CONF_CPIDS, []):
+            if self.id in item:
+                return item[self.id]
+        return None
+
+    def _store_new_measurands(self, found: str) -> list[str]:
+        """Save measurands found that aren't stored yet, and return them.
+
+        With automatic detection on, the stored list only grows (#2258).
+        Values also arrive in clock-aligned data, so a measurand missing from
+        what setup found can still have a live sensor, and nothing stored is
+        removed. With it off, the stored selection is
+        left alone. The setting is read from the record as it is now, not as
+        it was when this setup started.
+
+        Sensors are created when the integration loads, so the new ones appear
+        at the next reload. The save doesn't reload the entry itself: that
+        would restart the central system and reconnect every charger on it.
+        """
+        record = self._charger_record()
+        if record is None or not found:
+            return []
+        if not record.get(
+            CONF_MONITORED_VARIABLES_AUTOCONFIG,
+            self.settings.monitored_variables_autoconfig,
+        ):
+            return []
+        stored = _measurand_list(record.get(CONF_MONITORED_VARIABLES, ""))
+        # Only names the integration knows, so the options can show them all
+        new = [m for m in _measurand_list(found) if m in MEASURANDS and m not in stored]
+        if not new:
+            return []
+        # Copy the records too. Changing them in place would change
+        # entry.data as well, so async_update_entry would see no difference
+        # and save nothing.
+        updated = deepcopy(dict(self.entry.data))
+        for item in updated.get(CONF_CPIDS, []):
+            if self.id in item:
+                item[self.id][CONF_MONITORED_VARIABLES] = ",".join(stored + new)
+                break
+        central = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if central is not None and self.entry.update_listeners:
+            # Tells the update listener this save needs no reload. Without a
+            # listener yet, nothing reloads anyway, and a marker left behind
+            # could make it skip a later change.
+            central.saved_by_setup = updated
+        self.hass.config_entries.async_update_entry(self.entry, data=updated)
+        return new
+
+    def _note_received_measurands(self, names: set[str]):
+        """Make sure measurands the charger sends aren't silently dropped (#2258).
+
+        Values can arrive for a measurand with no sensor, for example in
+        clock-aligned data. With automatic detection on, it's added like one
+        setup found, and with it off, a warning says it isn't selected. One
+        that can't be selected, like an OCPP 2.0.1-only measurand, gets a
+        warning too, unless it's stored, which gives it a sensor. Each is
+        checked once per load, unless saving it fails.
+        """
+        names = set(names) - self._received_measurands
+        if not names:
+            return
+        self._received_measurands |= names
+        record = self._charger_record()
+        if record is None:
+            return
+        stored = _measurand_list(record.get(CONF_MONITORED_VARIABLES, ""))
+        unsupported = sorted(n for n in names if n not in MEASURANDS + stored)
+        if unsupported:
+            _LOGGER.warning(
+                "Charger '%s' sends %s, which the integration has no sensors "
+                "for, so the values aren't shown",
+                self.id,
+                ", ".join(unsupported),
+            )
+        unsensored = [n for n in MEASURANDS if n in names and n not in stored]
+        if not unsensored:
+            return
+        try:
+            new = self._store_new_measurands(",".join(unsensored))
+        except Exception as ex:
+            # The readings with them are still processed, and they're checked
+            # again with the next values
+            self._received_measurands -= set(unsensored)
+            _LOGGER.warning(
+                "Couldn't save the measurands charger '%s' sends: %s", self.id, ex
+            )
+            return
+        if new:
+            self.hass.async_create_task(self._warn_new_measurands(new))
+        else:
+            _LOGGER.warning(
+                "Charger '%s' sends %s, which isn't among the chosen measurands, "
+                "so it has no sensor. Select it in the integration's options to "
+                "add one",
+                self.id,
+                ", ".join(unsensored),
+            )
+
+    async def _warn_new_measurands(self, new: list[str]):
+        """Say which measurands were added, and that a reload adds their sensors."""
+        names = ", ".join(new)
+        _LOGGER.warning(
+            "Charger '%s' reports %s, which had no sensors. They are now "
+            "stored, and reloading the integration adds their sensors",
+            self.id,
+            names,
+        )
+        try:
+            await self.notify_ha(
+                f"Charger {self.id} reports {names}, which had no sensors. "
+                "Reload the OCPP integration to add them."
+            )
+        except Exception as ex:
+            # The warning above says the same, and a notification mustn't
+            # stop setup
+            _LOGGER.debug("New measurand notification failed: %r", ex)
+
     async def trigger_boot_notification(self):
         """Trigger a boot notification."""
         pass
@@ -449,11 +606,21 @@ class ChargePoint(cp):
         """Trigger message request with a custom message."""
         pass
 
-    async def clear_profile(self):
-        """Clear all charging profiles."""
+    async def clear_profile(self, conn_id: int | None = None):
+        """Clear all charging profiles.
+
+        conn_id is accepted for protocol-agnostic callers (e.g. the HA
+        clear_profile service) but is only meaningful for OCPP 1.6; OCPP 2.0.1
+        clears station-wide profiles regardless of connector.
+        """
         pass
 
-    async def set_station_charge_rate(self, limit_amps: int | float) -> bool:
+    async def set_station_charge_rate(
+        self,
+        limit_amps: int | float | None,
+        limit_watts: int | float | None = None,
+        conn_id: int = 0,
+    ) -> bool:
         """Set the station-wide maximum current without transaction fallbacks."""
         raise NotImplementedError
 
@@ -489,6 +656,64 @@ class ChargePoint(cp):
     ):
         """Build the protocol's SetChargingProfile for a transaction-bound limit."""
         raise NotImplementedError
+
+    def build_session_default_request(
+        self,
+        connector_id: int,
+        profile_id: int,
+        prepared: dict,
+    ):
+        """Build the protocol's SetChargingProfile for a connector default limit."""
+        raise NotImplementedError
+
+    def session_default_target_known(self, connector_id: int) -> bool:
+        """Return whether the charger has said where the connector's profile goes.
+
+        A default profile outlives the request, so it must not be sent to a
+        guessed target. 1.6 addresses the connector itself; 2.0.1 overrides.
+        """
+        return True
+
+    async def set_session_default_limit(
+        self, connector_id: int, limit_amps: float
+    ) -> bool:
+        """Set a TxDefaultProfile on the connector, with or without a transaction.
+
+        For chargers that refuse both the station ceiling and a TxProfile but
+        accept a connector default, which they also apply to the running
+        transaction. Returns True only for an Accepted reply; anything else
+        raises a HomeAssistantError, as set_session_limit does. The profile
+        stays on the charger until it is replaced; nothing is cleared.
+        """
+        conn = int(connector_id)
+        prepared = await self.prepare_session_limit(conn, float(limit_amps))
+        # Preparation waits for the charger's inventory, which is what
+        # settles the target on 2.0.1, so it is checked after it.
+        if not self.session_default_target_known(conn):
+            raise HomeAssistantError(
+                f"the charger has not reported which EVSE connector {conn} is on"
+            )
+        request = self.build_session_default_request(
+            conn, session_default_profile_id(conn), prepared
+        )
+        try:
+            resp = await self.call(request)
+        except TimeoutError as ex:
+            raise HomeAssistantError(
+                f"the charger did not answer the default limit for connector {conn}"
+            ) from ex
+        except Exception as ex:
+            raise HomeAssistantError(
+                f"default limit for connector {conn} failed: {ex}"
+            ) from ex
+        status = getattr(resp, "status", None)
+        if status == ChargingProfileStatus.accepted:
+            self._note_accepted_stack_level(int(prepared["stack_level"]))
+            return True
+        raise HomeAssistantError(
+            f"charger rejected the default limit for connector {conn} ({status})"
+            + self._stack_level_hint(int(prepared["stack_level"]), status)
+        )
 
     async def set_session_limit(self, connector_id: int, limit_amps: float) -> bool:
         """Bind a TxProfile to the connector's displayed transaction.
@@ -534,9 +759,11 @@ class ChargePoint(cp):
         status = getattr(resp, "status", None)
         # Both protocols answer with the same word, so the 1.6 enum serves both.
         if status == ChargingProfileStatus.accepted:
+            self._note_accepted_stack_level(int(prepared["stack_level"]))
             return True
         raise HomeAssistantError(
             f"charger rejected the session limit for connector {conn} ({status})"
+            + self._stack_level_hint(int(prepared["stack_level"]), status)
         )
 
     async def set_charge_rate(
@@ -769,6 +996,8 @@ class ChargePoint(cp):
         """Share teardown and finish it even if a waiter is repeatedly cancelled."""
         if session is self._session:
             self.status = STATE_UNAVAILABLE
+            # Entities don't poll, so they only learn this from an update.
+            self.hass.async_create_task(self.update(self.settings.cpid))
         if session["cleanup"] is None:
             session["cleanup"] = asyncio.create_task(
                 self._close_session(session, asyncio.current_task())
@@ -848,6 +1077,8 @@ class ChargePoint(cp):
                 return
             self._reset_protocol_generation_state()
             self.status = STATE_OK
+            # A reconnecting charger may stay silent for a long time.
+            self.hass.async_create_task(self.update(self.settings.cpid))
             self._connection = connection
             self._metrics[(0, cstat.reconnects)].value += 1
             installed = True
@@ -1015,14 +1246,36 @@ class ChargePoint(cp):
                     continue
                 active_entities.add(ent.entity_id)
 
-            for dev in dr.devices.values():
+            for dev in device_registry.async_entries_for_config_entry(
+                dr, self.entry.entry_id
+            ):
                 if dev.via_device_id == dev_id and dev.id not in visited:
                     to_visit.append(dev.id)
 
         async_dispatcher_send(self.hass, DATA_UPDATED, active_entities)
 
-    def get_authorization_status(self, id_tag):
-        """Get the authorization status for an id_tag."""
+    def get_authorization_status(self, id_tag, connector_id=None):
+        """Get the authorization status for an id_tag and fire it as an event."""
+        auth_status = self._lookup_authorization_status(id_tag)
+        # Tags the charger accepts locally skip Authorize and only arrive
+        # with StartTransaction, so the event cannot live in on_authorize.
+        self.fire_authorization_event(id_tag, auth_status, connector_id)
+        return auth_status
+
+    def fire_authorization_event(self, id_tag, auth_status, connector_id=None):
+        """Fire an ocpp_authorization event for an authorization decision."""
+        self.hass.bus.async_fire(
+            EVENT_AUTHORIZATION,
+            {
+                "charge_point_id": self.id,
+                "connector_id": connector_id,
+                "id_tag": id_tag,
+                "authorization_status": auth_status,
+            },
+        )
+
+    def _lookup_authorization_status(self, id_tag):
+        """Look up the authorization status for an id_tag."""
         # authorize if its the tag of this charger used for remote start_transaction
         if id_tag == self._remote_id_tag:
             return AuthorizationStatus.accepted.value
@@ -1070,6 +1323,36 @@ class ChargePoint(cp):
                 return metric
         return None
 
+    def _note_accepted_stack_level(self, stack_level: int) -> None:
+        """Remember that the charger takes profiles at this level."""
+        self._accepted_stack_levels.add(int(stack_level))
+
+    def _stack_level_hint(self, stack_level: int, status=None) -> str:
+        """Name the level of a refused profile and, on 1.6, maybe the option.
+
+        The option is for chargers that read the 1.6 ChargeProfileMaxStackLevel
+        as a count, so it is suggested only on 1.6, while it is off, and above
+        level 0. Only for a Rejected or NotSupported reply: ABB Terra AC
+        answers Rejected at its reported maximum, Timxon A0 and Morek MEV11
+        answer NotSupported. And not once the charger has accepted a profile at
+        this level, which proves the level is not the cause.
+        """
+        hint = f" at stackLevel {stack_level}"
+        if (
+            self._ocpp_version == "1.6"
+            and stack_level > 0
+            and not self.settings.stack_level_below_max
+            and status
+            in (ChargingProfileStatus.rejected, ChargingProfileStatus.not_supported)
+            and stack_level not in self._accepted_stack_levels
+        ):
+            hint += (
+                ". Some chargers accept only levels below the maximum they"
+                " report; if this one does, enable 'Charger accepts only stack"
+                " levels below its reported maximum' in the charger options"
+            )
+        return hint
+
     def _line_voltage(self, conn_id: int) -> float:
         """Return a plausible line-to-neutral voltage, or the 230 V default."""
         metric = self._lookup_metric(Measurand.voltage.value, conn_id)
@@ -1083,7 +1366,13 @@ class ChargePoint(cp):
         return _DEFAULT_LINE_VOLTAGE
 
     def _phase_count(self, conn_id: int) -> int:
-        """Count electrically active phases; conservatively default to one."""
+        """Count electrically active phases, or three if the charger is set so."""
+        if self.settings.three_phase_supply:
+            # Meter values don't always show the wiring: none survive a
+            # restart, and a one-phase car can show as one phase. A
+            # three-phase power-only charger sent a one-phase limit may refuse
+            # to charge (#2224), so the configured wiring wins.
+            return 3
         measurands = (
             Measurand.voltage.value,
             Measurand.current_import.value,
@@ -1124,6 +1413,20 @@ class ChargePoint(cp):
         if denominator <= 0:
             return float(DEFAULT_MAX_CURRENT)
         return round(watts / denominator, 1)
+
+    def _zero_flow_measurands(self, connector_id: int) -> None:
+        """Clear the readings that only have meaning while current is flowing."""
+        for meas in [
+            Measurand.current_import.value,
+            Measurand.power_active_import.value,
+            Measurand.power_reactive_import.value,
+            Measurand.current_export.value,
+            Measurand.power_active_export.value,
+            Measurand.power_reactive_export.value,
+        ]:
+            key = (connector_id, meas)
+            if key in self._metrics:
+                self._metrics[key].value = 0
 
     def process_phases(self, data: list[MeasurandValue], connector_id: int = 0):
         """Process per-phase MeterValues and aggregate them into per-connector metrics.
@@ -1296,6 +1599,19 @@ class ChargePoint(cp):
     ):
         """Process all values from OCPP 1.6 MeterValues or OCPP 2.0.1 TransactionEvent."""
 
+        # Only names that are strings, so a malformed one, which skipping
+        # schema validation lets through, can't make this check fail
+        self._note_received_measurands(
+            {
+                name
+                for bucket in meter_values
+                for sv in bucket
+                for name in [
+                    sv.measurand if sv.measurand is not None else DEFAULT_MEASURAND
+                ]
+                if isinstance(name, str)
+            }
+        )
         for bucket in meter_values:
             # --- Preselect best EAIR in this bucket (ignore Transaction.Begin) ---
             best_eair_idx = None
@@ -1357,12 +1673,12 @@ class ChargePoint(cp):
                 location = sampled_value.location
                 context = sampled_value.context or ReadingContext.sample_periodic.value
 
-                # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 energy reading.
+                # Strip the phase tag ONLY if a single-phase charger sends an isolated L1 or L1-N energy reading.
                 # If multiple phases exist (e.g., L1, L2), leave them intact so process_phases() can sum them.
                 normalized_measurand = measurand or DEFAULT_MEASURAND
                 if (
                     normalized_measurand == DEFAULT_MEASURAND
-                    and phase == Phase.l1.value
+                    and phase in (Phase.l1.value, Phase.l1_n.value)
                     and len(eair_phases) == 1
                 ):
                     phase = None
@@ -1446,7 +1762,8 @@ class ChargePoint(cp):
                         if (
                             ms_metric.value is not None
                             and ms_metric.unit == unit
-                            and value < ms_metric.value
+                            and value
+                            < ms_metric.value - SESSION_ENERGY_DETECT_TOLERANCE
                         ):
                             _LOGGER.warning(
                                 "%s[%s]: Energy.Active.Import.Register sample "
@@ -1519,7 +1836,9 @@ class ChargePoint(cp):
                             elif ms_metric.unit == unit:
                                 self._metrics[
                                     (target_cid, csess.session_energy)
-                                ].value = round(1000 * (value - ms_metric.value)) / 1000
+                                ].value = max(
+                                    0.0, round(1000 * (value - ms_metric.value)) / 1000
+                                )
                                 self._metrics[
                                     (target_cid, csess.session_energy)
                                 ].unit = unit
@@ -1551,15 +1870,39 @@ class ChargePoint(cp):
 
     def get_ha_metric(self, measurand: str, connector_id: int | None = None):
         """Return last known value in HA for given measurand, or None if not available."""
-        base = self.settings.cpid.lower()
+        cpid = self.settings.cpid
         meas_slug = measurand.lower().replace(".", "_")
 
-        # Build list of possible sensor entity IDs.
-        # Include connector-specific ID if applicable, then the generic one as fallback.
-        candidates: list[str] = []
+        # Connector-specific sensor first, then the generic one as fallback.
+        connectors: list[int | None] = []
         if connector_id and connector_id > 0:
-            candidates.append(f"sensor.{base}_connector_{connector_id}_{meas_slug}")
-        candidates.append(f"sensor.{base}_{meas_slug}")
+            connectors.append(connector_id)
+        connectors.append(None)
+
+        # Resolve through the entity registry by unique_id, which survives
+        # entities renamed by the user. The slugified entity id is the
+        # fallback for sensors the registry doesn't know. Building the id
+        # with cpid.lower() never matched a cpid with spaces or hyphens
+        # ("Garage Charger"), since the sensor platform slugifies it.
+        er = entity_registry.async_get(self.hass)
+        candidates: list[str] = []
+        for conn in connectors:
+            uid = sensor_unique_id(cpid, measurand, conn)
+            if entity_id := er.async_get_entity_id(SENSOR_DOMAIN, DOMAIN, uid):
+                # Once the registry knows the sensor, its slug may belong to
+                # another charger: "CP-A" and "CP_A" both slugify to "cp_a".
+                candidates.append(entity_id)
+                continue
+            object_id = (
+                f"{cpid}_connector_{conn}_{meas_slug}"
+                if conn is not None
+                else f"{cpid}_{meas_slug}"
+            )
+            fallback = f"{SENSOR_DOMAIN}.{slugify(object_id)}"
+            # A registered entity at the slug isn't ours (ours would have
+            # resolved above): it belongs to another charger.
+            if er.async_get(fallback) is None:
+                candidates.append(fallback)
 
         # Return the first valid state found among candidates.
         for entity_id in candidates:

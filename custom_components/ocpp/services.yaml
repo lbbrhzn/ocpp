@@ -39,7 +39,7 @@ set_charge_rate:
       default: 22000
     conn_id:
       name: Connector identifier
-      description: Selects the target connector, or mapped EVSE on OCPP 2.x, for custom_profile. Managed limits first target the whole charging station; OCPP 1.6 may use this connector for fallback profiles.
+      description: Selects the target connector, or mapped EVSE on OCPP 2.x, for custom_profile. Managed limits always target the whole charging station; this connector's voltage and phases only convert between amps and watts.
       required: false
       advanced: true
       example: 0
@@ -77,7 +77,12 @@ clear_profile:
       description: Either HA charger id or Ocpp id
       required: false
       advanced: true
-      example: charger
+    conn_id:
+      name: Connector id
+      description: Limit the clear to a single connector. Only effective on OCPP 1.6; on OCPP 2.0.1 the clear always applies station-wide
+      required: false
+      advanced: true
+      example: 1
 
 update_firmware:
   name: Update charger firmware

@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: 🛠️ Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.x"
 
@@ -40,7 +40,7 @@ jobs:
           python3 "$WORKSPACE/manage/update_manifest.py" --version "${RELEASE_VERSION#v}"
 
       - name: 📤 Upload zip to action
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         if: ${{ github.event_name == 'push' }}
         with:
           name: ocpp

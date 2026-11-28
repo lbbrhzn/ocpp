@@ -40,6 +40,10 @@ To use these chargers:
 
 This list is based on the overview of OCPP 1.6 implementation for ABB Terra AC (firmware 1.6.6).
 
+### Charging profiles rejected at the reported stack level
+
+The charger rejects charging profiles at the `ChargeProfileMaxStackLevel` it reports ([Issue #1737](https://github.com/lbbrhzn/ocpp/issues/1737)). Enable **Charger accepts only stack levels below its reported maximum** in the charger options (see [Charging profile stack level](Charge_automation.md#charging-profile-stack-level)).
+
 ### [ABB Terra AC-W7-G5-R-0](https://new.abb.com/products/6AGC082156/tac-w7-g5-r-0)
 
 ### [ABB Terra AC-W11-G5-R-0](https://new.abb.com/products/6AGC082156/tac-w11-g5-r-0)
@@ -61,7 +65,7 @@ On a local network no TLS setup is needed - a plain `ws://<home-assistant-ip>:90
 
 ### Station-wide maximum current (`number.<cpid>_maximum_current`) is rejected
 
-The MaxiCharger rejects the `ChargePointMaxProfile` that the integration normally sends to enforce a whole-station charging ceiling (e.g. from `number.<cpid>_maximum_current` or the `set_charge_rate` service without a connector) because that profile is `Relative` by default, and Autel's firmware does not honour a relative schedule there - see [Issue #1565](https://github.com/lbbrhzn/ocpp/issues/1565).
+The MaxiCharger rejects the `ChargePointMaxProfile` that the integration normally sends to enforce a whole-station charging ceiling (e.g. from `number.<cpid>_maximum_current` or the `set_charge_rate` action) because that profile is `Relative` by default, and Autel's firmware does not honour a relative schedule there - see [Issue #1565](https://github.com/lbbrhzn/ocpp/issues/1565).
 
 Enable **Send the station charging limit as an absolute schedule** in the charge point's options (Settings -> Devices & Services -> OCPP -> configure the charger) to work around this. It makes the integration send that same profile as an `Absolute` schedule anchored at a fixed, arbitrary past timestamp instead, which the MaxiCharger accepts. Per-connector limits (`TxDefaultProfile`/`TxProfile`, used while a session is active) are unaffected either way.
 
@@ -155,6 +159,10 @@ Reconnection (either protocol): the charger's OCPP client does not reliably redi
 
 ## [Garo Entity Pro](https://www.garo.se/en/professional/products/e-mobility/wallbox/entity-pro/wallbox-entity-pro-22-sigi-o)
 
+## Huawei SCharger (FusionCharge)
+
+Power-only: the charger reports `ChargingScheduleAllowedChargingRateUnit` as `Power`, so the integration converts current limits to watts. A three-phase Huawei won't charge below about 4140 W, 6 A on each phase ([Issue #1810](https://github.com/lbbrhzn/ocpp/issues/1810)). On a three-phase model such as the SCharger-22KT, enable **Charger is fed three-phase** in the charger options, then set Maximum Current again. Otherwise a limit set before any per-phase meter values arrive, as after a restart, is converted for one phase, so a limit below 18 A goes out under 4140 W and the charger ends the session ([Issue #2224](https://github.com/lbbrhzn/ocpp/issues/2224)). With it on, every limit is converted for three phases, so a single-phase car can draw up to three times the current set. Unless the charger reports its voltage between phases, the conversion takes each phase as fed to neutral, so on a supply without neutral, such as a 230 V IT network, the charger can draw about 1.7 times the current set. Leave it off on the single-phase SCharger-7KS.
+
 ## [MaXpeedingrods Ev Charger](https://www.maxpeedingrods.com/category/ev-charger.html)
 
 ## [Mennekes Amtron Charge Control](https://www.mennekes.de/emobility/produkte/charge-control/)
@@ -163,6 +171,8 @@ Reconnection (either protocol): the charger's OCPP client does not reliably redi
 Successful connection requires firmware version **A0-MEV-V2.0.9** or newer.
 
 The "Charger idle sampling interval" is not supported. Set this to **0** to avoid a "ClockAlignedDataInterval is read-only" warning.
+
+The MEV11 (firmware A0-MEV-V2.1.8) reports `ChargeProfileMaxStackLevel` 5 but rejects charging profiles at level 5. Enable **Charger accepts only stack levels below its reported maximum** in the charger options (see [Charging profile stack level](Charge_automation.md#charging-profile-stack-level)).
 
 ## [Ocular LTE Plus v3](https://evse.com.au/) (tested: reports as BS-EV22, firmware 448.3251.0Q03197)
 Works, with some firmware quirks worth knowing about. The same behaviour has been seen on the BS-EV07, so it likely applies to other chargers reporting the vendor `BS AC EV Charger`.
@@ -187,6 +197,98 @@ but certain features (eg. scheduling) may not work.
 
 ## [Schneider Electric EVlink Wallbox Plus](https://www.se.com/nl/en/product/EVH3S22P0CK/evlink-wallbox-plus-t2-attached-cable-3-phase-32a-22kw/)
 Model is discontinued by the manufacturer.
+
+## Sigenergy Sigen EV DC charger (tested: SIGEN EVDC 25 7.5S2)
+
+Tested on 4 October 2026 with reported vendor `SIGEN`, model `EVDC 25 7.5S2`,
+firmware `V100R001C21SPC117`, one connector, and integration release `v0.12.0`
+(tag commit `848407c`). This is a charging and discharge telemetry report,
+not a claim that all charger functions work. The negotiated OCPP version was
+not independently verified during this test.
+
+### Confirmed observations
+
+- Connector status, transaction ID, session duration, meter start, session
+  energy and stop reason were exposed. Connector history included `Preparing`,
+  `Charging` and `Finishing`.
+- Use `sensor.<cpid>_status_connector` for connector state. The charger-level
+  status was `unknown` while the connector correctly reported `Charging`.
+- After enabling the corresponding integration entities,
+  `Energy.Active.Import.Register` supplied cumulative kWh readings with
+  `Sample.Periodic` context at approximately 60-second intervals during charging.
+
+The following measurands had changing numeric readings in Home Assistant
+history during the 12:08 to 12:18 AEST charging window on 4 October 2026. Each
+carried `Sample.Periodic` context; units below are those displayed by the
+integration, not a claim about the original wire units.
+
+| Measurand | Displayed unit | Observed behaviour |
+| --- | --- | --- |
+| `Energy.Active.Import.Register` | kWh | Cumulative imported energy increased during charging |
+| `Power.Active.Import` | kW | Charging power varied |
+| `Current.Import` | A | Charging current varied |
+| `Voltage` | V | Voltage varied |
+| `SoC` | % | Reported state of charge increased |
+
+`Power.Offered` also had a numeric reading with `Sample.Periodic` context, but
+remained at 25 kW throughout this window. It is not included in the changing
+measurands above, and does not establish that a charging limit can be controlled.
+
+### Vehicle discharge (V2G) observations
+
+In a subsequent vehicle discharge session on 4 October 2026, the tester reported
+the following behaviour on the same setup:
+
+| Measurand or session field | Observed behaviour during discharge |
+| --- | --- |
+| `Power.Active.Import` | Negative power, matching the Sigenergy discharge-power reading within about 1% |
+| `Current.Import` | Remained at 0 A rather than reporting negative current |
+| `Energy.Active.Import.Register` | Remained flat during discharge |
+| Connector status and transaction ID | Connector remained `Charging` with the same transaction ID |
+| Export measurands | No export measurands appeared during the observed discharge session |
+
+The approximately 1% agreement is a comparison reported for this session, not a
+calibrated accuracy specification. These observations show discharge through
+signed `Power.Active.Import`; `Charging` status and the transaction ID alone
+did not distinguish charging from discharge. Zero `Current.Import` did not
+mean that no energy was flowing.
+
+The flat import register did not account for exported energy, and no usable
+export-energy register was demonstrated. Integrating negative power over time
+would be a separate energy estimate, not a charger-reported export register.
+This telemetry observation does not establish OCPP control of V2G or verified
+bidirectional energy accounting.
+
+### Measurand auto-detection limitation
+
+Automatic detection did not identify the supported measurands in this test.
+Do not rely on auto-detection to establish which readings this firmware can
+supply. If using this setup, configure the required measurands manually and
+enable the corresponding Home Assistant entities, then check for live readings
+during a charging session.
+
+Measurand configuration and entity enablement are separate steps: enabling an
+entity alone does not make the charger report that measurement. The numeric
+readings listed above were observed; export and interval-energy reporting were
+not established. This limitation is reported for the tested firmware, not all
+Sigenergy models or firmware versions.
+
+### Limits of this test
+
+- `Energy.Active.Export.Register` was enabled but remained `unknown` in the
+  observed charging window. Import and export interval-energy entities also
+  remained `unknown`. Enabling an entity does not establish that the charger
+  supplies its measurand.
+- The discharge observations above establish negative import-power reporting,
+  not export-energy register support. Zero-valued current and absent export
+  measurands must not be treated as proof that no discharge occurred.
+  Bidirectional energy accounting remains unverified.
+- Features reported `CORE`, and current-limit controls were unavailable at the
+  inspected snapshot. Smart charging, charging-profile enforcement and V2G
+  control were not verified.
+
+See the [test record](https://github.com/purcell-lab/ha-bsv-settlement/issues/61)
+for the dated sensor observations and their limitations.
 
 ## [Simpson & Partners](https://simpson-partners.com/home-ev-charger/)
 All basic functions work properly

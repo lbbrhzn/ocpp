@@ -41,7 +41,11 @@ If you do not use HTTPS for your Home Assistant instance:
 
 ### Measurands
 - Most chargers only support a subset of all possible measurands. This depends most on the Feature profiles that are supported by the charger.
-- The integration will autodetect the supported measurands when the charger connects. This can be disabled for chargers that do not support autodetection.
+- On an OCPP 1.6 charger with _Automatic detection of OCPP Measurands_ on, the integration reads the measurands the charger is set to sample while setting the charger up, the first time it connects after the integration loads. It doesn't change what the charger samples, so a list set on the charger, or with the `ocpp.configure` action, is left alone.
+- Detection only adds to the charger's measurands. When it finds one that isn't stored, either in the list the charger samples or in the values the charger sends, the integration stores it, logs a warning, and with _Enable Home Assistant notifications_ on, shows a notification. Sensors are created when the integration loads, so reload it to add sensors for the new ones. It never removes a measurand, since values can also arrive in clock-aligned data, and if it can't read the list, or recognises nothing in it, the stored measurands stay as they are.
+- Many 1.6 chargers sample only `Energy.Active.Import.Register` out of the box, even when they support more. If that's all automatic detection finds, the integration logs a warning, and with notifications on, shows a notification.
+- To choose the measurands, or to have fewer sensors, turn off automatic detection and select them. The selection decides which sensors there are, and on 1.6 the integration also sets it on the charger when it connects. If the charger sends a measurand that isn't selected, the integration logs a warning.
+- OCPP 2.0.1 chargers work differently: the integration takes the measurands from what the charger reports about itself, rather than reading a list. With automatic detection on, it adds new ones the same way, and with it off, the selection decides the sensors. Some 2.0.1 measurands, like `Energy.Active.Net`, can't be selected, and if the charger sends one that has no sensor, the integration logs a warning.
 
 ## Add the entities to your Dashboard
 - On the OCPP integration, click on devices to navigate to your Charge Point device.
