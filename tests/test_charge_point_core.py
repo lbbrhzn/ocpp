@@ -295,6 +295,47 @@ def test_get_energy_kwh_and_session_derive(hass):
     assert cp._metrics[(1, csess.session_energy)].unit == HA_ENERGY_UNIT
 
 
+def test_process_measurands_defaults_missing_power_unit(hass):
+    """Missing power units default to watts before kW normalization."""
+    cp = _mk_cp(hass)
+
+    cp.process_measurands(
+        [[_mv("Power.Active.Import", 500.0)]],
+        is_transaction=False,
+        connector_id=1,
+    )
+
+    metric = cp._metrics[(1, "Power.Active.Import")]
+    assert metric.value == pytest.approx(0.5)
+    assert metric.unit == HA_POWER_UNIT
+
+
+@pytest.mark.parametrize(
+    "measurand", ["Power.Active.Import", "Power.Active.Export", "Power.Offered"]
+)
+@pytest.mark.parametrize("other_unit", [None, DEFAULT_POWER_UNIT, HA_POWER_UNIT])
+def test_process_measurands_defaults_missing_phase_power_unit(
+    hass, measurand, other_unit
+):
+    """Sum unitless and explicit power readings on the same scale."""
+    cp = _mk_cp(hass)
+    unitless = _mv(measurand, 500.0, phase="L1")
+    readings = [unitless]
+    expected = 0.5
+    if other_unit is not None:
+        other_value = 750.0 if other_unit == DEFAULT_POWER_UNIT else 0.75
+        readings.append(_mv(measurand, other_value, phase="L2", unit=other_unit))
+        expected = 1.25
+
+    for readings_order in (readings, readings[::-1]):
+        cp.process_measurands([readings_order], is_transaction=False, connector_id=1)
+        metric = cp._metrics[(1, measurand)]
+        assert metric.value == pytest.approx(expected)
+        assert metric.unit == HA_POWER_UNIT
+
+    assert unitless.unit is None
+
+
 @pytest.mark.asyncio
 async def test_handle_call_wraps_notimplementederror_and_sends(hass):
     """Test _handle_call Path: NotImplementedError → _send(...)."""

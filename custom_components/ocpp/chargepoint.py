@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
 import logging
 from math import sqrt
@@ -1453,6 +1453,9 @@ class ChargePoint(cp):
             return (sum(nonzero) / len(nonzero)) if nonzero else 0.0
 
         measurand_data: dict[str, dict[str, float]] = {}
+        power_measurands_in_kw = {
+            item.measurand for item in data if item.unit == HA_POWER_UNIT
+        }
 
         for item in data:
             # create ordered Dict for each measurand, eg {"voltage":{"unit":"V","L1-N":"230"...}}
@@ -1464,6 +1467,11 @@ class ChargePoint(cp):
 
             if measurand is None or phase is None:
                 continue
+
+            # Convert watts before summing a bucket that also contains kilowatts.
+            if unit == DEFAULT_POWER_UNIT and measurand in power_measurands_in_kw:
+                value /= 1000
+                unit = HA_POWER_UNIT
 
             if measurand not in measurand_data:
                 measurand_data[measurand] = {}
@@ -1682,6 +1690,19 @@ class ChargePoint(cp):
 
                 if measurand == DEFAULT_MEASURAND and unit is None:
                     unit = DEFAULT_ENERGY_UNIT
+
+                if (
+                    measurand
+                    in {
+                        "Power.Active.Import",
+                        "Power.Active.Export",
+                        "Power.Offered",
+                    }
+                    and unit is None
+                ):
+                    unit = DEFAULT_POWER_UNIT
+                    if phase is not None:
+                        sampled_value = replace(sampled_value, unit=unit)
 
                 # Normalize units
                 if unit == DEFAULT_ENERGY_UNIT:
