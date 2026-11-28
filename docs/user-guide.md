@@ -72,6 +72,10 @@ If your integration shows extra attributes on the connector status sensor like a
 
 
 
+## Power readings
+
+Home Assistant shows active import, active export, and offered power in kilowatts. When a charger omits the unit for one of these readings, the integration assumes watts. This also applies to readings for individual phases. For example, a unitless reading of 500 on L1 and a reading of 0.75 kW on L2 contribute a total of 1.25 kW.
+
 ## Useful Entities for Wallbox Pulsar Plus
 
 ### Metrics
